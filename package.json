@@ -67,7 +67,7 @@
               },
               "command": {
                 "type": "string",
-                "description": "Executable to invoke (must be on PATH)."
+                "description": "Executable to invoke. Must be on PATH or an absolute path. Supports ~ for the home directory."
               },
               "args": {
                 "type": "array",
@@ -80,9 +80,13 @@
                 "type": "string",
                 "enum": [
                   "json",
-                  "regex"
+                  "jsonlint",
+                  "parsable",
+                  "checkmake",
+                  "xmllint",
+                  "linthtml"
                 ],
-                "description": "Output parser to use. Currently only 'json' produces diagnostics."
+                "description": "Output parser to use. 'json' and 'jsonlint' produce diagnostics; others log a warning."
               },
               "run": {
                 "type": "string",
