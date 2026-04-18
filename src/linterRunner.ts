@@ -3,6 +3,8 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { parseJsonOutput } from './parser/jsonParser.js';
 
+const MAX_STDOUT_PREVIEW_LENGTH = 500;
+
 export interface LinterConfig {
     name: string;
     filePatterns: string[];
@@ -82,14 +84,16 @@ function spawnLinter(
     });
 
     proc.on('close', (code: number | null) => {
-        if (stderr.trim()) {
+        if (stderr.trim() !== '') {
             output.appendLine(`[${linter.name}] stderr: ${stderr.trim()}`);
         }
         output.appendLine(
             `[${linter.name}] exit code ${code ?? 'null'} | stdout bytes: ${stdout.length}`
         );
         if (stdout.length > 0) {
-            output.appendLine(`[${linter.name}] stdout: ${stdout.slice(0, 500)}`);
+            output.appendLine(
+                `[${linter.name}] stdout: ${stdout.slice(0, MAX_STDOUT_PREVIEW_LENGTH)}`
+            );
         }
         const diags = linter.parser === 'json' ? parseJsonOutput(stdout, linter.name) : [];
         output.appendLine(`[${linter.name}] parsed ${diags.length} diagnostic(s)`);
@@ -122,13 +126,15 @@ export function runLinters(
     const allDiags: vscode.Diagnostic[] = [];
     let remaining = matching.length;
 
+    const onLinterDone = (diags: vscode.Diagnostic[]): void => {
+        allDiags.push(...diags);
+        remaining--;
+        if (remaining === 0) {
+            diagnostics.set(uri, allDiags);
+        }
+    };
+
     for (const linter of matching) {
-        spawnLinter(linter, filePath, output, (diags) => {
-            allDiags.push(...diags);
-            remaining--;
-            if (remaining === 0) {
-                diagnostics.set(uri, allDiags);
-            }
-        });
+        spawnLinter(linter, filePath, output, onLinterDone);
     }
 }
