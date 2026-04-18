@@ -2,12 +2,27 @@
   "name": "lint-runner",
   "displayName": "lint-runner",
   "description": "",
+  "icon": "icon.png",
   "version": "0.0.1",
+  "publisher": "vix",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vix-4800/lint-runner"
+  },
+  "author": {
+    "name": "Anton VIX",
+    "email": "Gordan.ei@protonmail.ch",
+    "url": "https://github.com/vix-4800"
+  },
   "engines": {
     "vscode": "^1.116.0"
   },
   "categories": [
-    "Other"
+    "Programming Languages",
+    "Linters"
+  ],
+  "keywords": [
+    "code quality"
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
