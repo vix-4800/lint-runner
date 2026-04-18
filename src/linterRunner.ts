@@ -2,6 +2,7 @@ import * as cp from 'child_process';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { parseJsonOutput } from './parser/jsonParser.js';
+import { parseJsonlintOutput } from './parser/jsonlintParser.js';
 
 const MAX_STDOUT_PREVIEW_LENGTH = 500;
 
@@ -10,7 +11,7 @@ export interface LinterConfig {
     filePatterns: string[];
     command: string;
     args: string[];
-    parser: 'json' | 'regex';
+    parser: string;
     run: 'manual' | 'onSave';
 }
 
@@ -46,9 +47,13 @@ function matchesPatterns(filePath: string, patterns: string[]): boolean {
     });
 }
 
-function buildArgs(args: string[], filePath: string): string[] {
+function expandHome(value: string): string {
     const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
-    return args.map((arg) => arg.replace('${file}', filePath).replace(/^~(?=\/|$)/, home));
+    return value.replace(/^~(?=\/|$)/, home);
+}
+
+function buildArgs(args: string[], filePath: string): string[] {
+    return args.map((arg) => expandHome(arg.replace('${file}', filePath)));
 }
 
 function spawnLinter(
@@ -57,12 +62,13 @@ function spawnLinter(
     output: vscode.OutputChannel,
     onDone: (diags: vscode.Diagnostic[]) => void
 ): void {
+    const command = expandHome(linter.command);
     const args = buildArgs(linter.args, filePath);
-    output.appendLine(`[${linter.name}] ${linter.command} ${args.join(' ')}`);
+    output.appendLine(`[${linter.name}] ${command} ${args.join(' ')}`);
 
     let proc: cp.ChildProcess;
     try {
-        proc = cp.spawn(linter.command, args, { shell: false });
+        proc = cp.spawn(command, args, { shell: false });
     } catch (err) {
         output.appendLine(`[${linter.name}] Failed to start: ${String(err)}`);
         onDone([]);
@@ -95,7 +101,16 @@ function spawnLinter(
                 `[${linter.name}] stdout: ${stdout.slice(0, MAX_STDOUT_PREVIEW_LENGTH)}`
             );
         }
-        const diags = linter.parser === 'json' ? parseJsonOutput(stdout, linter.name) : [];
+        let diags: vscode.Diagnostic[] = [];
+        if (linter.parser === 'json') {
+            diags = parseJsonOutput(stdout, linter.name);
+        } else if (linter.parser === 'jsonlint') {
+            diags = parseJsonlintOutput(stdout, stderr, linter.name);
+        } else if (stdout.length > 0 || stderr.trim().length > 0) {
+            output.appendLine(
+                `[${linter.name}] Parser '${linter.parser}' is not implemented; output was not parsed`
+            );
+        }
         output.appendLine(`[${linter.name}] parsed ${diags.length} diagnostic(s)`);
         onDone(diags);
     });
