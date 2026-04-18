@@ -82,11 +82,11 @@
                   "json",
                   "jsonlint",
                   "parsable",
-                  "checkmake",
                   "xmllint",
-                  "linthtml"
+                  "linthtml",
+                  "ansible-lint"
                 ],
-                "description": "Output parser to use. 'json' and 'jsonlint' produce diagnostics; others log a warning."
+                "description": "Output parser to use."
               },
               "run": {
                 "type": "string",

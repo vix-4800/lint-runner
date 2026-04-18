@@ -4,6 +4,9 @@ import * as vscode from 'vscode';
 import { parseAnsibleLintOutput } from './parser/ansibleLintParser.js';
 import { parseJsonOutput } from './parser/jsonParser.js';
 import { parseJsonlintOutput } from './parser/jsonlintParser.js';
+import { parseLinthtmlOutput } from './parser/linthtmlParser.js';
+import { parseParsableOutput } from './parser/parsableParser.js';
+import { parseXmllintOutput } from './parser/xmllintParser.js';
 
 const MAX_STDOUT_PREVIEW_LENGTH = 500;
 
@@ -69,7 +72,7 @@ function spawnLinter(
 
     let proc: cp.ChildProcess;
     try {
-        proc = cp.spawn(command, args, { shell: false });
+        proc = cp.spawn(command, args, { shell: true });
     } catch (err) {
         output.appendLine(`[${linter.name}] Failed to start: ${String(err)}`);
         onDone([]);
@@ -109,6 +112,12 @@ function spawnLinter(
             diags = parseJsonlintOutput(stdout, stderr, linter.name);
         } else if (linter.parser === 'ansible-lint') {
             diags = parseAnsibleLintOutput(stdout, linter.name);
+        } else if (linter.parser === 'parsable') {
+            diags = parseParsableOutput(stdout, linter.name);
+        } else if (linter.parser === 'xmllint') {
+            diags = parseXmllintOutput(stderr, linter.name);
+        } else if (linter.parser === 'linthtml') {
+            diags = parseLinthtmlOutput(stdout, linter.name);
         } else if (stdout.length > 0 || stderr.trim().length > 0) {
             output.appendLine(
                 `[${linter.name}] Parser '${linter.parser}' is not implemented; output was not parsed`
