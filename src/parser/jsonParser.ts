@@ -33,7 +33,8 @@ export function parseJsonOutput(stdout: string, source: string): vscode.Diagnost
     let raw: unknown;
     try {
         raw = JSON.parse(stdout);
-    } catch {
+    } catch (err) {
+        console.error(`[LintRunner] JSON parse failed for source '${source}': ${String(err)}`);
         return [];
     }
 

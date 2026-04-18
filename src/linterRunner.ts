@@ -84,8 +84,14 @@ function spawnLinter(
         if (stderr.trim()) {
             output.appendLine(`[${linter.name}] stderr: ${stderr.trim()}`);
         }
-        output.appendLine(`[${linter.name}] exit code ${code}`);
+        output.appendLine(
+            `[${linter.name}] exit code ${code ?? 'null'} | stdout bytes: ${stdout.length}`
+        );
+        if (stdout.length > 0) {
+            output.appendLine(`[${linter.name}] stdout: ${stdout.slice(0, 500)}`);
+        }
         const diags = linter.parser === 'json' ? parseJsonOutput(stdout, linter.name) : [];
+        output.appendLine(`[${linter.name}] parsed ${diags.length} diagnostic(s)`);
         onDone(diags);
     });
 }
