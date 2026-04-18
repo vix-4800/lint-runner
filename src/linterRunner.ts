@@ -45,7 +45,8 @@ function matchesPatterns(filePath: string, patterns: string[]): boolean {
 }
 
 function buildArgs(args: string[], filePath: string): string[] {
-    return args.map((arg) => arg.replace('${file}', filePath));
+    const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
+    return args.map((arg) => arg.replace('${file}', filePath).replace(/^~(?=\/|$)/, home));
 }
 
 function spawnLinter(
