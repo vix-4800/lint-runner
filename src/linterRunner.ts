@@ -1,6 +1,7 @@
 import * as cp from 'child_process';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { parseAnsibleLintOutput } from './parser/ansibleLintParser.js';
 import { parseJsonOutput } from './parser/jsonParser.js';
 import { parseJsonlintOutput } from './parser/jsonlintParser.js';
 
@@ -106,6 +107,8 @@ function spawnLinter(
             diags = parseJsonOutput(stdout, linter.name);
         } else if (linter.parser === 'jsonlint') {
             diags = parseJsonlintOutput(stdout, stderr, linter.name);
+        } else if (linter.parser === 'ansible-lint') {
+            diags = parseAnsibleLintOutput(stdout, linter.name);
         } else if (stdout.length > 0 || stderr.trim().length > 0) {
             output.appendLine(
                 `[${linter.name}] Parser '${linter.parser}' is not implemented; output was not parsed`
