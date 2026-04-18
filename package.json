@@ -1,7 +1,7 @@
 {
   "name": "lint-runner",
-  "displayName": "lint-runner",
-  "description": "",
+  "displayName": "LintRunner",
+  "description": "Run external CLI linters and show diagnostics in the editor.",
   "icon": "icon.png",
   "version": "0.0.1",
   "publisher": "vix",
@@ -24,15 +24,79 @@
   "keywords": [
     "code quality"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "lint-runner.helloWorld",
-        "title": "Hello World"
+        "command": "lintRunner.run",
+        "title": "LintRunner: Run Linters"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "LintRunner",
+      "properties": {
+        "lintRunner.linters": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "List of linter configurations to run against matching files.",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "filePatterns",
+              "command",
+              "args",
+              "parser",
+              "run"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Display name shown in the Problems panel source column."
+              },
+              "filePatterns": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Glob patterns for files this linter applies to (e.g. [\"*.sh\"])."
+              },
+              "command": {
+                "type": "string",
+                "description": "Executable to invoke (must be on PATH)."
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Arguments passed to the command. Use ${file} for the file path."
+              },
+              "parser": {
+                "type": "string",
+                "enum": [
+                  "json",
+                  "regex"
+                ],
+                "description": "Output parser to use. Currently only 'json' produces diagnostics."
+              },
+              "run": {
+                "type": "string",
+                "enum": [
+                  "onSave",
+                  "manual"
+                ],
+                "description": "'onSave' runs automatically on save; 'manual' only runs via the command."
+              }
+            }
+          }
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
