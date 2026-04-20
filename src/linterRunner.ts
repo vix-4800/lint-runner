@@ -10,6 +10,12 @@ import { parseXmllintOutput } from './parser/xmllintParser.js';
 
 const MAX_STDOUT_PREVIEW_LENGTH = 500;
 
+export interface CommandConfig {
+    name?: string;
+    command: string;
+    args: string[];
+}
+
 export interface LinterConfig {
     name: string;
     filePatterns: string[];
@@ -17,6 +23,13 @@ export interface LinterConfig {
     args: string[];
     parser: string;
     run: 'manual' | 'onSave';
+    preCommands?: CommandConfig[];
+}
+
+interface CommandResult {
+    code: number | null;
+    stdout: string;
+    stderr: string;
 }
 
 function globToRegex(pattern: string): RegExp {
@@ -60,72 +73,138 @@ function buildArgs(args: string[], filePath: string): string[] {
     return args.map((arg) => expandHome(arg.replace('${file}', filePath)));
 }
 
-function spawnLinter(
+function runCommand(
+    label: string,
+    commandConfig: CommandConfig,
+    filePath: string,
+    output: vscode.OutputChannel
+): Promise<CommandResult> {
+    const command = expandHome(commandConfig.command);
+    const args = buildArgs(commandConfig.args, filePath);
+    output.appendLine(`[${label}] ${command} ${args.join(' ')}`);
+
+    return new Promise((resolve) => {
+        let proc: cp.ChildProcess;
+        try {
+            proc = cp.spawn(command, args, { shell: true });
+        } catch (err) {
+            output.appendLine(`[${label}] Failed to start: ${String(err)}`);
+            resolve({ code: null, stdout: '', stderr: '' });
+            return;
+        }
+
+        let stdout = '';
+        let stderr = '';
+        let done = false;
+        proc.stdout?.on('data', (chunk: Buffer) => {
+            stdout += chunk.toString();
+        });
+        proc.stderr?.on('data', (chunk: Buffer) => {
+            stderr += chunk.toString();
+        });
+
+        proc.on('error', (err: Error) => {
+            if (done) {
+                return;
+            }
+            done = true;
+            output.appendLine(`[${label}] Error: ${err.message}`);
+            resolve({ code: null, stdout, stderr });
+        });
+
+        proc.on('close', (code: number | null) => {
+            if (done) {
+                return;
+            }
+            done = true;
+            resolve({ code, stdout, stderr });
+        });
+    });
+}
+
+function logCommandResult(
+    label: string,
+    result: CommandResult,
+    output: vscode.OutputChannel
+): void {
+    if (result.stderr.trim() !== '') {
+        output.appendLine(`[${label}] stderr: ${result.stderr.trim()}`);
+    }
+    output.appendLine(
+        `[${label}] exit code ${result.code ?? 'null'} | stdout bytes: ${result.stdout.length}`
+    );
+    if (result.stdout.length > 0) {
+        output.appendLine(
+            `[${label}] stdout: ${result.stdout.slice(0, MAX_STDOUT_PREVIEW_LENGTH)}`
+        );
+    }
+}
+
+async function runPreCommands(
+    linter: LinterConfig,
+    filePath: string,
+    output: vscode.OutputChannel
+): Promise<boolean> {
+    for (const preCommand of linter.preCommands ?? []) {
+        const preCommandName = preCommand.name ?? preCommand.command;
+        const label = `${linter.name}:pre:${preCommandName}`;
+        const result = await runCommand(label, preCommand, filePath, output);
+        logCommandResult(label, result, output);
+        if (result.code !== 0) {
+            output.appendLine(`[${linter.name}] pre-command '${preCommandName}' failed; skipping linter`);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function parseLinterOutput(linter: LinterConfig, result: CommandResult, output: vscode.OutputChannel): vscode.Diagnostic[] {
+    if (linter.parser === 'json') {
+        return parseJsonOutput(result.stdout, linter.name);
+    }
+    if (linter.parser === 'jsonlint') {
+        return parseJsonlintOutput(result.stdout, result.stderr, linter.name);
+    }
+    if (linter.parser === 'ansible-lint') {
+        return parseAnsibleLintOutput(result.stdout, linter.name);
+    }
+    if (linter.parser === 'parsable') {
+        return parseParsableOutput(result.stdout, linter.name);
+    }
+    if (linter.parser === 'xmllint') {
+        return parseXmllintOutput(result.stderr, linter.name);
+    }
+    if (linter.parser === 'linthtml') {
+        return parseLinthtmlOutput(result.stdout, linter.name);
+    }
+    if (result.stdout.length > 0 || result.stderr.trim().length > 0) {
+        output.appendLine(
+            `[${linter.name}] Parser '${linter.parser}' is not implemented; output was not parsed`
+        );
+    }
+
+    return [];
+}
+
+async function spawnLinter(
     linter: LinterConfig,
     filePath: string,
     output: vscode.OutputChannel,
     onDone: (diags: vscode.Diagnostic[]) => void
-): void {
-    const command = expandHome(linter.command);
-    const args = buildArgs(linter.args, filePath);
-    output.appendLine(`[${linter.name}] ${command} ${args.join(' ')}`);
-
-    let proc: cp.ChildProcess;
-    try {
-        proc = cp.spawn(command, args, { shell: true });
-    } catch (err) {
-        output.appendLine(`[${linter.name}] Failed to start: ${String(err)}`);
+): Promise<void> {
+    const shouldRunLinter = await runPreCommands(linter, filePath, output);
+    if (!shouldRunLinter) {
         onDone([]);
         return;
     }
 
-    let stdout = '';
-    let stderr = '';
-    proc.stdout?.on('data', (chunk: Buffer) => {
-        stdout += chunk.toString();
-    });
-    proc.stderr?.on('data', (chunk: Buffer) => {
-        stderr += chunk.toString();
-    });
+    const result = await runCommand(linter.name, linter, filePath, output);
+    logCommandResult(linter.name, result, output);
 
-    proc.on('error', (err: Error) => {
-        output.appendLine(`[${linter.name}] Error: ${err.message}`);
-        onDone([]);
-    });
-
-    proc.on('close', (code: number | null) => {
-        if (stderr.trim() !== '') {
-            output.appendLine(`[${linter.name}] stderr: ${stderr.trim()}`);
-        }
-        output.appendLine(
-            `[${linter.name}] exit code ${code ?? 'null'} | stdout bytes: ${stdout.length}`
-        );
-        if (stdout.length > 0) {
-            output.appendLine(
-                `[${linter.name}] stdout: ${stdout.slice(0, MAX_STDOUT_PREVIEW_LENGTH)}`
-            );
-        }
-        let diags: vscode.Diagnostic[] = [];
-        if (linter.parser === 'json') {
-            diags = parseJsonOutput(stdout, linter.name);
-        } else if (linter.parser === 'jsonlint') {
-            diags = parseJsonlintOutput(stdout, stderr, linter.name);
-        } else if (linter.parser === 'ansible-lint') {
-            diags = parseAnsibleLintOutput(stdout, linter.name);
-        } else if (linter.parser === 'parsable') {
-            diags = parseParsableOutput(stdout, linter.name);
-        } else if (linter.parser === 'xmllint') {
-            diags = parseXmllintOutput(stderr, linter.name);
-        } else if (linter.parser === 'linthtml') {
-            diags = parseLinthtmlOutput(stdout, linter.name);
-        } else if (stdout.length > 0 || stderr.trim().length > 0) {
-            output.appendLine(
-                `[${linter.name}] Parser '${linter.parser}' is not implemented; output was not parsed`
-            );
-        }
-        output.appendLine(`[${linter.name}] parsed ${diags.length} diagnostic(s)`);
-        onDone(diags);
-    });
+    const diags = parseLinterOutput(linter, result, output);
+    output.appendLine(`[${linter.name}] parsed ${diags.length} diagnostic(s)`);
+    onDone(diags);
 }
 
 export function runLinters(

@@ -75,6 +75,36 @@
                 },
                 "description": "Arguments passed to the command. Use ${file} for the file path."
               },
+              "preCommands": {
+                "type": "array",
+                "default": [],
+                "markdownDescription": "Commands to run before this linter. They run sequentially; a non-zero exit code skips the linter. Use `${file}` for the file path.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "command",
+                    "args"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Optional display name shown in the LintRunner output."
+                    },
+                    "command": {
+                      "type": "string",
+                      "description": "Executable to invoke before this linter. Must be on PATH or an absolute path. Supports ~ for the home directory."
+                    },
+                    "args": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Arguments passed to the pre-command. Use ${file} for the file path."
+                    }
+                  }
+                }
+              },
               "parser": {
                 "type": "string",
                 "enum": [
