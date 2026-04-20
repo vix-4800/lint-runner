@@ -70,6 +70,7 @@ suite('JSON Parser', () => {
     test('stylelint warnings format', () => {
         const input = JSON.stringify([
             {
+                parseErrors: [],
                 warnings: [
                     {
                         line: 2,
@@ -91,11 +92,31 @@ suite('JSON Parser', () => {
         const input = JSON.stringify([
             {
                 parseErrors: [{ line: 1, column: 10, text: 'Unexpected token', type: 'error' }],
+                warnings: [],
             },
         ]);
         const diags = parseJsonOutput(input, 'stylelint');
         assert.strictEqual(diags.length, 1);
         assert.strictEqual(diags[0].message, 'Unexpected token');
+    });
+
+    test('stylelint combined parseErrors and warnings', () => {
+        const input = JSON.stringify([
+            {
+                parseErrors: [{ line: 1, column: 1, text: 'Parse error', type: 'error' }],
+                warnings: [
+                    {
+                        line: 5,
+                        column: 3,
+                        text: 'Named color',
+                        severity: 'warning',
+                        rule: 'color-named',
+                    },
+                ],
+            },
+        ]);
+        const diags = parseJsonOutput(input, 'stylelint');
+        assert.strictEqual(diags.length, 2);
     });
 
     test('ruff format', () => {

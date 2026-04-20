@@ -116,9 +116,8 @@ function normalizeRawItems(raw: unknown[]): unknown[] {
             continue;
         }
 
-        // Stylelint parse errors: [{parseErrors: [{line, column, text, type}]}]
-        if (Array.isArray(obj.parseErrors)) {
-            for (const p of obj.parseErrors) {
+        if (Array.isArray(obj.parseErrors) || Array.isArray(obj.warnings)) {
+            for (const p of Array.isArray(obj.parseErrors) ? obj.parseErrors : []) {
                 if (typeof p !== 'object' || p === null) {
                     continue;
                 }
@@ -133,12 +132,7 @@ function normalizeRawItems(raw: unknown[]): unknown[] {
                     });
                 }
             }
-            continue;
-        }
-
-        // Stylelint: [{warnings: [{line, column, text, severity, rule}]}]
-        if (Array.isArray(obj.warnings)) {
-            for (const w of obj.warnings) {
+            for (const w of Array.isArray(obj.warnings) ? obj.warnings : []) {
                 if (typeof w !== 'object' || w === null) {
                     continue;
                 }
