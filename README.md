@@ -201,6 +201,7 @@ Expected 1 newline at end of file; 0 found phpcs
 | `json`         | JSON output with `line`, `column`, `message`, `level`/`severity`/`type`, `code`/`rule`/`ruleId` fields. Also supports phpcs JSON.              |
 | `jsonlint`     | `line N, col N, message`.                                                                                                                     |
 | `parsable`     | `file:line:column: [level] message`.                                                                                                          |
+| `taplo`        | Taplo `check` output.                                                                                                                         |
 | `xmllint`      | stderr in `file:line: error: message` or `file:line: warning: message` format.                                                                 |
 | `linthtml`     | `line:column error message  rule`.                                                                                                            |
 | `ansible-lint` | rule line + location line from standard ansible-lint output.                                                                                  |

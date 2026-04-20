@@ -7,6 +7,7 @@ import { parseJsonOutput } from '../parser/jsonParser.js';
 import { parseJsonlintOutput } from '../parser/jsonlintParser.js';
 import { parseLinthtmlOutput } from '../parser/linthtmlParser.js';
 import { parseParsableOutput } from '../parser/parsableParser.js';
+import { parseTaploOutput } from '../parser/taploParser.js';
 import { parseXmllintOutput } from '../parser/xmllintParser.js';
 
 suite('JSON Parser', () => {
@@ -434,6 +435,28 @@ suite('Xmllint Parser', () => {
         const stderr = '      ^  \nfile.xml:6: parser error : Something';
         const diags = parseXmllintOutput(stderr, 'xmllint');
         assert.strictEqual(diags.length, 1);
+    });
+});
+
+suite('Taplo Parser', () => {
+    test('parses syntax error output', () => {
+        const input = [
+            'error: invalid TOML',
+            '  ┌─ /tmp/test.toml:1:5',
+            '  │',
+            '1 │ x = ]',
+            '  │     ^ expected value',
+            '',
+            'ERROR invalid file error=syntax errors found path="/tmp/test.toml"',
+        ].join('\n');
+
+        const diags = parseTaploOutput(input, 'taplo');
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].range.start.line, 0);
+        assert.strictEqual(diags[0].range.start.character, 4);
+        assert.strictEqual(diags[0].message, 'invalid TOML: expected value');
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diags[0].source, 'taplo');
     });
 });
 

@@ -6,6 +6,7 @@ import { parseJsonOutput } from './parser/jsonParser.js';
 import { parseJsonlintOutput } from './parser/jsonlintParser.js';
 import { parseLinthtmlOutput } from './parser/linthtmlParser.js';
 import { parseParsableOutput } from './parser/parsableParser.js';
+import { parseTaploOutput } from './parser/taploParser.js';
 import { parseXmllintOutput } from './parser/xmllintParser.js';
 
 const runningLinters = new Map<string, number>();
@@ -16,6 +17,7 @@ const SUPPORTED_PARSERS = [
     'json',
     'jsonlint',
     'parsable',
+    'taplo',
     'xmllint',
     'linthtml',
     'ansible-lint',
@@ -24,6 +26,7 @@ const SUPPORTED_PARSERS = [
 type ParserName = (typeof SUPPORTED_PARSERS)[number];
 type RunMode = 'manual' | 'onSave' | 'onOpen';
 type FixerRunMode = Extract<RunMode, 'manual' | 'onSave'>;
+type DiagnosticsHandler = (diagnostics: vscode.Diagnostic[]) => void;
 
 export interface CommandConfig {
     name?: string;
@@ -383,6 +386,9 @@ export function parseLinterOutput(
         case 'parsable':
             diagnostics = parseParsableOutput(result.stdout, linter.name);
             break;
+        case 'taplo':
+            diagnostics = parseTaploOutput(`${result.stdout}\n${result.stderr}`, linter.name);
+            break;
         case 'xmllint':
             diagnostics = parseXmllintOutput(result.stderr, linter.name);
             break;
@@ -473,7 +479,8 @@ async function spawnTargetLinters(
     filePath: string,
     trigger: RunMode,
     output: vscode.OutputChannel,
-    statusBar: vscode.StatusBarItem
+    statusBar: vscode.StatusBarItem,
+    onLinterDiagnostics: DiagnosticsHandler
 ): Promise<vscode.Diagnostic[]> {
     const matchingLinters = target.linters.filter(
         (linter) => trigger === 'manual' || linter.run === trigger
@@ -493,7 +500,11 @@ async function spawnTargetLinters(
     }
 
     const diagnostics = await Promise.all(
-        matchingLinters.map((linter) => spawnLinter(linter, filePath, output, statusBar))
+        matchingLinters.map(async (linter) => {
+            const linterDiagnostics = await spawnLinter(linter, filePath, output, statusBar);
+            onLinterDiagnostics(linterDiagnostics);
+            return linterDiagnostics;
+        })
     );
 
     return diagnostics.flat();
@@ -561,6 +572,7 @@ export function runLinters(
     const runId = nextRunId++;
     activeRunIds.set(filePath, runId);
     diagnostics.delete(uri);
+    const currentDiagnostics: vscode.Diagnostic[] = [];
 
     const matching = targets.filter((target) => matchesPatterns(filePath, target.filePatterns));
 
@@ -570,7 +582,16 @@ export function runLinters(
     }
 
     Promise.all(
-        matching.map((target) => spawnTargetLinters(target, filePath, trigger, output, statusBar))
+        matching.map((target) =>
+            spawnTargetLinters(target, filePath, trigger, output, statusBar, (linterDiagnostics) => {
+                if (activeRunIds.get(filePath) !== runId || linterDiagnostics.length === 0) {
+                    return;
+                }
+
+                currentDiagnostics.push(...linterDiagnostics);
+                diagnostics.set(uri, currentDiagnostics);
+            })
+        )
     )
         .then((allDiags) => {
             if (activeRunIds.get(filePath) !== runId) {
