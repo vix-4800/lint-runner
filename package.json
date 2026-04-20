@@ -78,7 +78,7 @@
                   "onOpen",
                   "manual"
                 ],
-                "description": "Default run mode for linters in this target. 'onOpen' runs automatically when a file opens."
+                "description": "Default run mode for linters in this target. 'onOpen' runs when a file opens and again on save."
               },
               "preCommands": {
                 "type": "array",
@@ -224,7 +224,7 @@
                         "onOpen",
                         "manual"
                       ],
-                      "description": "Override target run mode for this linter. 'onOpen' runs automatically when a file opens."
+                      "description": "Override target run mode for this linter. 'onOpen' runs when a file opens and again on save."
                     },
                     "showDiagnosticCodes": {
                       "type": "boolean",
@@ -404,7 +404,7 @@
                   "onOpen",
                   "manual"
                 ],
-                "description": "'onOpen' runs automatically when a file opens; 'onSave' runs automatically on save; 'manual' only runs via the command."
+                "description": "'onOpen' runs when a file opens and again on save; 'onSave' runs on save; 'manual' only runs via the command."
               },
               "showDiagnosticCodes": {
                 "type": "boolean",

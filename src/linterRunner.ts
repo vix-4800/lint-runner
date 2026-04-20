@@ -264,6 +264,14 @@ function getCommandEnv(): Promise<NodeJS.ProcessEnv> {
     return commandEnvPromise;
 }
 
+export function shouldRunLinter(linter: LinterConfig, trigger: RunMode): boolean {
+    return (
+        trigger === 'manual' ||
+        linter.run === trigger ||
+        (trigger === 'onSave' && linter.run === 'onOpen')
+    );
+}
+
 interface CommandTemplateValues {
     file: string;
     workspaceFolder: string;
@@ -580,9 +588,7 @@ async function spawnTargetLinters(
     statusBar: vscode.StatusBarItem,
     onLinterDiagnostics: DiagnosticsHandler
 ): Promise<vscode.Diagnostic[]> {
-    const matchingLinters = target.linters.filter(
-        (linter) => trigger === 'manual' || linter.run === trigger
-    );
+    const matchingLinters = target.linters.filter((linter) => shouldRunLinter(linter, trigger));
     if (matchingLinters.length === 0) {
         return [];
     }

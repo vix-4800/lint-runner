@@ -6,6 +6,7 @@ import {
     buildCommandEnv,
     parseLinterOutput,
     resolveConfiguredTargets,
+    shouldRunLinter,
 } from '../linterRunner.js';
 import { parseAnsibleLintOutput } from '../parser/ansibleLintParser.js';
 import { parseJsonOutput } from '../parser/jsonParser.js';
@@ -332,6 +333,34 @@ suite('Linter Runner', () => {
         );
 
         assert.strictEqual(targets[0].linters[0].run, 'onOpen');
+    });
+
+    test('runs onOpen linters again on save', () => {
+        const linter = {
+            name: 'markdownlint',
+            filePatterns: ['*.md'],
+            command: 'markdownlint',
+            args: ['${file}'],
+            parser: 'json',
+            run: 'onOpen' as const,
+        };
+
+        assert.strictEqual(shouldRunLinter(linter, 'onOpen'), true);
+        assert.strictEqual(shouldRunLinter(linter, 'onSave'), true);
+    });
+
+    test('does not run onSave linters on open', () => {
+        const linter = {
+            name: 'eslint',
+            filePatterns: ['*.ts'],
+            command: 'eslint',
+            args: ['${file}'],
+            parser: 'json',
+            run: 'onSave' as const,
+        };
+
+        assert.strictEqual(shouldRunLinter(linter, 'onOpen'), false);
+        assert.strictEqual(shouldRunLinter(linter, 'onSave'), true);
     });
 
     test('keeps legacy linter-first configs working as targets', () => {
