@@ -27,6 +27,12 @@
     "onStartupFinished"
   ],
   "main": "./out/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "LintRunner loads in untrusted workspaces, but configured commands are disabled until the workspace is trusted."
+    }
+  },
   "contributes": {
     "commands": [
       {

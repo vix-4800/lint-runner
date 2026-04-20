@@ -1,6 +1,23 @@
 import * as vscode from 'vscode';
 import { runFixers, runLinters } from './linterRunner.js';
 
+let untrustedWorkspaceWarningShown = false;
+
+function canRunWorkspaceCommands(showRepeatedWarning: boolean): boolean {
+    if (vscode.workspace.isTrusted) {
+        return true;
+    }
+
+    if (showRepeatedWarning || !untrustedWorkspaceWarningShown) {
+        vscode.window.showWarningMessage(
+            'LintRunner: Workspace is not trusted. Trust the workspace to run configured commands.'
+        );
+        untrustedWorkspaceWarningShown = true;
+    }
+
+    return false;
+}
+
 export function activate(context: vscode.ExtensionContext): void {
     const diagnostics = vscode.languages.createDiagnosticCollection('lintRunner');
     const output = vscode.window.createOutputChannel('LintRunner');
@@ -10,6 +27,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument((doc) => {
+            if (!canRunWorkspaceCommands(false)) {
+                return;
+            }
             runLinters(doc.fileName, 'onSave', diagnostics, output, statusBar);
         })
     );
@@ -27,6 +47,9 @@ export function activate(context: vscode.ExtensionContext): void {
                 vscode.window.showWarningMessage('LintRunner: No active editor.');
                 return;
             }
+            if (!canRunWorkspaceCommands(true)) {
+                return;
+            }
             runLinters(editor.document.fileName, 'manual', diagnostics, output, statusBar);
         })
     );
@@ -36,6 +59,9 @@ export function activate(context: vscode.ExtensionContext): void {
             const editor = vscode.window.activeTextEditor;
             if (editor === undefined) {
                 vscode.window.showWarningMessage('LintRunner: No active editor.');
+                return;
+            }
+            if (!canRunWorkspaceCommands(true)) {
                 return;
             }
 

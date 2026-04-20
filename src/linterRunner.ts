@@ -148,7 +148,17 @@ function runCommand(
     filePath: string,
     output: vscode.OutputChannel
 ): Promise<CommandResult> {
-    const command = expandHome(commandConfig.command);
+    if (!vscode.workspace.isTrusted) {
+        output.appendLine(`[${label}] skipped: workspace is not trusted`);
+        return Promise.resolve({
+            code: null,
+            stdout: '',
+            stderr: '',
+            error: 'workspace is not trusted',
+        });
+    }
+
+    const command = expandHome(applyCommandTemplate(commandConfig.command, filePath));
     const args = buildArgs(commandConfig.args, filePath);
     const cwd = resolveWorkingDirectory(filePath);
     output.appendLine(`[${label}] ${formatCommand(command, args)}`);

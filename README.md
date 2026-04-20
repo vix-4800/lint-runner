@@ -13,6 +13,7 @@ VS Code расширение для запуска внешних CLI линте
 - pre-commands перед основным линтером;
 - скрытие diagnostic rule codes в Problems;
 - status bar с именами активных линтеров.
+- блокировка запуска команд в untrusted workspaces.
 
 ## Настройка
 
