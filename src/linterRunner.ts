@@ -9,6 +9,8 @@ import { parseParsableOutput } from './parser/parsableParser.js';
 import { parseXmllintOutput } from './parser/xmllintParser.js';
 
 const runningLinters = new Map<string, number>();
+const activeRunIds = new Map<string, number>();
+let nextRunId = 0;
 
 export interface CommandConfig {
     name?: string;
@@ -58,11 +60,18 @@ function globToRegex(pattern: string): RegExp {
     return new RegExp(result);
 }
 
+function normalizePath(value: string): string {
+    return value.split(path.sep).join('/');
+}
+
 function matchesPatterns(filePath: string, patterns: string[]): boolean {
     const fileName = path.basename(filePath);
+    const relativePath = normalizePath(vscode.workspace.asRelativePath(filePath, false));
+    const normalizedFilePath = normalizePath(filePath);
+
     return patterns.some((pattern) => {
         const re = globToRegex(pattern);
-        return re.test(fileName) || re.test(filePath);
+        return re.test(fileName) || re.test(relativePath) || re.test(normalizedFilePath);
     });
 }
 
@@ -290,6 +299,10 @@ export function runLinters(
 ): void {
     const config = vscode.workspace.getConfiguration('lintRunner');
     const linters = config.get<LinterConfig[]>('linters') ?? [];
+    const uri = vscode.Uri.file(filePath);
+    const runId = nextRunId++;
+    activeRunIds.set(filePath, runId);
+    diagnostics.delete(uri);
 
     const matching = linters.filter(
         (l) =>
@@ -298,11 +311,9 @@ export function runLinters(
     );
 
     if (matching.length === 0) {
+        activeRunIds.delete(filePath);
         return;
     }
-
-    const uri = vscode.Uri.file(filePath);
-    diagnostics.delete(uri);
 
     const allDiags: vscode.Diagnostic[] = [];
     let remaining = matching.length;
@@ -311,6 +322,10 @@ export function runLinters(
         allDiags.push(...diags);
         remaining--;
         if (remaining === 0) {
+            if (activeRunIds.get(filePath) !== runId) {
+                return;
+            }
+            activeRunIds.delete(filePath);
             diagnostics.set(uri, allDiags);
         }
     };
