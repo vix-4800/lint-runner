@@ -278,7 +278,9 @@ suite('Linter Runner', () => {
                             showDiagnosticCodes: true,
                         },
                     ],
-                    fixers: [{ name: 'phpcbf', command: 'phpcbf', args: ['${file}'] }],
+                    fixers: [
+                        { name: 'phpcbf', command: 'phpcbf', args: ['${file}'], run: 'onSave' },
+                    ],
                 },
             ],
             []
@@ -292,6 +294,7 @@ suite('Linter Runner', () => {
         assert.strictEqual(targets[0].linters[1].showDiagnosticCodes, true);
         assert.strictEqual(targets[0].preCommands.length, 1);
         assert.strictEqual(targets[0].fixers.length, 1);
+        assert.strictEqual(targets[0].fixers[0].run, 'onSave');
     });
 
     test('resolves onOpen run mode', () => {
@@ -326,6 +329,12 @@ suite('Linter Runner', () => {
                 args: ['${file}'],
                 parser: 'json',
                 run: 'onSave',
+                fixCommand: {
+                    name: 'eslint --fix',
+                    command: 'eslint',
+                    args: ['--fix', '${file}'],
+                    run: 'onSave',
+                },
             },
         ]);
 
@@ -333,6 +342,7 @@ suite('Linter Runner', () => {
         assert.strictEqual(targets[0].name, 'ESLint');
         assert.deepStrictEqual(targets[0].filePatterns, ['*.ts']);
         assert.strictEqual(targets[0].linters[0].name, 'ESLint');
+        assert.strictEqual(targets[0].linters[0].fixCommand?.run, 'onSave');
     });
 });
 

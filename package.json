@@ -171,7 +171,7 @@
                     },
                     "fixCommand": {
                       "type": "object",
-                      "markdownDescription": "Legacy per-linter command to run when `LintRunner: Run Fixers` is invoked. Prefer target-level `fixers` for new configs.",
+                      "markdownDescription": "Legacy per-linter command to run when `LintRunner: Run Fixers` is invoked. Set `run` to `onSave` to also run on save. Prefer target-level `fixers` for new configs.",
                       "required": [
                         "command",
                         "args"
@@ -192,6 +192,15 @@
                             "type": "string"
                           },
                           "description": "Arguments passed to the fix command. Supports command variables."
+                        },
+                        "run": {
+                          "type": "string",
+                          "default": "manual",
+                          "enum": [
+                            "manual",
+                            "onSave"
+                          ],
+                          "description": "'manual' runs only via the command; 'onSave' also runs when a matching file is saved."
                         }
                       }
                     },
@@ -226,7 +235,7 @@
               "fixers": {
                 "type": "array",
                 "default": [],
-                "markdownDescription": "Commands to run when `LintRunner: Run Fixers` is invoked for files matching this target.",
+                "markdownDescription": "Commands to run when `LintRunner: Run Fixers` is invoked for files matching this target. Set `run` to `onSave` to also run on save.",
                 "items": {
                   "type": "object",
                   "required": [
@@ -249,6 +258,15 @@
                         "type": "string"
                       },
                       "description": "Arguments passed to the fix command. Supports command variables."
+                    },
+                    "run": {
+                      "type": "string",
+                      "default": "manual",
+                      "enum": [
+                        "manual",
+                        "onSave"
+                      ],
+                      "description": "'manual' runs only via the command; 'onSave' also runs when a matching file is saved."
                     }
                   }
                 }
@@ -332,7 +350,7 @@
               },
               "fixCommand": {
                 "type": "object",
-                "markdownDescription": "Command to run when `LintRunner: Run Fixers` is invoked. Use `${file}` for the file path.",
+                "markdownDescription": "Command to run when `LintRunner: Run Fixers` is invoked. Set `run` to `onSave` to also run on save. Use `${file}` for the file path.",
                 "required": [
                   "command",
                   "args"
@@ -353,6 +371,15 @@
                       "type": "string"
                     },
                     "description": "Arguments passed to the fix command. Supports command variables."
+                  },
+                  "run": {
+                    "type": "string",
+                    "default": "manual",
+                    "enum": [
+                      "manual",
+                      "onSave"
+                    ],
+                    "description": "'manual' runs only via the command; 'onSave' also runs when a matching file is saved."
                   }
                 }
               },

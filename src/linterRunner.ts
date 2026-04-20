@@ -23,11 +23,16 @@ const SUPPORTED_PARSERS = [
 
 type ParserName = (typeof SUPPORTED_PARSERS)[number];
 type RunMode = 'manual' | 'onSave' | 'onOpen';
+type FixerRunMode = Extract<RunMode, 'manual' | 'onSave'>;
 
 export interface CommandConfig {
     name?: string;
     command: string;
     args: string[];
+}
+
+export interface FixerConfig extends CommandConfig {
+    run?: FixerRunMode;
 }
 
 export interface TargetLinterConfig {
@@ -37,7 +42,7 @@ export interface TargetLinterConfig {
     parser: ParserName | string;
     run?: RunMode;
     preCommands?: CommandConfig[];
-    fixCommand?: CommandConfig;
+    fixCommand?: FixerConfig;
     showDiagnosticCodes?: boolean;
 }
 
@@ -52,7 +57,7 @@ export interface TargetConfig {
     run?: RunMode;
     preCommands?: CommandConfig[];
     linters?: TargetLinterConfig[];
-    fixers?: CommandConfig[];
+    fixers?: FixerConfig[];
     showDiagnosticCodes?: boolean;
 }
 
@@ -61,7 +66,7 @@ export interface ResolvedTargetConfig {
     filePatterns: string[];
     preCommands: CommandConfig[];
     linters: LinterConfig[];
-    fixers: CommandConfig[];
+    fixers: FixerConfig[];
 }
 
 export interface CommandResult {
@@ -519,9 +524,13 @@ async function runFixer(
     }
 }
 
+function shouldRunFixer(fixer: FixerConfig, trigger: FixerRunMode): boolean {
+    return trigger === 'manual' || fixer.run === trigger;
+}
+
 async function runTargetFixer(
     targetName: string,
-    fixer: CommandConfig,
+    fixer: FixerConfig,
     filePath: string,
     output: vscode.OutputChannel,
     statusBar: vscode.StatusBarItem
@@ -581,7 +590,8 @@ export function runLinters(
 export async function runFixers(
     filePath: string,
     output: vscode.OutputChannel,
-    statusBar: vscode.StatusBarItem
+    statusBar: vscode.StatusBarItem,
+    trigger: FixerRunMode = 'manual'
 ): Promise<number> {
     const targets = getConfiguredTargets();
     const matching = targets.filter((target) => matchesPatterns(filePath, target.filePatterns));
@@ -589,12 +599,15 @@ export async function runFixers(
 
     for (const target of matching) {
         for (const fixer of target.fixers) {
+            if (!shouldRunFixer(fixer, trigger)) {
+                continue;
+            }
             fixersRun++;
             await runTargetFixer(target.name, fixer, filePath, output, statusBar);
         }
 
         for (const linter of target.linters) {
-            if (linter.fixCommand === undefined) {
+            if (linter.fixCommand === undefined || !shouldRunFixer(linter.fixCommand, trigger)) {
                 continue;
             }
             fixersRun++;

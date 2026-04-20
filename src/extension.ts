@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { runFixers, runLinters } from './linterRunner.js';
 
 let untrustedWorkspaceWarningShown = false;
+const skipFixersOnSave = new Set<string>();
 
 function canRunWorkspaceCommands(showRepeatedWarning: boolean): boolean {
     if (vscode.workspace.isTrusted) {
@@ -35,9 +36,12 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 
     context.subscriptions.push(
-        vscode.workspace.onDidSaveTextDocument((doc) => {
+        vscode.workspace.onDidSaveTextDocument(async (doc) => {
             if (!canRunWorkspaceCommands(false)) {
                 return;
+            }
+            if (!skipFixersOnSave.delete(doc.fileName)) {
+                await runFixers(doc.fileName, output, statusBar, 'onSave');
             }
             runLinters(doc.fileName, 'onSave', diagnostics, output, statusBar);
         })
@@ -74,19 +78,26 @@ export function activate(context: vscode.ExtensionContext): void {
                 return;
             }
 
-            const saved = await editor.document.save();
+            const fileName = editor.document.fileName;
+            skipFixersOnSave.add(fileName);
+            let saved: boolean;
+            try {
+                saved = await editor.document.save();
+            } finally {
+                skipFixersOnSave.delete(fileName);
+            }
             if (!saved) {
                 vscode.window.showWarningMessage('LintRunner: File was not saved.');
                 return;
             }
 
-            const fixersRun = await runFixers(editor.document.fileName, output, statusBar);
+            const fixersRun = await runFixers(fileName, output, statusBar);
             if (fixersRun === 0) {
                 vscode.window.showWarningMessage('LintRunner: No matching fix command.');
                 return;
             }
 
-            runLinters(editor.document.fileName, 'manual', diagnostics, output, statusBar);
+            runLinters(fileName, 'manual', diagnostics, output, statusBar);
         })
     );
 }
