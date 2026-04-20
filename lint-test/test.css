@@ -1,0 +1,9 @@
+.container {
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    margin: 0 auto;
+    color: red;
+    font-size: 24px;
+    font-weight: bold;
+}

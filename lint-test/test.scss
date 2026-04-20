@@ -1,0 +1,12 @@
+$primary: #cba6f7;
+
+.container {
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    color: RED;
+    font-size: 24px .title {
+        font-size: 24px;
+        color: $primary;
+    }
+}
