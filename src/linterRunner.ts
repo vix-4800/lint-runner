@@ -224,6 +224,35 @@ function parseLinterOutput(linter: LinterConfig, result: CommandResult): vscode.
     return diagnostics;
 }
 
+async function moveLineStartDiagnosticsToFirstNonWhitespace(
+    filePath: string,
+    diagnostics: vscode.Diagnostic[]
+): Promise<void> {
+    if (diagnostics.length === 0) {
+        return;
+    }
+
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+    for (const diagnostic of diagnostics) {
+        if (diagnostic.range.start.character !== 0 || diagnostic.range.start.line >= document.lineCount) {
+            continue;
+        }
+
+        const line = document.lineAt(diagnostic.range.start.line);
+        const firstNonWhitespace = line.firstNonWhitespaceCharacterIndex;
+        if (firstNonWhitespace === 0 || line.isEmptyOrWhitespace) {
+            continue;
+        }
+
+        diagnostic.range = new vscode.Range(
+            diagnostic.range.start.line,
+            firstNonWhitespace,
+            diagnostic.range.end.line,
+            Math.max(firstNonWhitespace + 1, diagnostic.range.end.character)
+        );
+    }
+}
+
 async function spawnLinter(
     linter: LinterConfig,
     filePath: string,
@@ -241,6 +270,7 @@ async function spawnLinter(
 
         const result = await runCommand(linter.name, linter, filePath, output);
         const diags = parseLinterOutput(linter, result);
+        await moveLineStartDiagnosticsToFirstNonWhitespace(filePath, diags);
         logCommandResult(linter.name, result, output, diags.length);
         onDone(diags);
     } catch (err) {
