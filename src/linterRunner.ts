@@ -9,6 +9,7 @@ import { parseParsableOutput } from './parser/parsableParser.js';
 import { parseXmllintOutput } from './parser/xmllintParser.js';
 
 const MAX_STDOUT_PREVIEW_LENGTH = 500;
+const runningLinters = new Map<string, number>();
 
 export interface CommandConfig {
     name?: string;
@@ -72,6 +73,40 @@ function expandHome(value: string): string {
 
 function buildArgs(args: string[], filePath: string): string[] {
     return args.map((arg) => expandHome(arg.replace('${file}', filePath)));
+}
+
+function formatRunningLinterName(name: string, count: number): string {
+    return count > 1 ? `${name} x${count}` : name;
+}
+
+function updateStatusBar(statusBar: vscode.StatusBarItem): void {
+    const names = [...runningLinters.entries()].map(([name, count]) =>
+        formatRunningLinterName(name, count)
+    );
+
+    if (names.length === 0) {
+        statusBar.hide();
+        return;
+    }
+
+    statusBar.text = `$(sync~spin) LintRunner: ${names.join(', ')}`;
+    statusBar.tooltip = `Running linters: ${names.join(', ')}`;
+    statusBar.show();
+}
+
+function startLinterStatus(name: string, statusBar: vscode.StatusBarItem): void {
+    runningLinters.set(name, (runningLinters.get(name) ?? 0) + 1);
+    updateStatusBar(statusBar);
+}
+
+function stopLinterStatus(name: string, statusBar: vscode.StatusBarItem): void {
+    const count = runningLinters.get(name) ?? 0;
+    if (count <= 1) {
+        runningLinters.delete(name);
+    } else {
+        runningLinters.set(name, count - 1);
+    }
+    updateStatusBar(statusBar);
 }
 
 function runCommand(
@@ -196,27 +231,37 @@ async function spawnLinter(
     linter: LinterConfig,
     filePath: string,
     output: vscode.OutputChannel,
+    statusBar: vscode.StatusBarItem,
     onDone: (diags: vscode.Diagnostic[]) => void
 ): Promise<void> {
-    const shouldRunLinter = await runPreCommands(linter, filePath, output);
-    if (!shouldRunLinter) {
+    startLinterStatus(linter.name, statusBar);
+    try {
+        const shouldRunLinter = await runPreCommands(linter, filePath, output);
+        if (!shouldRunLinter) {
+            onDone([]);
+            return;
+        }
+
+        const result = await runCommand(linter.name, linter, filePath, output);
+        logCommandResult(linter.name, result, output);
+
+        const diags = parseLinterOutput(linter, result, output);
+        output.appendLine(`[${linter.name}] parsed ${diags.length} diagnostic(s)`);
+        onDone(diags);
+    } catch (err) {
+        output.appendLine(`[${linter.name}] Failed: ${String(err)}`);
         onDone([]);
-        return;
+    } finally {
+        stopLinterStatus(linter.name, statusBar);
     }
-
-    const result = await runCommand(linter.name, linter, filePath, output);
-    logCommandResult(linter.name, result, output);
-
-    const diags = parseLinterOutput(linter, result, output);
-    output.appendLine(`[${linter.name}] parsed ${diags.length} diagnostic(s)`);
-    onDone(diags);
 }
 
 export function runLinters(
     filePath: string,
     trigger: 'manual' | 'onSave',
     diagnostics: vscode.DiagnosticCollection,
-    output: vscode.OutputChannel
+    output: vscode.OutputChannel,
+    statusBar: vscode.StatusBarItem
 ): void {
     const config = vscode.workspace.getConfiguration('lintRunner');
     const linters = config.get<LinterConfig[]>('linters') ?? [];
@@ -246,6 +291,6 @@ export function runLinters(
     };
 
     for (const linter of matching) {
-        spawnLinter(linter, filePath, output, onLinterDone);
+        spawnLinter(linter, filePath, output, statusBar, onLinterDone);
     }
 }

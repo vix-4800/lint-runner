@@ -10,7 +10,8 @@ VS Code расширение для запуска внешних CLI линте
 - подстановка `${file}` в аргументы;
 - поддержка `~` в путях команд и аргументов;
 - pre-commands перед основным линтером;
-- скрытие diagnostic rule codes в Problems.
+- скрытие diagnostic rule codes в Problems;
+- status bar с именами активных линтеров.
 
 ## Настройка
 
