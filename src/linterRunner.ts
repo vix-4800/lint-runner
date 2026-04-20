@@ -24,6 +24,7 @@ export interface LinterConfig {
     parser: string;
     run: 'manual' | 'onSave';
     preCommands?: CommandConfig[];
+    showDiagnosticCodes?: boolean;
 }
 
 interface CommandResult {
@@ -160,31 +161,35 @@ async function runPreCommands(
 }
 
 function parseLinterOutput(linter: LinterConfig, result: CommandResult, output: vscode.OutputChannel): vscode.Diagnostic[] {
+    let diagnostics: vscode.Diagnostic[];
     if (linter.parser === 'json') {
-        return parseJsonOutput(result.stdout, linter.name);
-    }
-    if (linter.parser === 'jsonlint') {
-        return parseJsonlintOutput(result.stdout, result.stderr, linter.name);
-    }
-    if (linter.parser === 'ansible-lint') {
-        return parseAnsibleLintOutput(result.stdout, linter.name);
-    }
-    if (linter.parser === 'parsable') {
-        return parseParsableOutput(result.stdout, linter.name);
-    }
-    if (linter.parser === 'xmllint') {
-        return parseXmllintOutput(result.stderr, linter.name);
-    }
-    if (linter.parser === 'linthtml') {
-        return parseLinthtmlOutput(result.stdout, linter.name);
-    }
-    if (result.stdout.length > 0 || result.stderr.trim().length > 0) {
-        output.appendLine(
-            `[${linter.name}] Parser '${linter.parser}' is not implemented; output was not parsed`
-        );
+        diagnostics = parseJsonOutput(result.stdout, linter.name);
+    } else if (linter.parser === 'jsonlint') {
+        diagnostics = parseJsonlintOutput(result.stdout, result.stderr, linter.name);
+    } else if (linter.parser === 'ansible-lint') {
+        diagnostics = parseAnsibleLintOutput(result.stdout, linter.name);
+    } else if (linter.parser === 'parsable') {
+        diagnostics = parseParsableOutput(result.stdout, linter.name);
+    } else if (linter.parser === 'xmllint') {
+        diagnostics = parseXmllintOutput(result.stderr, linter.name);
+    } else if (linter.parser === 'linthtml') {
+        diagnostics = parseLinthtmlOutput(result.stdout, linter.name);
+    } else {
+        diagnostics = [];
+        if (result.stdout.length > 0 || result.stderr.trim().length > 0) {
+            output.appendLine(
+                `[${linter.name}] Parser '${linter.parser}' is not implemented; output was not parsed`
+            );
+        }
     }
 
-    return [];
+    if (linter.showDiagnosticCodes === false) {
+        for (const diagnostic of diagnostics) {
+            diagnostic.code = undefined;
+        }
+    }
+
+    return diagnostics;
 }
 
 async function spawnLinter(
