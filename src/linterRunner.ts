@@ -26,6 +26,7 @@ export interface LinterConfig {
     parser: string;
     run: 'manual' | 'onSave';
     preCommands?: CommandConfig[];
+    fixCommand?: CommandConfig;
     showDiagnosticCodes?: boolean;
 }
 
@@ -300,6 +301,31 @@ async function spawnLinter(
     }
 }
 
+async function runFixer(
+    linter: LinterConfig,
+    filePath: string,
+    output: vscode.OutputChannel,
+    statusBar: vscode.StatusBarItem
+): Promise<void> {
+    const fixCommand = linter.fixCommand;
+    if (fixCommand === undefined) {
+        return;
+    }
+
+    const fixCommandName = fixCommand.name ?? fixCommand.command;
+    const label = `${linter.name}:fix:${fixCommandName}`;
+    const statusName = `${linter.name}:fix`;
+    startLinterStatus(statusName, statusBar);
+    try {
+        const result = await runCommand(label, fixCommand, filePath, output);
+        logCommandResult(label, result, output);
+    } catch (err) {
+        output.appendLine(`[${label}] failed: ${String(err)}`);
+    } finally {
+        stopLinterStatus(statusName, statusBar);
+    }
+}
+
 export function runLinters(
     filePath: string,
     trigger: 'manual' | 'onSave',
@@ -343,4 +369,22 @@ export function runLinters(
     for (const linter of matching) {
         spawnLinter(linter, filePath, output, statusBar, onLinterDone);
     }
+}
+
+export async function runFixers(
+    filePath: string,
+    output: vscode.OutputChannel,
+    statusBar: vscode.StatusBarItem
+): Promise<number> {
+    const config = vscode.workspace.getConfiguration('lintRunner');
+    const linters = config.get<LinterConfig[]>('linters') ?? [];
+    const matching = linters.filter(
+        (l) => matchesPatterns(filePath, l.filePatterns) && l.fixCommand !== undefined
+    );
+
+    for (const linter of matching) {
+        await runFixer(linter, filePath, output, statusBar);
+    }
+
+    return matching.length;
 }

@@ -5,6 +5,7 @@ VS Code расширение для запуска внешних CLI линте
 ## Возможности
 
 - запуск линтеров вручную через `LintRunner: Run Linters`;
+- запуск автофиксеров вручную через `LintRunner: Run Fixers`;
 - запуск линтеров при сохранении файла;
 - выбор линтеров по glob-паттернам файла;
 - подстановка `${file}` в аргументы;
@@ -25,6 +26,10 @@ VS Code расширение для запуска внешних CLI линте
       "filePatterns": ["*.php"],
       "command": "vendor/bin/phpcs",
       "args": ["--report=json", "${file}"],
+      "fixCommand": {
+        "command": "vendor/bin/phpcbf",
+        "args": ["${file}"]
+      },
       "parser": "json",
       "run": "onSave"
     }
@@ -43,6 +48,7 @@ VS Code расширение для запуска внешних CLI линте
 | `parser` | `string` | да | Parser вывода линтера. |
 | `run` | `"onSave" \| "manual"` | да | Запуск при сохранении или только вручную. |
 | `preCommands` | `CommandConfig[]` | нет | Команды перед основным линтером. |
+| `fixCommand` | `CommandConfig` | нет | Команда автофиксера для `LintRunner: Run Fixers`. |
 | `showDiagnosticCodes` | `boolean` | нет | Показывать rule codes в Problems. По умолчанию `true`. |
 
 ## Pre-Commands
@@ -74,6 +80,26 @@ VS Code расширение для запуска внешних CLI линте
 | `name` | `string` | нет | Имя команды в LintRunner output. |
 | `command` | `string` | да | Исполняемый файл. |
 | `args` | `string[]` | да | Аргументы. Поддерживает `${file}` и `~`. |
+
+## Fix Commands
+
+`fixCommand` выполняется только через `LintRunner: Run Fixers`. Для всех matching configs команды выполняются последовательно. После фиксеров расширение запускает линтеры вручную, чтобы обновить Problems.
+
+```json
+{
+  "name": "phpcs",
+  "filePatterns": ["*.php"],
+  "command": "vendor/bin/phpcs",
+  "args": ["--report=json", "${file}"],
+  "fixCommand": {
+    "name": "phpcbf",
+    "command": "vendor/bin/phpcbf",
+    "args": ["${file}"]
+  },
+  "parser": "json",
+  "run": "onSave"
+}
+```
 
 ## Diagnostic Codes
 

@@ -32,6 +32,10 @@
       {
         "command": "lintRunner.run",
         "title": "LintRunner: Run Linters"
+      },
+      {
+        "command": "lintRunner.fix",
+        "title": "LintRunner: Run Fixers"
       }
     ],
     "configuration": {
@@ -102,6 +106,32 @@
                       },
                       "description": "Arguments passed to the pre-command. Use ${file} for the file path."
                     }
+                  }
+                }
+              },
+              "fixCommand": {
+                "type": "object",
+                "markdownDescription": "Command to run when `LintRunner: Run Fixers` is invoked. Use `${file}` for the file path.",
+                "required": [
+                  "command",
+                  "args"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Optional display name shown in the LintRunner output."
+                  },
+                  "command": {
+                    "type": "string",
+                    "description": "Executable to invoke for auto-fixing. Must be on PATH or an absolute path. Supports ~ for the home directory."
+                  },
+                  "args": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Arguments passed to the fix command. Use ${file} for the file path."
                   }
                 }
               },

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { runLinters } from './linterRunner.js';
+import { runFixers, runLinters } from './linterRunner.js';
 
 export function activate(context: vscode.ExtensionContext): void {
     const diagnostics = vscode.languages.createDiagnosticCollection('lintRunner');
@@ -21,6 +21,30 @@ export function activate(context: vscode.ExtensionContext): void {
                 vscode.window.showWarningMessage('LintRunner: No active editor.');
                 return;
             }
+            runLinters(editor.document.fileName, 'manual', diagnostics, output, statusBar);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('lintRunner.fix', async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (editor === undefined) {
+                vscode.window.showWarningMessage('LintRunner: No active editor.');
+                return;
+            }
+
+            const saved = await editor.document.save();
+            if (!saved) {
+                vscode.window.showWarningMessage('LintRunner: File was not saved.');
+                return;
+            }
+
+            const fixersRun = await runFixers(editor.document.fileName, output, statusBar);
+            if (fixersRun === 0) {
+                vscode.window.showWarningMessage('LintRunner: No matching fix command.');
+                return;
+            }
+
             runLinters(editor.document.fileName, 'manual', diagnostics, output, statusBar);
         })
     );
