@@ -210,6 +210,9 @@ function parseLinterOutput(linter: LinterConfig, result: CommandResult): vscode.
     let diagnostics: vscode.Diagnostic[];
     if (linter.parser === 'json') {
         diagnostics = parseJsonOutput(result.stdout, linter.name);
+        if (diagnostics.length === 0) {
+            diagnostics = parseJsonOutput(result.stderr, linter.name);
+        }
     } else if (linter.parser === 'jsonlint') {
         diagnostics = parseJsonlintOutput(result.stdout, result.stderr, linter.name);
     } else if (linter.parser === 'ansible-lint') {
