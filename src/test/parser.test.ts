@@ -380,6 +380,18 @@ suite('Parsable Parser', () => {
         assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
     });
 
+    test('parses dotenv-linter plain output', () => {
+        const input =
+            'lint-test/.env:1 LowercaseKey: The app_name key should be in uppercase\nlint-test/.env:2 IncorrectDelimiter: The APP ENV key has incorrect delimiter';
+        const diags = parseParsableOutput(input, 'dotenv-linter');
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
+        assert.strictEqual(diags[0].range.start.line, 0);
+        assert.strictEqual(diags[0].range.start.character, 0);
+        assert.strictEqual(diags[0].message, 'The app_name key should be in uppercase');
+        assert.strictEqual(diags[0].code, 'LowercaseKey');
+    });
+
     test('info severity', () => {
         const input = 'file:1:1: [info] some note';
         const diags = parseParsableOutput(input, 'test');

@@ -6,7 +6,11 @@ import * as vscode from 'vscode';
 //
 // Generic "parsable" / gcc-style:
 //   file:LINE:COL: SEVERITY: message
-const PARSABLE_RE = /^.+?:(\d+):(\d+):\s*\[?(\w+)\]?\s*(.+)$/;
+const LINE_COL_RE = /^.+?:(\d+):(\d+):\s*\[?(\w+)\]?\s*(.+)$/;
+
+// dotenv-linter --plain:
+//   .env:1 LowercaseKey: The app_name key should be in uppercase
+const LINE_CODE_RE = /^.+?:(\d+)\s+([A-Za-z][\w-]*):\s*(.+)$/;
 
 export function parseParsableOutput(stdout: string, source: string): vscode.Diagnostic[] {
     const diagnostics: vscode.Diagnostic[] = [];
@@ -16,14 +20,17 @@ export function parseParsableOutput(stdout: string, source: string): vscode.Diag
         if (line === '') {
             continue;
         }
-        const m = PARSABLE_RE.exec(line);
-        if (m === null) {
+        const lineColMatch = LINE_COL_RE.exec(line);
+        const lineCodeMatch = lineColMatch === null ? LINE_CODE_RE.exec(line) : null;
+        if (lineColMatch === null && lineCodeMatch === null) {
             continue;
         }
-        const lineNo = Math.max(0, parseInt(m[1], 10) - 1);
-        const colNo = Math.max(0, parseInt(m[2], 10) - 1);
-        const level = m[3].toLowerCase();
-        const message = m[4].trim();
+
+        const lineNo = Math.max(0, parseInt(lineColMatch?.[1] ?? lineCodeMatch?.[1] ?? '1', 10) - 1);
+        const colNo = lineColMatch === null ? 0 : Math.max(0, parseInt(lineColMatch[2], 10) - 1);
+        const level = lineColMatch === null ? 'warning' : lineColMatch[3].toLowerCase();
+        const code = lineCodeMatch?.[2];
+        const message = (lineColMatch?.[4] ?? lineCodeMatch?.[3] ?? '').trim();
 
         let severity: vscode.DiagnosticSeverity;
         switch (level) {
@@ -42,6 +49,9 @@ export function parseParsableOutput(stdout: string, source: string): vscode.Diag
         const range = new vscode.Range(lineNo, colNo, lineNo, colNo + 1);
         const diag = new vscode.Diagnostic(range, message, severity);
         diag.source = source;
+        if (code !== undefined) {
+            diag.code = code;
+        }
         diagnostics.push(diag);
     }
 
