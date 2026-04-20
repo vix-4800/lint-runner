@@ -12,6 +12,7 @@ VS Code extension for running external CLI linters and reporting found issues in
 - select linters by file glob patterns;
 - substitute command variables in commands and arguments;
 - support `~` in command and argument paths;
+- resolve commands through the user's login shell `PATH`;
 - pre-commands before the main linter;
 - hide diagnostic rule codes in Problems;
 - status bar with active linter names;

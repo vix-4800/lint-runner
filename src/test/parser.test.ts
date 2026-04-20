@@ -1,7 +1,12 @@
 import * as assert from 'assert';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { applyCommandTemplate, parseLinterOutput, resolveConfiguredTargets } from '../linterRunner.js';
+import {
+    applyCommandTemplate,
+    buildCommandEnv,
+    parseLinterOutput,
+    resolveConfiguredTargets,
+} from '../linterRunner.js';
 import { parseAnsibleLintOutput } from '../parser/ansibleLintParser.js';
 import { parseJsonOutput } from '../parser/jsonParser.js';
 import { parseJsonlintOutput } from '../parser/jsonlintParser.js';
@@ -252,6 +257,14 @@ suite('Linter Runner', () => {
         );
 
         assert.strictEqual(diagnostics.length, 0);
+    });
+
+    test('prepends shell PATH to command PATH', () => {
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        const env = buildCommandEnv(workspaceRoot);
+        const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
+
+        assert.strictEqual(env[pathKey]?.split(path.delimiter)[0], workspaceRoot);
     });
 
     test('resolves target-first configs with shared target settings', () => {

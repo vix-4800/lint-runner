@@ -1,4 +1,5 @@
 import * as cp from 'child_process';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { parseAnsibleLintOutput } from './parser/ansibleLintParser.js';
@@ -22,11 +23,14 @@ const SUPPORTED_PARSERS = [
     'linthtml',
     'ansible-lint',
 ] as const;
+const SHELL_ENV_TIMEOUT_MS = 3000;
+const SHELL_PATH_PREFIX = 'LINT_RUNNER_PATH=';
 
 type ParserName = (typeof SUPPORTED_PARSERS)[number];
 type RunMode = 'manual' | 'onSave' | 'onOpen';
 type FixerRunMode = Extract<RunMode, 'manual' | 'onSave'>;
 type DiagnosticsHandler = (diagnostics: vscode.Diagnostic[]) => void;
+let commandEnvPromise: Promise<NodeJS.ProcessEnv> | undefined;
 
 export interface CommandConfig {
     name?: string;
@@ -167,6 +171,99 @@ function expandHome(value: string): string {
     return value.replace(/(^|=)~(?=\/|$)/, `$1${home}`);
 }
 
+function getPathKey(env: NodeJS.ProcessEnv): string {
+    return Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
+}
+
+function mergePathValues(...values: string[]): string {
+    const entries = values
+        .flatMap((value) => value.split(path.delimiter))
+        .filter((value) => value !== '');
+
+    return [...new Set(entries)].join(path.delimiter);
+}
+
+export function buildCommandEnv(shellPath?: string): NodeJS.ProcessEnv {
+    const env = { ...process.env };
+    if (shellPath === undefined || shellPath === '') {
+        return env;
+    }
+
+    const pathKey = getPathKey(env);
+    env[pathKey] = mergePathValues(shellPath, env[pathKey] ?? '');
+    return env;
+}
+
+function getShellPathCommand(shell: string): string {
+    return path.basename(shell) === 'fish'
+        ? `printf '${SHELL_PATH_PREFIX}%s\\n' (string join ${path.delimiter} $PATH)`
+        : `printf '${SHELL_PATH_PREFIX}%s\\n' "$PATH"`;
+}
+
+function parseShellPath(stdout: string): string | undefined {
+    const lines = stdout.split(/\r?\n/);
+    for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].startsWith(SHELL_PATH_PREFIX)) {
+            return lines[i].slice(SHELL_PATH_PREFIX.length);
+        }
+    }
+
+    return undefined;
+}
+
+function getLoginShell(): string | undefined {
+    return process.env.SHELL ?? os.userInfo().shell ?? undefined;
+}
+
+function resolveShellPath(): Promise<string | undefined> {
+    const shell = getLoginShell();
+    if (shell === undefined || process.platform === 'win32') {
+        return Promise.resolve(undefined);
+    }
+
+    return new Promise((resolve) => {
+        const proc = cp.spawn(shell, ['-lc', getShellPathCommand(shell)]);
+        let stdout = '';
+        let done = false;
+
+        const timer = setTimeout(() => {
+            if (done) {
+                return;
+            }
+            done = true;
+            proc.kill();
+            resolve(undefined);
+        }, SHELL_ENV_TIMEOUT_MS);
+
+        proc.stdout?.on('data', (chunk: Buffer) => {
+            stdout += chunk.toString();
+        });
+
+        proc.on('error', () => {
+            if (done) {
+                return;
+            }
+            done = true;
+            clearTimeout(timer);
+            resolve(undefined);
+        });
+
+        proc.on('close', () => {
+            if (done) {
+                return;
+            }
+            done = true;
+            clearTimeout(timer);
+            resolve(parseShellPath(stdout));
+        });
+    });
+}
+
+function getCommandEnv(): Promise<NodeJS.ProcessEnv> {
+    commandEnvPromise ??= resolveShellPath().then(buildCommandEnv);
+    return commandEnvPromise;
+}
+
 interface CommandTemplateValues {
     file: string;
     workspaceFolder: string;
@@ -263,7 +360,7 @@ function resolveWorkingDirectory(filePath: string): string | undefined {
     return folder?.uri.fsPath;
 }
 
-function runCommand(
+async function runCommand(
     label: string,
     commandConfig: CommandConfig,
     filePath: string,
@@ -282,12 +379,13 @@ function runCommand(
     const command = expandHome(applyCommandTemplate(commandConfig.command, filePath));
     const args = buildArgs(commandConfig.args, filePath);
     const cwd = resolveWorkingDirectory(filePath);
+    const env = await getCommandEnv();
     output.appendLine(`[${label}] ${formatCommand(command, args)}`);
 
     return new Promise((resolve) => {
         let proc: cp.ChildProcess;
         try {
-            proc = cp.spawn(command, args, { cwd });
+            proc = cp.spawn(command, args, { cwd, env });
         } catch (err) {
             resolve({ code: null, stdout: '', stderr: '', error: String(err) });
             return;
