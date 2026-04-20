@@ -3,11 +3,12 @@ import * as vscode from 'vscode';
 interface RawItem {
     line: number;
     column?: number;
+    col?: number;
     message: string;
     level?: string;
     severity?: number | string;
     code?: string;
-    rule?: string;
+    rule?: string | { id?: unknown };
     ruleId?: string;
     source?: string;
     type?: string;
@@ -98,9 +99,39 @@ function normalizeRawItems(raw: unknown[]): unknown[] {
                 if (typeof m.line !== 'number') {
                     m.line = 1;
                 }
+                if (typeof m.column !== 'number' && typeof m.col === 'number') {
+                    m.column = m.col;
+                }
+                if (
+                    typeof m.rule !== 'string' &&
+                    typeof m.rule === 'object' &&
+                    m.rule !== null &&
+                    typeof (m.rule as Record<string, unknown>).id === 'string'
+                ) {
+                    m.code = (m.rule as Record<string, unknown>).id;
+                }
                 items.push(m);
             }
             continue;
+        }
+
+        // Stylelint parse errors: [{parseErrors: [{line, column, text, type}]}]
+        if (Array.isArray(obj.parseErrors)) {
+            for (const p of obj.parseErrors) {
+                if (typeof p !== 'object' || p === null) {
+                    continue;
+                }
+                const parseError = p as Record<string, unknown>;
+                if (typeof parseError.text === 'string') {
+                    items.push({
+                        line: parseError.line,
+                        column: parseError.column,
+                        message: parseError.text,
+                        level: parseError.type,
+                        code: parseError.stylelintType,
+                    });
+                }
+            }
         }
 
         // Stylelint: [{warnings: [{line, column, text, severity, rule}]}]
@@ -253,13 +284,18 @@ export function parseJsonOutput(stdout: string, source: string): vscode.Diagnost
 
     return flatItems.filter(isRawItem).map((item) => {
         const line = Math.max(0, item.line - 1);
-        const col = Math.max(0, (item.column ?? 1) - 1);
+        const col = Math.max(0, (item.column ?? item.col ?? 1) - 1);
         const range = new vscode.Range(line, col, line, col + 1);
         const severity = parseSeverity(item.level ?? item.severity ?? item.type);
         const diagnostic = new vscode.Diagnostic(range, item.message, severity);
         diagnostic.source = source;
-        if (item.code ?? item.rule ?? item.ruleId) {
-            diagnostic.code = String(item.code ?? item.rule ?? item.ruleId);
+        const nestedRuleId =
+            typeof item.rule === 'object' && item.rule !== null && typeof item.rule.id === 'string'
+                ? item.rule.id
+                : undefined;
+        const code = item.code ?? (typeof item.rule === 'string' ? item.rule : undefined) ?? item.ruleId ?? nestedRuleId;
+        if (code !== undefined) {
+            diagnostic.code = String(code);
         }
         return diagnostic;
     });
