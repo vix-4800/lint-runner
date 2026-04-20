@@ -75,9 +75,10 @@
                 "default": "onSave",
                 "enum": [
                   "onSave",
+                  "onOpen",
                   "manual"
                 ],
-                "description": "Default run mode for linters in this target."
+                "description": "Default run mode for linters in this target. 'onOpen' runs automatically when a file opens."
               },
               "preCommands": {
                 "type": "array",
@@ -210,9 +211,10 @@
                       "type": "string",
                       "enum": [
                         "onSave",
+                        "onOpen",
                         "manual"
                       ],
-                      "description": "Override target run mode for this linter."
+                      "description": "Override target run mode for this linter. 'onOpen' runs automatically when a file opens."
                     },
                     "showDiagnosticCodes": {
                       "type": "boolean",
@@ -370,9 +372,10 @@
                 "type": "string",
                 "enum": [
                   "onSave",
+                  "onOpen",
                   "manual"
                 ],
-                "description": "'onSave' runs automatically on save; 'manual' only runs via the command."
+                "description": "'onOpen' runs automatically when a file opens; 'onSave' runs automatically on save; 'manual' only runs via the command."
               },
               "showDiagnosticCodes": {
                 "type": "boolean",

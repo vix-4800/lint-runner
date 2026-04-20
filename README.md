@@ -6,6 +6,7 @@ VS Code расширение для запуска внешних CLI линте
 
 - запуск линтеров вручную через `LintRunner: Run Linters`;
 - запуск автофиксеров вручную через `LintRunner: Run Fixers`;
+- запуск линтеров при открытии файла;
 - запуск линтеров при сохранении файла;
 - выбор линтеров по glob-паттернам файла;
 - подстановка command variables в команды и аргументы;
@@ -49,7 +50,7 @@ VS Code расширение для запуска внешних CLI линте
 | --------------------- | ---------------------- | ------------ | ----------------------------------------------------------------------------------- |
 | `name`                | `string`               | да           | Имя target в LintRunner output.                                                     |
 | `filePatterns`        | `string[]`             | да           | Glob-паттерны файлов. Проверяется имя файла, workspace-relative path и полный путь. |
-| `run`                 | `"onSave" \| "manual"` | нет          | Режим запуска по умолчанию для linters. По умолчанию `onSave`.                      |
+| `run`                 | `"onOpen" \| "onSave" \| "manual"` | нет          | Режим запуска по умолчанию для linters. По умолчанию `onSave`.                      |
 | `preCommands`         | `CommandConfig[]`      | нет          | Команды, которые выполняются один раз перед linters target.                         |
 | `linters`             | `TargetLinterConfig[]` | нет          | Команды линтеров для target.                                                        |
 | `fixers`              | `CommandConfig[]`      | нет          | Команды автофиксеров для `LintRunner: Run Fixers`.                                  |
@@ -63,7 +64,7 @@ VS Code расширение для запуска внешних CLI линте
 | `command`             | `string`               | да           | Команда линтера. Должна быть в `PATH` или абсолютным путем. Поддерживает `~` и command variables. |
 | `args`                | `string[]`             | да           | Аргументы команды. Поддерживает `~` и command variables.                                          |
 | `parser`              | `string`               | да           | Parser вывода линтера.                                                                            |
-| `run`                 | `"onSave" \| "manual"` | нет          | Переопределяет `run` target.                                                                      |
+| `run`                 | `"onOpen" \| "onSave" \| "manual"` | нет          | Переопределяет `run` target.                                                                      |
 | `preCommands`         | `CommandConfig[]`      | нет          | Команды перед основным линтером.                                                                  |
 | `fixCommand`          | `CommandConfig`        | нет          | Legacy per-linter auto-fixer. Для новых конфигов лучше `fixers` на target.                        |
 | `showDiagnosticCodes` | `boolean`              | нет          | Переопределяет `showDiagnosticCodes` target.                                                      |
@@ -126,7 +127,7 @@ LintRunner подставляет переменные в `command`, `args`, `pr
 ## Workspace Trust
 
 LintRunner не запускает команды из workspace config, пока workspace не trusted. В untrusted workspace команды
-`LintRunner: Run Linters`, `LintRunner: Run Fixers` и запуск при сохранении пропускаются.
+`LintRunner: Run Linters`, `LintRunner: Run Fixers`, запуск при открытии и запуск при сохранении пропускаются.
 
 ## Fix Commands
 

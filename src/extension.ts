@@ -26,6 +26,15 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(diagnostics, output, statusBar);
 
     context.subscriptions.push(
+        vscode.workspace.onDidOpenTextDocument((doc) => {
+            if (!canRunWorkspaceCommands(false)) {
+                return;
+            }
+            runLinters(doc.fileName, 'onOpen', diagnostics, output, statusBar);
+        })
+    );
+
+    context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument((doc) => {
             if (!canRunWorkspaceCommands(false)) {
                 return;

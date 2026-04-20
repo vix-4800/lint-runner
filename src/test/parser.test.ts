@@ -294,6 +294,29 @@ suite('Linter Runner', () => {
         assert.strictEqual(targets[0].fixers.length, 1);
     });
 
+    test('resolves onOpen run mode', () => {
+        const targets = resolveConfiguredTargets(
+            [
+                {
+                    name: 'Markdown',
+                    filePatterns: ['*.md'],
+                    run: 'onOpen',
+                    linters: [
+                        {
+                            name: 'markdownlint',
+                            command: 'markdownlint',
+                            args: ['${file}'],
+                            parser: 'json',
+                        },
+                    ],
+                },
+            ],
+            []
+        );
+
+        assert.strictEqual(targets[0].linters[0].run, 'onOpen');
+    });
+
     test('keeps legacy linter-first configs working as targets', () => {
         const targets = resolveConfiguredTargets([], [
             {

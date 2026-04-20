@@ -22,6 +22,7 @@ const SUPPORTED_PARSERS = [
 ] as const;
 
 type ParserName = (typeof SUPPORTED_PARSERS)[number];
+type RunMode = 'manual' | 'onSave' | 'onOpen';
 
 export interface CommandConfig {
     name?: string;
@@ -34,7 +35,7 @@ export interface TargetLinterConfig {
     command: string;
     args: string[];
     parser: ParserName | string;
-    run?: 'manual' | 'onSave';
+    run?: RunMode;
     preCommands?: CommandConfig[];
     fixCommand?: CommandConfig;
     showDiagnosticCodes?: boolean;
@@ -42,13 +43,13 @@ export interface TargetLinterConfig {
 
 export interface LinterConfig extends TargetLinterConfig {
     filePatterns: string[];
-    run: 'manual' | 'onSave';
+    run: RunMode;
 }
 
 export interface TargetConfig {
     name: string;
     filePatterns: string[];
-    run?: 'manual' | 'onSave';
+    run?: RunMode;
     preCommands?: CommandConfig[];
     linters?: TargetLinterConfig[];
     fixers?: CommandConfig[];
@@ -465,12 +466,12 @@ async function spawnLinter(
 async function spawnTargetLinters(
     target: ResolvedTargetConfig,
     filePath: string,
-    trigger: 'manual' | 'onSave',
+    trigger: RunMode,
     output: vscode.OutputChannel,
     statusBar: vscode.StatusBarItem
 ): Promise<vscode.Diagnostic[]> {
     const matchingLinters = target.linters.filter(
-        (linter) => trigger === 'manual' || linter.run === 'onSave'
+        (linter) => trigger === 'manual' || linter.run === trigger
     );
     if (matchingLinters.length === 0) {
         return [];
@@ -541,7 +542,7 @@ async function runTargetFixer(
 
 export function runLinters(
     filePath: string,
-    trigger: 'manual' | 'onSave',
+    trigger: RunMode,
     diagnostics: vscode.DiagnosticCollection,
     output: vscode.OutputChannel,
     statusBar: vscode.StatusBarItem
