@@ -76,14 +76,14 @@
               },
               "command": {
                 "type": "string",
-                "description": "Executable to invoke. Must be on PATH or an absolute path. Supports ~ for the home directory."
+                "description": "Executable to invoke. Must be on PATH or an absolute path. Supports ~ and command variables."
               },
               "args": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 },
-                "description": "Arguments passed to the command. Use ${file} for the file path."
+                "description": "Arguments passed to the command. Supports command variables."
               },
               "preCommands": {
                 "type": "array",
@@ -103,14 +103,14 @@
                     },
                     "command": {
                       "type": "string",
-                      "description": "Executable to invoke before this linter. Must be on PATH or an absolute path. Supports ~ for the home directory."
+                      "description": "Executable to invoke before this linter. Must be on PATH or an absolute path. Supports ~ and command variables."
                     },
                     "args": {
                       "type": "array",
                       "items": {
                         "type": "string"
                       },
-                      "description": "Arguments passed to the pre-command. Use ${file} for the file path."
+                      "description": "Arguments passed to the pre-command. Supports command variables."
                     }
                   }
                 }
@@ -130,14 +130,14 @@
                   },
                   "command": {
                     "type": "string",
-                    "description": "Executable to invoke for auto-fixing. Must be on PATH or an absolute path. Supports ~ for the home directory."
+                    "description": "Executable to invoke for auto-fixing. Must be on PATH or an absolute path. Supports ~ and command variables."
                   },
                   "args": {
                     "type": "array",
                     "items": {
                       "type": "string"
                     },
-                    "description": "Arguments passed to the fix command. Use ${file} for the file path."
+                    "description": "Arguments passed to the fix command. Supports command variables."
                   }
                 }
               },

@@ -12,6 +12,17 @@ const runningLinters = new Map<string, number>();
 const activeRunIds = new Map<string, number>();
 let nextRunId = 0;
 
+const SUPPORTED_PARSERS = [
+    'json',
+    'jsonlint',
+    'parsable',
+    'xmllint',
+    'linthtml',
+    'ansible-lint',
+] as const;
+
+type ParserName = (typeof SUPPORTED_PARSERS)[number];
+
 export interface CommandConfig {
     name?: string;
     command: string;
@@ -23,14 +34,14 @@ export interface LinterConfig {
     filePatterns: string[];
     command: string;
     args: string[];
-    parser: string;
+    parser: ParserName | string;
     run: 'manual' | 'onSave';
     preCommands?: CommandConfig[];
     fixCommand?: CommandConfig;
     showDiagnosticCodes?: boolean;
 }
 
-interface CommandResult {
+export interface CommandResult {
     code: number | null;
     stdout: string;
     stderr: string;
@@ -81,8 +92,43 @@ function expandHome(value: string): string {
     return value.replace(/(^|=)~(?=\/|$)/, `$1${home}`);
 }
 
+interface CommandTemplateValues {
+    file: string;
+    workspaceFolder: string;
+    relativeFile: string;
+    fileDirname: string;
+    fileBasename: string;
+    fileBasenameNoExtension: string;
+    fileExtname: string;
+}
+
+function buildCommandTemplateValues(filePath: string): CommandTemplateValues {
+    const workspaceFolder = resolveWorkingDirectory(filePath) ?? '';
+    const fileExtname = path.extname(filePath);
+    return {
+        file: filePath,
+        workspaceFolder,
+        relativeFile: workspaceFolder === '' ? filePath : path.relative(workspaceFolder, filePath),
+        fileDirname: path.dirname(filePath),
+        fileBasename: path.basename(filePath),
+        fileBasenameNoExtension: path.basename(filePath, fileExtname),
+        fileExtname,
+    };
+}
+
+export function applyCommandTemplate(value: string, filePath: string): string {
+    const values = buildCommandTemplateValues(filePath);
+    return value.replace(/\$\{(\w+)\}/g, (match, key: string) => {
+        if (Object.hasOwn(values, key)) {
+            return values[key as keyof CommandTemplateValues];
+        }
+
+        return match;
+    });
+}
+
 function buildArgs(args: string[], filePath: string): string[] {
-    return args.map((arg) => expandHome(arg.replace('${file}', filePath)));
+    return args.map((arg) => expandHome(applyCommandTemplate(arg, filePath)));
 }
 
 function formatCommandPart(value: string): string {
@@ -242,23 +288,39 @@ async function runPreCommands(
     return true;
 }
 
-function parseLinterOutput(linter: LinterConfig, result: CommandResult): vscode.Diagnostic[] {
+export function parseLinterOutput(
+    linter: LinterConfig,
+    result: CommandResult
+): vscode.Diagnostic[] {
     let diagnostics: vscode.Diagnostic[];
-    if (linter.parser === 'json') {
-        diagnostics = parseJsonOutput(result.stdout, linter.name);
-        if (diagnostics.length === 0) {
-            diagnostics = parseJsonOutput(result.stderr, linter.name);
-        }
-    } else if (linter.parser === 'jsonlint') {
-        diagnostics = parseJsonlintOutput(result.stdout, result.stderr, linter.name);
-    } else if (linter.parser === 'ansible-lint') {
-        diagnostics = parseAnsibleLintOutput(result.stdout, linter.name);
-    } else if (linter.parser === 'parsable') {
-        diagnostics = parseParsableOutput(result.stdout, linter.name);
-    } else if (linter.parser === 'xmllint') {
-        diagnostics = parseXmllintOutput(result.stderr, linter.name);
-    } else {
-        diagnostics = parseLinthtmlOutput(result.stdout, linter.name);
+
+    switch (linter.parser) {
+        case 'json':
+            diagnostics = parseJsonOutput(result.stdout, linter.name);
+            if (diagnostics.length === 0) {
+                diagnostics = parseJsonOutput(result.stderr, linter.name);
+            }
+            break;
+        case 'jsonlint':
+            diagnostics = parseJsonlintOutput(result.stdout, result.stderr, linter.name);
+            break;
+        case 'ansible-lint':
+            diagnostics = parseAnsibleLintOutput(result.stdout, linter.name);
+            break;
+        case 'parsable':
+            diagnostics = parseParsableOutput(result.stdout, linter.name);
+            break;
+        case 'xmllint':
+            diagnostics = parseXmllintOutput(result.stderr, linter.name);
+            break;
+        case 'linthtml':
+            diagnostics = parseLinthtmlOutput(result.stdout, linter.name);
+            break;
+        default:
+            vscode.window.showWarningMessage(
+                `LintRunner: unknown parser '${linter.parser}' in linter '${linter.name}'.`
+            );
+            return [];
     }
 
     if (linter.showDiagnosticCodes === false) {

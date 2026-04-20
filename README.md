@@ -8,7 +8,7 @@ VS Code расширение для запуска внешних CLI линте
 - запуск автофиксеров вручную через `LintRunner: Run Fixers`;
 - запуск линтеров при сохранении файла;
 - выбор линтеров по glob-паттернам файла;
-- подстановка `${file}` в аргументы;
+- подстановка command variables в команды и аргументы;
 - поддержка `~` в путях команд и аргументов;
 - pre-commands перед основным линтером;
 - скрытие diagnostic rule codes в Problems;
@@ -44,8 +44,8 @@ VS Code расширение для запуска внешних CLI линте
 | --- | --- | --- | --- |
 | `name` | `string` | да | Имя источника в Problems. |
 | `filePatterns` | `string[]` | да | Glob-паттерны файлов. Проверяется имя файла, workspace-relative path и полный путь. |
-| `command` | `string` | да | Команда линтера. Должна быть в `PATH` или абсолютным путем. |
-| `args` | `string[]` | да | Аргументы команды. Поддерживает `${file}` и `~`. |
+| `command` | `string` | да | Команда линтера. Должна быть в `PATH` или абсолютным путем. Поддерживает `~` и command variables. |
+| `args` | `string[]` | да | Аргументы команды. Поддерживает `~` и command variables. |
 | `parser` | `string` | да | Parser вывода линтера. |
 | `run` | `"onSave" \| "manual"` | да | Запуск при сохранении или только вручную. |
 | `preCommands` | `CommandConfig[]` | нет | Команды перед основным линтером. |
@@ -79,8 +79,28 @@ VS Code расширение для запуска внешних CLI линте
 | Поле | Тип | Обязательное | Описание |
 | --- | --- | --- | --- |
 | `name` | `string` | нет | Имя команды в LintRunner output. |
-| `command` | `string` | да | Исполняемый файл. |
-| `args` | `string[]` | да | Аргументы. Поддерживает `${file}` и `~`. |
+| `command` | `string` | да | Исполняемый файл. Поддерживает `~` и command variables. |
+| `args` | `string[]` | да | Аргументы. Поддерживает `~` и command variables. |
+
+## Command Variables
+
+LintRunner подставляет переменные в `command`, `args`, `preCommands[*].command`, `preCommands[*].args`, `fixCommand.command` и `fixCommand.args`.
+
+| Переменная | Значение |
+| --- | --- |
+| `${file}` | Полный путь к файлу. |
+| `${workspaceFolder}` | Путь к workspace folder файла. Пустая строка, если файл вне workspace. |
+| `${relativeFile}` | Путь файла относительно workspace folder. Если файл вне workspace, полный путь. |
+| `${fileDirname}` | Директория файла. |
+| `${fileBasename}` | Имя файла с расширением. |
+| `${fileBasenameNoExtension}` | Имя файла без расширения. |
+| `${fileExtname}` | Расширение файла, включая точку. |
+
+Неизвестные переменные остаются без изменений.
+
+## Workspace Trust
+
+LintRunner не запускает команды из workspace config, пока workspace не trusted. В untrusted workspace команды `LintRunner: Run Linters`, `LintRunner: Run Fixers` и запуск при сохранении пропускаются.
 
 ## Fix Commands
 

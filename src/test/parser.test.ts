@@ -1,5 +1,7 @@
 import * as assert from 'assert';
+import * as path from 'path';
 import * as vscode from 'vscode';
+import { applyCommandTemplate, parseLinterOutput } from '../linterRunner.js';
 import { parseAnsibleLintOutput } from '../parser/ansibleLintParser.js';
 import { parseJsonOutput } from '../parser/jsonParser.js';
 import { parseJsonlintOutput } from '../parser/jsonlintParser.js';
@@ -199,6 +201,56 @@ suite('JSON Parser', () => {
 
     test('invalid JSON returns empty', () => {
         assert.strictEqual(parseJsonOutput('not json at all', 'test').length, 0);
+    });
+});
+
+suite('Linter Runner', () => {
+    test('expands command variables and leaves unknown variables unchanged', () => {
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        const filePath = path.join(workspaceRoot, 'src', 'example.test.ts');
+        const workspaceFolder =
+            vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath))?.uri.fsPath ?? '';
+        const relativeFile =
+            workspaceFolder === '' ? filePath : path.relative(workspaceFolder, filePath);
+        const result = applyCommandTemplate(
+            '${file}|${file}|${workspaceFolder}|${relativeFile}|${fileDirname}|${fileBasename}|${fileBasenameNoExtension}|${fileExtname}|${unknown}',
+            filePath
+        );
+
+        assert.strictEqual(
+            result,
+            [
+                filePath,
+                filePath,
+                workspaceFolder,
+                relativeFile,
+                path.join(workspaceRoot, 'src'),
+                'example.test.ts',
+                'example.test',
+                '.ts',
+                '${unknown}',
+            ].join('|')
+        );
+    });
+
+    test('unknown parser returns no diagnostics', () => {
+        const diagnostics = parseLinterOutput(
+            {
+                name: 'unknown',
+                filePatterns: ['*.html'],
+                command: 'lint',
+                args: ['${file}'],
+                parser: 'missing-parser',
+                run: 'manual',
+            },
+            {
+                code: 1,
+                stdout: '  2:1  error  message  rule-id',
+                stderr: '',
+            }
+        );
+
+        assert.strictEqual(diagnostics.length, 0);
     });
 });
 
