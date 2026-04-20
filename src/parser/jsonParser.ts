@@ -133,6 +133,7 @@ function normalizeRawItems(raw: unknown[]): unknown[] {
                     });
                 }
             }
+            continue;
         }
 
         // Stylelint: [{warnings: [{line, column, text, severity, rule}]}]
@@ -279,7 +280,11 @@ function parseJsonPayload(output: string): unknown {
         }
 
         const close = open === '{' ? '}' : ']';
-        for (let end = trimmed.lastIndexOf(close); end > start; end = trimmed.lastIndexOf(close, end - 1)) {
+        for (
+            let end = trimmed.lastIndexOf(close);
+            end > start;
+            end = trimmed.lastIndexOf(close, end - 1)
+        ) {
             try {
                 return JSON.parse(trimmed.slice(start, end + 1));
             } catch {
