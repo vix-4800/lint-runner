@@ -135,6 +135,13 @@ function stopLinterStatus(name: string, statusBar: vscode.StatusBarItem): void {
     updateStatusBar(statusBar);
 }
 
+const TIMEOUT_MS = 30_000;
+
+function resolveWorkingDirectory(filePath: string): string | undefined {
+    const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath));
+    return folder?.uri.fsPath;
+}
+
 function runCommand(
     label: string,
     commandConfig: CommandConfig,
@@ -143,12 +150,13 @@ function runCommand(
 ): Promise<CommandResult> {
     const command = expandHome(commandConfig.command);
     const args = buildArgs(commandConfig.args, filePath);
+    const cwd = resolveWorkingDirectory(filePath);
     output.appendLine(`[${label}] ${formatCommand(command, args)}`);
 
     return new Promise((resolve) => {
         let proc: cp.ChildProcess;
         try {
-            proc = cp.spawn(command, args);
+            proc = cp.spawn(command, args, { cwd });
         } catch (err) {
             resolve({ code: null, stdout: '', stderr: '', error: String(err) });
             return;
@@ -157,6 +165,17 @@ function runCommand(
         let stdout = '';
         let stderr = '';
         let done = false;
+
+        const timer = setTimeout(() => {
+            if (done) {
+                return;
+            }
+            done = true;
+            proc.kill();
+            output.appendLine(`[${label}] killed: timeout after ${TIMEOUT_MS}ms`);
+            resolve({ code: null, stdout, stderr, error: 'timeout' });
+        }, TIMEOUT_MS);
+
         proc.stdout?.on('data', (chunk: Buffer) => {
             stdout += chunk.toString();
         });
@@ -169,6 +188,7 @@ function runCommand(
                 return;
             }
             done = true;
+            clearTimeout(timer);
             resolve({ code: null, stdout, stderr, error: err.message });
         });
 
@@ -177,6 +197,7 @@ function runCommand(
                 return;
             }
             done = true;
+            clearTimeout(timer);
             resolve({ code, stdout, stderr });
         });
     });
@@ -226,10 +247,8 @@ function parseLinterOutput(linter: LinterConfig, result: CommandResult): vscode.
         diagnostics = parseParsableOutput(result.stdout, linter.name);
     } else if (linter.parser === 'xmllint') {
         diagnostics = parseXmllintOutput(result.stderr, linter.name);
-    } else if (linter.parser === 'linthtml') {
-        diagnostics = parseLinthtmlOutput(result.stdout, linter.name);
     } else {
-        diagnostics = [];
+        diagnostics = parseLinthtmlOutput(result.stdout, linter.name);
     }
 
     if (linter.showDiagnosticCodes === false) {
