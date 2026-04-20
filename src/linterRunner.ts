@@ -29,16 +29,38 @@ export interface CommandConfig {
     args: string[];
 }
 
-export interface LinterConfig {
+export interface TargetLinterConfig {
     name: string;
-    filePatterns: string[];
     command: string;
     args: string[];
     parser: ParserName | string;
-    run: 'manual' | 'onSave';
+    run?: 'manual' | 'onSave';
     preCommands?: CommandConfig[];
     fixCommand?: CommandConfig;
     showDiagnosticCodes?: boolean;
+}
+
+export interface LinterConfig extends TargetLinterConfig {
+    filePatterns: string[];
+    run: 'manual' | 'onSave';
+}
+
+export interface TargetConfig {
+    name: string;
+    filePatterns: string[];
+    run?: 'manual' | 'onSave';
+    preCommands?: CommandConfig[];
+    linters?: TargetLinterConfig[];
+    fixers?: CommandConfig[];
+    showDiagnosticCodes?: boolean;
+}
+
+export interface ResolvedTargetConfig {
+    name: string;
+    filePatterns: string[];
+    preCommands: CommandConfig[];
+    linters: LinterConfig[];
+    fixers: CommandConfig[];
 }
 
 export interface CommandResult {
@@ -85,6 +107,50 @@ function matchesPatterns(filePath: string, patterns: string[]): boolean {
         const re = globToRegex(pattern);
         return re.test(fileName) || re.test(relativePath) || re.test(normalizedFilePath);
     });
+}
+
+function normalizeTargetConfig(target: TargetConfig): ResolvedTargetConfig {
+    const targetRun = target.run ?? 'onSave';
+    const targetShowDiagnosticCodes = target.showDiagnosticCodes;
+    const linters = (target.linters ?? []).map((linter) => ({
+        ...linter,
+        filePatterns: target.filePatterns,
+        run: linter.run ?? targetRun,
+        showDiagnosticCodes: linter.showDiagnosticCodes ?? targetShowDiagnosticCodes,
+    }));
+
+    return {
+        name: target.name,
+        filePatterns: target.filePatterns,
+        preCommands: target.preCommands ?? [],
+        linters,
+        fixers: target.fixers ?? [],
+    };
+}
+
+function legacyLinterToTarget(linter: LinterConfig): ResolvedTargetConfig {
+    return {
+        name: linter.name,
+        filePatterns: linter.filePatterns,
+        preCommands: [],
+        linters: [linter],
+        fixers: [],
+    };
+}
+
+export function resolveConfiguredTargets(
+    targets: TargetConfig[],
+    legacyLinters: LinterConfig[]
+): ResolvedTargetConfig[] {
+    return [...targets.map(normalizeTargetConfig), ...legacyLinters.map(legacyLinterToTarget)];
+}
+
+function getConfiguredTargets(): ResolvedTargetConfig[] {
+    const config = vscode.workspace.getConfiguration('lintRunner');
+    const targets = config.get<TargetConfig[]>('targets') ?? [];
+    const legacyLinters = config.get<LinterConfig[]>('linters') ?? [];
+
+    return resolveConfiguredTargets(targets, legacyLinters);
 }
 
 function expandHome(value: string): string {
@@ -270,17 +336,18 @@ function logCommandResult(
 }
 
 async function runPreCommands(
-    linter: LinterConfig,
+    ownerName: string,
+    preCommands: CommandConfig[],
     filePath: string,
     output: vscode.OutputChannel
 ): Promise<boolean> {
-    for (const preCommand of linter.preCommands ?? []) {
+    for (const preCommand of preCommands) {
         const preCommandName = preCommand.name ?? preCommand.command;
-        const label = `${linter.name}:pre:${preCommandName}`;
+        const label = `${ownerName}:pre:${preCommandName}`;
         const result = await runCommand(label, preCommand, filePath, output);
         logCommandResult(label, result, output);
         if (result.code !== 0) {
-            output.appendLine(`[${linter.name}] skipped: pre-command '${preCommandName}' failed`);
+            output.appendLine(`[${ownerName}] skipped: pre-command '${preCommandName}' failed`);
             return false;
         }
     }
@@ -368,28 +435,62 @@ async function spawnLinter(
     linter: LinterConfig,
     filePath: string,
     output: vscode.OutputChannel,
-    statusBar: vscode.StatusBarItem,
-    onDone: (diags: vscode.Diagnostic[]) => void
-): Promise<void> {
+    statusBar: vscode.StatusBarItem
+): Promise<vscode.Diagnostic[]> {
     startLinterStatus(linter.name, statusBar);
     try {
-        const shouldRunLinter = await runPreCommands(linter, filePath, output);
+        const shouldRunLinter = await runPreCommands(
+            linter.name,
+            linter.preCommands ?? [],
+            filePath,
+            output
+        );
         if (!shouldRunLinter) {
-            onDone([]);
-            return;
+            return [];
         }
 
         const result = await runCommand(linter.name, linter, filePath, output);
         const diags = parseLinterOutput(linter, result);
         await moveLineStartDiagnosticsToFirstNonWhitespace(filePath, diags);
         logCommandResult(linter.name, result, output, diags.length);
-        onDone(diags);
+        return diags;
     } catch (err) {
         output.appendLine(`[${linter.name}] failed: ${String(err)}`);
-        onDone([]);
+        return [];
     } finally {
         stopLinterStatus(linter.name, statusBar);
     }
+}
+
+async function spawnTargetLinters(
+    target: ResolvedTargetConfig,
+    filePath: string,
+    trigger: 'manual' | 'onSave',
+    output: vscode.OutputChannel,
+    statusBar: vscode.StatusBarItem
+): Promise<vscode.Diagnostic[]> {
+    const matchingLinters = target.linters.filter(
+        (linter) => trigger === 'manual' || linter.run === 'onSave'
+    );
+    if (matchingLinters.length === 0) {
+        return [];
+    }
+
+    const shouldRunLinters = await runPreCommands(
+        target.name,
+        target.preCommands,
+        filePath,
+        output
+    );
+    if (!shouldRunLinters) {
+        return [];
+    }
+
+    const diagnostics = await Promise.all(
+        matchingLinters.map((linter) => spawnLinter(linter, filePath, output, statusBar))
+    );
+
+    return diagnostics.flat();
 }
 
 async function runFixer(
@@ -417,6 +518,27 @@ async function runFixer(
     }
 }
 
+async function runTargetFixer(
+    targetName: string,
+    fixer: CommandConfig,
+    filePath: string,
+    output: vscode.OutputChannel,
+    statusBar: vscode.StatusBarItem
+): Promise<void> {
+    const fixerName = fixer.name ?? fixer.command;
+    const label = `${targetName}:fix:${fixerName}`;
+    const statusName = `${targetName}:fix`;
+    startLinterStatus(statusName, statusBar);
+    try {
+        const result = await runCommand(label, fixer, filePath, output);
+        logCommandResult(label, result, output);
+    } catch (err) {
+        output.appendLine(`[${label}] failed: ${String(err)}`);
+    } finally {
+        stopLinterStatus(statusName, statusBar);
+    }
+}
+
 export function runLinters(
     filePath: string,
     trigger: 'manual' | 'onSave',
@@ -424,42 +546,35 @@ export function runLinters(
     output: vscode.OutputChannel,
     statusBar: vscode.StatusBarItem
 ): void {
-    const config = vscode.workspace.getConfiguration('lintRunner');
-    const linters = config.get<LinterConfig[]>('linters') ?? [];
+    const targets = getConfiguredTargets();
     const uri = vscode.Uri.file(filePath);
     const runId = nextRunId++;
     activeRunIds.set(filePath, runId);
     diagnostics.delete(uri);
 
-    const matching = linters.filter(
-        (l) =>
-            matchesPatterns(filePath, l.filePatterns) &&
-            (trigger === 'manual' || l.run === 'onSave')
-    );
+    const matching = targets.filter((target) => matchesPatterns(filePath, target.filePatterns));
 
     if (matching.length === 0) {
         activeRunIds.delete(filePath);
         return;
     }
 
-    const allDiags: vscode.Diagnostic[] = [];
-    let remaining = matching.length;
-
-    const onLinterDone = (diags: vscode.Diagnostic[]): void => {
-        allDiags.push(...diags);
-        remaining--;
-        if (remaining === 0) {
+    Promise.all(
+        matching.map((target) => spawnTargetLinters(target, filePath, trigger, output, statusBar))
+    )
+        .then((allDiags) => {
             if (activeRunIds.get(filePath) !== runId) {
                 return;
             }
             activeRunIds.delete(filePath);
-            diagnostics.set(uri, allDiags);
-        }
-    };
-
-    for (const linter of matching) {
-        spawnLinter(linter, filePath, output, statusBar, onLinterDone);
-    }
+            diagnostics.set(uri, allDiags.flat());
+        })
+        .then(undefined, (err: unknown) => {
+            if (activeRunIds.get(filePath) === runId) {
+                activeRunIds.delete(filePath);
+            }
+            output.appendLine(`[LintRunner] failed: ${String(err)}`);
+        });
 }
 
 export async function runFixers(
@@ -467,15 +582,24 @@ export async function runFixers(
     output: vscode.OutputChannel,
     statusBar: vscode.StatusBarItem
 ): Promise<number> {
-    const config = vscode.workspace.getConfiguration('lintRunner');
-    const linters = config.get<LinterConfig[]>('linters') ?? [];
-    const matching = linters.filter(
-        (l) => matchesPatterns(filePath, l.filePatterns) && l.fixCommand !== undefined
-    );
+    const targets = getConfiguredTargets();
+    const matching = targets.filter((target) => matchesPatterns(filePath, target.filePatterns));
+    let fixersRun = 0;
 
-    for (const linter of matching) {
-        await runFixer(linter, filePath, output, statusBar);
+    for (const target of matching) {
+        for (const fixer of target.fixers) {
+            fixersRun++;
+            await runTargetFixer(target.name, fixer, filePath, output, statusBar);
+        }
+
+        for (const linter of target.linters) {
+            if (linter.fixCommand === undefined) {
+                continue;
+            }
+            fixersRun++;
+            await runFixer(linter, filePath, output, statusBar);
+        }
     }
 
-    return matching.length;
+    return fixersRun;
 }

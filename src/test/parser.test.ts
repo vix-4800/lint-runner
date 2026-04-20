@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { applyCommandTemplate, parseLinterOutput } from '../linterRunner.js';
+import { applyCommandTemplate, parseLinterOutput, resolveConfiguredTargets } from '../linterRunner.js';
 import { parseAnsibleLintOutput } from '../parser/ansibleLintParser.js';
 import { parseJsonOutput } from '../parser/jsonParser.js';
 import { parseJsonlintOutput } from '../parser/jsonlintParser.js';
@@ -251,6 +251,65 @@ suite('Linter Runner', () => {
         );
 
         assert.strictEqual(diagnostics.length, 0);
+    });
+
+    test('resolves target-first configs with shared target settings', () => {
+        const targets = resolveConfiguredTargets(
+            [
+                {
+                    name: 'PHP',
+                    filePatterns: ['*.php'],
+                    run: 'manual',
+                    showDiagnosticCodes: false,
+                    preCommands: [{ name: 'php -l', command: 'php', args: ['-l', '${file}'] }],
+                    linters: [
+                        {
+                            name: 'PHPStan',
+                            command: 'phpstan',
+                            args: ['analyse', '${file}'],
+                            parser: 'json',
+                        },
+                        {
+                            name: 'PHPCS',
+                            command: 'phpcs',
+                            args: ['${file}'],
+                            parser: 'json',
+                            run: 'onSave',
+                            showDiagnosticCodes: true,
+                        },
+                    ],
+                    fixers: [{ name: 'phpcbf', command: 'phpcbf', args: ['${file}'] }],
+                },
+            ],
+            []
+        );
+
+        assert.strictEqual(targets.length, 1);
+        assert.strictEqual(targets[0].linters.length, 2);
+        assert.strictEqual(targets[0].linters[0].run, 'manual');
+        assert.strictEqual(targets[0].linters[0].showDiagnosticCodes, false);
+        assert.strictEqual(targets[0].linters[1].run, 'onSave');
+        assert.strictEqual(targets[0].linters[1].showDiagnosticCodes, true);
+        assert.strictEqual(targets[0].preCommands.length, 1);
+        assert.strictEqual(targets[0].fixers.length, 1);
+    });
+
+    test('keeps legacy linter-first configs working as targets', () => {
+        const targets = resolveConfiguredTargets([], [
+            {
+                name: 'ESLint',
+                filePatterns: ['*.ts'],
+                command: 'eslint',
+                args: ['${file}'],
+                parser: 'json',
+                run: 'onSave',
+            },
+        ]);
+
+        assert.strictEqual(targets.length, 1);
+        assert.strictEqual(targets[0].name, 'ESLint');
+        assert.deepStrictEqual(targets[0].filePatterns, ['*.ts']);
+        assert.strictEqual(targets[0].linters[0].name, 'ESLint');
     });
 });
 

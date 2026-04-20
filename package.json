@@ -47,10 +47,223 @@
     "configuration": {
       "title": "LintRunner",
       "properties": {
+        "lintRunner.targets": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "Target-first configurations. Put shared file patterns and shared pre-commands on a target, then list linters and fixers for that file set.",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "filePatterns"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Target display name shown in LintRunner output."
+              },
+              "filePatterns": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Glob patterns for files this target applies to."
+              },
+              "run": {
+                "type": "string",
+                "default": "onSave",
+                "enum": [
+                  "onSave",
+                  "manual"
+                ],
+                "description": "Default run mode for linters in this target."
+              },
+              "preCommands": {
+                "type": "array",
+                "default": [],
+                "markdownDescription": "Commands to run once before this target's linters. They run sequentially; a non-zero exit code skips target linters.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "command",
+                    "args"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Optional display name shown in the LintRunner output."
+                    },
+                    "command": {
+                      "type": "string",
+                      "description": "Executable to invoke before target linters. Must be on PATH or an absolute path. Supports ~ and command variables."
+                    },
+                    "args": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Arguments passed to the pre-command. Supports command variables."
+                    }
+                  }
+                }
+              },
+              "linters": {
+                "type": "array",
+                "default": [],
+                "description": "Linter commands to run for matching files.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "command",
+                    "args",
+                    "parser"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Display name shown in the Problems panel source column."
+                    },
+                    "command": {
+                      "type": "string",
+                      "description": "Executable to invoke. Must be on PATH or an absolute path. Supports ~ and command variables."
+                    },
+                    "args": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Arguments passed to the command. Supports command variables."
+                    },
+                    "preCommands": {
+                      "type": "array",
+                      "default": [],
+                      "markdownDescription": "Commands to run before this linter. They run sequentially; a non-zero exit code skips the linter.",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "command",
+                          "args"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "description": "Optional display name shown in the LintRunner output."
+                          },
+                          "command": {
+                            "type": "string",
+                            "description": "Executable to invoke before this linter. Must be on PATH or an absolute path. Supports ~ and command variables."
+                          },
+                          "args": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Arguments passed to the pre-command. Supports command variables."
+                          }
+                        }
+                      }
+                    },
+                    "fixCommand": {
+                      "type": "object",
+                      "markdownDescription": "Legacy per-linter command to run when `LintRunner: Run Fixers` is invoked. Prefer target-level `fixers` for new configs.",
+                      "required": [
+                        "command",
+                        "args"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "description": "Optional display name shown in the LintRunner output."
+                        },
+                        "command": {
+                          "type": "string",
+                          "description": "Executable to invoke for auto-fixing. Must be on PATH or an absolute path. Supports ~ and command variables."
+                        },
+                        "args": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Arguments passed to the fix command. Supports command variables."
+                        }
+                      }
+                    },
+                    "parser": {
+                      "type": "string",
+                      "enum": [
+                        "json",
+                        "jsonlint",
+                        "parsable",
+                        "xmllint",
+                        "linthtml",
+                        "ansible-lint"
+                      ],
+                      "description": "Output parser to use."
+                    },
+                    "run": {
+                      "type": "string",
+                      "enum": [
+                        "onSave",
+                        "manual"
+                      ],
+                      "description": "Override target run mode for this linter."
+                    },
+                    "showDiagnosticCodes": {
+                      "type": "boolean",
+                      "markdownDescription": "Override target diagnostic code visibility for this linter."
+                    }
+                  }
+                }
+              },
+              "fixers": {
+                "type": "array",
+                "default": [],
+                "markdownDescription": "Commands to run when `LintRunner: Run Fixers` is invoked for files matching this target.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "command",
+                    "args"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Optional display name shown in the LintRunner output."
+                    },
+                    "command": {
+                      "type": "string",
+                      "description": "Executable to invoke for auto-fixing. Must be on PATH or an absolute path. Supports ~ and command variables."
+                    },
+                    "args": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Arguments passed to the fix command. Supports command variables."
+                    }
+                  }
+                }
+              },
+              "showDiagnosticCodes": {
+                "type": "boolean",
+                "default": true,
+                "markdownDescription": "Default diagnostic code visibility for linters in this target."
+              }
+            }
+          }
+        },
         "lintRunner.linters": {
           "type": "array",
           "default": [],
           "markdownDescription": "List of linter configurations to run against matching files.",
+          "markdownDeprecationMessage": "Use `lintRunner.targets` instead. The legacy linter-first config remains supported for compatibility.",
           "items": {
             "type": "object",
             "required": [
