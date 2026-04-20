@@ -77,15 +77,19 @@ function matchesPatterns(filePath: string, patterns: string[]): boolean {
 
 function expandHome(value: string): string {
     const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
-    return value.replace(/^~(?=\/|$)/, home);
+    return value.replace(/(^|=)~(?=\/|$)/, `$1${home}`);
 }
 
 function buildArgs(args: string[], filePath: string): string[] {
     return args.map((arg) => expandHome(arg.replace('${file}', filePath)));
 }
 
+function formatCommandPart(value: string): string {
+    return /\s/.test(value) ? JSON.stringify(value) : value;
+}
+
 function formatCommand(command: string, args: string[]): string {
-    return [command, ...args].join(' ');
+    return [command, ...args].map(formatCommandPart).join(' ');
 }
 
 function formatCommandStatus(result: CommandResult): string {
@@ -143,7 +147,7 @@ function runCommand(
     return new Promise((resolve) => {
         let proc: cp.ChildProcess;
         try {
-            proc = cp.spawn(command, args, { shell: true });
+            proc = cp.spawn(command, args);
         } catch (err) {
             resolve({ code: null, stdout: '', stderr: '', error: String(err) });
             return;

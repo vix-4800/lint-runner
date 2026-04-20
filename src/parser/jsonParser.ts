@@ -10,6 +10,7 @@ interface RawItem {
     code?: string;
     rule?: string | { id?: unknown };
     ruleId?: string;
+    identifier?: string;
     source?: string;
     type?: string;
 }
@@ -259,16 +260,40 @@ function normalizeRawItems(raw: unknown[]): unknown[] {
     return items;
 }
 
-export function parseJsonOutput(stdout: string, source: string): vscode.Diagnostic[] {
-    const trimmed = stdout.trim();
+function parseJsonPayload(output: string): unknown {
+    const trimmed = output.trim();
     if (trimmed === '') {
-        return [];
+        return undefined;
     }
 
-    let raw: unknown;
     try {
-        raw = JSON.parse(trimmed);
+        return JSON.parse(trimmed);
     } catch {
+        // Some tools print explanatory text before their JSON payload.
+    }
+
+    for (let start = 0; start < trimmed.length; start++) {
+        const open = trimmed[start];
+        if (open !== '{' && open !== '[') {
+            continue;
+        }
+
+        const close = open === '{' ? '}' : ']';
+        for (let end = trimmed.lastIndexOf(close); end > start; end = trimmed.lastIndexOf(close, end - 1)) {
+            try {
+                return JSON.parse(trimmed.slice(start, end + 1));
+            } catch {
+                // Try earlier closing bracket.
+            }
+        }
+    }
+
+    return undefined;
+}
+
+export function parseJsonOutput(stdout: string, source: string): vscode.Diagnostic[] {
+    const raw = parseJsonPayload(stdout);
+    if (raw === undefined) {
         return [];
     }
 
@@ -293,7 +318,12 @@ export function parseJsonOutput(stdout: string, source: string): vscode.Diagnost
             typeof item.rule === 'object' && item.rule !== null && typeof item.rule.id === 'string'
                 ? item.rule.id
                 : undefined;
-        const code = item.code ?? (typeof item.rule === 'string' ? item.rule : undefined) ?? item.ruleId ?? nestedRuleId;
+        const code =
+            item.code ??
+            item.identifier ??
+            (typeof item.rule === 'string' ? item.rule : undefined) ??
+            item.ruleId ??
+            nestedRuleId;
         if (code !== undefined) {
             diagnostic.code = String(code);
         }
