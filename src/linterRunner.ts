@@ -138,7 +138,7 @@ function runCommand(
 ): Promise<CommandResult> {
     const command = expandHome(commandConfig.command);
     const args = buildArgs(commandConfig.args, filePath);
-    output.appendLine(`[${label}] run: ${formatCommand(command, args)}`);
+    output.appendLine(`[${label}] ${formatCommand(command, args)}`);
 
     return new Promise((resolve) => {
         let proc: cp.ChildProcess;
@@ -246,7 +246,10 @@ async function moveLineStartDiagnosticsToFirstNonWhitespace(
 
     const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
     for (const diagnostic of diagnostics) {
-        if (diagnostic.range.start.character !== 0 || diagnostic.range.start.line >= document.lineCount) {
+        if (
+            diagnostic.range.start.character !== 0 ||
+            diagnostic.range.start.line >= document.lineCount
+        ) {
             continue;
         }
 
