@@ -15,6 +15,12 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 
     context.subscriptions.push(
+        vscode.workspace.onDidCloseTextDocument((doc) => {
+            diagnostics.delete(doc.uri);
+        })
+    );
+
+    context.subscriptions.push(
         vscode.commands.registerCommand('lintRunner.run', () => {
             const editor = vscode.window.activeTextEditor;
             if (editor === undefined) {
