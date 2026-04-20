@@ -1,0 +1,1 @@
+Before finishing code changes, run npm run compile and npm run lint. For behavior/parser changes, run npm test. Check git status --short and review scoped diff. Do not touch unrelated untracked or modified files.

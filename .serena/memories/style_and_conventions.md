@@ -1,0 +1,1 @@
+TypeScript project with strict tsconfig, ES2022 target, Node16 modules. Existing style uses 4-space indentation, semicolons, single quotes in TS, explicit interfaces/types for configs, small parser functions returning vscode.Diagnostic[]. Keep edits scoped. Prefer existing parser patterns and VS Code APIs.

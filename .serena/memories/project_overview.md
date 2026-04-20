@@ -1,0 +1,1 @@
+LintRunner is a VS Code extension written in TypeScript. It runs configured external CLI linters/fixers for matching files, parses command output, and publishes VS Code diagnostics. Main code lives in src/linterRunner.ts, src/extension.ts, and parser modules under src/parser. Tests live under src/test and run in vscode-test.

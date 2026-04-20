@@ -1,0 +1,7 @@
+- npm run compile: TypeScript compile
+- npm run lint: ESLint over src
+- npm test: compile, lint, then VS Code extension tests via vscode-test
+- rg --files: list project files
+- rg <pattern> src: search source quickly
+- git status --short: check worktree state
+- git diff -- <path>: inspect scoped changes
