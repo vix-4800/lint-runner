@@ -4,6 +4,41 @@ import { runFixers, runLinters } from './linterRunner.js';
 let untrustedWorkspaceWarningShown = false;
 const skipFixersOnSave = new Set<string>();
 
+type OnOpenDocument = Pick<vscode.TextDocument, 'fileName' | 'isUntitled' | 'uri'>;
+type OnOpenEditor = { readonly document: OnOpenDocument };
+
+function documentKey(document: Pick<vscode.TextDocument, 'uri'>): string {
+    return document.uri.toString();
+}
+
+function isUserOpenDocument(document: OnOpenDocument): boolean {
+    return document.uri.scheme === 'file' && !document.isUntitled;
+}
+
+export function collectNewVisibleFileNames(
+    editors: readonly OnOpenEditor[],
+    seenDocumentUris: Set<string>
+): string[] {
+    const fileNames: string[] = [];
+
+    for (const editor of editors) {
+        const document = editor.document;
+        if (!isUserOpenDocument(document)) {
+            continue;
+        }
+
+        const key = documentKey(document);
+        if (seenDocumentUris.has(key)) {
+            continue;
+        }
+
+        seenDocumentUris.add(key);
+        fileNames.push(document.fileName);
+    }
+
+    return fileNames;
+}
+
 function canRunWorkspaceCommands(showRepeatedWarning: boolean): boolean {
     if (vscode.workspace.isTrusted) {
         return true;
@@ -26,12 +61,18 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar.name = 'LintRunner';
     context.subscriptions.push(diagnostics, output, statusBar);
 
+    const seenOnOpenDocumentUris = new Set<string>();
+    collectNewVisibleFileNames(vscode.window.visibleTextEditors, seenOnOpenDocumentUris);
+
     context.subscriptions.push(
-        vscode.workspace.onDidOpenTextDocument((doc) => {
+        vscode.window.onDidChangeVisibleTextEditors((editors) => {
             if (!canRunWorkspaceCommands(false)) {
                 return;
             }
-            runLinters(doc.fileName, 'onOpen', diagnostics, output, statusBar);
+
+            for (const fileName of collectNewVisibleFileNames(editors, seenOnOpenDocumentUris)) {
+                runLinters(fileName, 'onOpen', diagnostics, output, statusBar);
+            }
         })
     );
 
@@ -49,6 +90,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(
         vscode.workspace.onDidCloseTextDocument((doc) => {
+            seenOnOpenDocumentUris.delete(documentKey(doc));
             diagnostics.delete(doc.uri);
         })
     );
