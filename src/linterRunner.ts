@@ -8,7 +8,6 @@ import { parseLinthtmlOutput } from './parser/linthtmlParser.js';
 import { parseParsableOutput } from './parser/parsableParser.js';
 import { parseXmllintOutput } from './parser/xmllintParser.js';
 
-const MAX_STDOUT_PREVIEW_LENGTH = 500;
 const runningLinters = new Map<string, number>();
 
 export interface CommandConfig {
@@ -32,6 +31,7 @@ interface CommandResult {
     code: number | null;
     stdout: string;
     stderr: string;
+    error?: string;
 }
 
 function globToRegex(pattern: string): RegExp {
@@ -73,6 +73,18 @@ function expandHome(value: string): string {
 
 function buildArgs(args: string[], filePath: string): string[] {
     return args.map((arg) => expandHome(arg.replace('${file}', filePath)));
+}
+
+function formatCommand(command: string, args: string[]): string {
+    return [command, ...args].join(' ');
+}
+
+function formatCommandStatus(result: CommandResult): string {
+    if (result.error !== undefined) {
+        return `failed: ${result.error}`;
+    }
+
+    return result.code === 0 ? 'ok' : `exit ${result.code ?? 'null'}`;
 }
 
 function formatRunningLinterName(name: string, count: number): string {
@@ -117,15 +129,14 @@ function runCommand(
 ): Promise<CommandResult> {
     const command = expandHome(commandConfig.command);
     const args = buildArgs(commandConfig.args, filePath);
-    output.appendLine(`[${label}] ${command} ${args.join(' ')}`);
+    output.appendLine(`[${label}] run: ${formatCommand(command, args)}`);
 
     return new Promise((resolve) => {
         let proc: cp.ChildProcess;
         try {
             proc = cp.spawn(command, args, { shell: true });
         } catch (err) {
-            output.appendLine(`[${label}] Failed to start: ${String(err)}`);
-            resolve({ code: null, stdout: '', stderr: '' });
+            resolve({ code: null, stdout: '', stderr: '', error: String(err) });
             return;
         }
 
@@ -144,8 +155,7 @@ function runCommand(
                 return;
             }
             done = true;
-            output.appendLine(`[${label}] Error: ${err.message}`);
-            resolve({ code: null, stdout, stderr });
+            resolve({ code: null, stdout, stderr, error: err.message });
         });
 
         proc.on('close', (code: number | null) => {
@@ -161,19 +171,11 @@ function runCommand(
 function logCommandResult(
     label: string,
     result: CommandResult,
-    output: vscode.OutputChannel
+    output: vscode.OutputChannel,
+    parsedCount?: number
 ): void {
-    if (result.stderr.trim() !== '') {
-        output.appendLine(`[${label}] stderr: ${result.stderr.trim()}`);
-    }
-    output.appendLine(
-        `[${label}] exit code ${result.code ?? 'null'} | stdout bytes: ${result.stdout.length}`
-    );
-    if (result.stdout.length > 0) {
-        output.appendLine(
-            `[${label}] stdout: ${result.stdout.slice(0, MAX_STDOUT_PREVIEW_LENGTH)}`
-        );
-    }
+    const parsedSuffix = parsedCount === undefined ? '' : `, parsed ${parsedCount} diagnostic(s)`;
+    output.appendLine(`[${label}] done: ${formatCommandStatus(result)}${parsedSuffix}`);
 }
 
 async function runPreCommands(
@@ -187,7 +189,7 @@ async function runPreCommands(
         const result = await runCommand(label, preCommand, filePath, output);
         logCommandResult(label, result, output);
         if (result.code !== 0) {
-            output.appendLine(`[${linter.name}] pre-command '${preCommandName}' failed; skipping linter`);
+            output.appendLine(`[${linter.name}] skipped: pre-command '${preCommandName}' failed`);
             return false;
         }
     }
@@ -195,7 +197,7 @@ async function runPreCommands(
     return true;
 }
 
-function parseLinterOutput(linter: LinterConfig, result: CommandResult, output: vscode.OutputChannel): vscode.Diagnostic[] {
+function parseLinterOutput(linter: LinterConfig, result: CommandResult): vscode.Diagnostic[] {
     let diagnostics: vscode.Diagnostic[];
     if (linter.parser === 'json') {
         diagnostics = parseJsonOutput(result.stdout, linter.name);
@@ -211,11 +213,6 @@ function parseLinterOutput(linter: LinterConfig, result: CommandResult, output: 
         diagnostics = parseLinthtmlOutput(result.stdout, linter.name);
     } else {
         diagnostics = [];
-        if (result.stdout.length > 0 || result.stderr.trim().length > 0) {
-            output.appendLine(
-                `[${linter.name}] Parser '${linter.parser}' is not implemented; output was not parsed`
-            );
-        }
     }
 
     if (linter.showDiagnosticCodes === false) {
@@ -243,13 +240,11 @@ async function spawnLinter(
         }
 
         const result = await runCommand(linter.name, linter, filePath, output);
-        logCommandResult(linter.name, result, output);
-
-        const diags = parseLinterOutput(linter, result, output);
-        output.appendLine(`[${linter.name}] parsed ${diags.length} diagnostic(s)`);
+        const diags = parseLinterOutput(linter, result);
+        logCommandResult(linter.name, result, output, diags.length);
         onDone(diags);
     } catch (err) {
-        output.appendLine(`[${linter.name}] Failed: ${String(err)}`);
+        output.appendLine(`[${linter.name}] failed: ${String(err)}`);
         onDone([]);
     } finally {
         stopLinterStatus(linter.name, statusBar);
