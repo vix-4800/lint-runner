@@ -1,5 +1,12 @@
 import * as vscode from 'vscode';
-import { getRunnableFixers, runFixers, runLinters, type RunnableFixer } from './linterRunner.js';
+import {
+    getRunnableFixers,
+    getRunnableLinters,
+    runFixers,
+    runLinters,
+    runRunnableLinters,
+    type RunnableFixer,
+} from './linterRunner.js';
 
 let untrustedWorkspaceWarningShown = false;
 const skipFixersOnSave = new Set<string>();
@@ -19,12 +26,25 @@ interface FixerQuickPickItem extends vscode.QuickPickItem {
     fixer: RunnableFixer;
 }
 
+interface ActionQuickPickItem extends vscode.QuickPickItem {
+    action?: () => Promise<void>;
+}
+
 function documentKey(document: Pick<vscode.TextDocument, 'uri'>): string {
     return document.uri.toString();
 }
 
 function isUserOpenDocument(document: OnOpenDocument): boolean {
     return document.uri.scheme === 'file' && !document.isUntitled;
+}
+
+function getActiveFileEditor(): vscode.TextEditor | undefined {
+    const editor = vscode.window.activeTextEditor;
+    if (editor === undefined || !isUserOpenDocument(editor.document)) {
+        return undefined;
+    }
+
+    return editor;
 }
 
 function addDiffDocumentUri(
@@ -147,12 +167,165 @@ async function selectManualFixers(fileName: string): Promise<readonly RunnableFi
     return selectedItems.map((item) => item.fixer);
 }
 
+function buildActionsTooltip(): string {
+    const editor = getActiveFileEditor();
+    if (editor === undefined) {
+        return 'LintRunner: no active file';
+    }
+
+    const fileName = editor.document.fileName;
+    const linters = getRunnableLinters(fileName, 'manual');
+    const fixers = getRunnableFixers(fileName, 'manual');
+
+    return `LintRunner: ${linters.length} linter(s), ${fixers.length} fixer(s) for ${editor.document.fileName}`;
+}
+
+function updateActionsStatusBar(statusBar: vscode.StatusBarItem): void {
+    statusBar.text = '$(wrench)';
+    statusBar.tooltip = buildActionsTooltip();
+    statusBar.show();
+}
+
+async function runManualFixersForEditor(
+    editor: vscode.TextEditor,
+    diagnostics: vscode.DiagnosticCollection,
+    output: vscode.OutputChannel,
+    statusBar: vscode.StatusBarItem,
+    fixers?: readonly RunnableFixer[]
+): Promise<void> {
+    const fileName = editor.document.fileName;
+    skipFixersOnSave.add(fileName);
+    let saved: boolean;
+    try {
+        saved = await editor.document.save();
+    } finally {
+        skipFixersOnSave.delete(fileName);
+    }
+    if (!saved) {
+        vscode.window.showWarningMessage('LintRunner: File was not saved.');
+        return;
+    }
+
+    const selectedFixers = fixers ?? (await selectManualFixers(fileName));
+    if (selectedFixers === undefined) {
+        return;
+    }
+    if (selectedFixers.length === 0) {
+        vscode.window.showWarningMessage('LintRunner: No matching fix command.');
+        return;
+    }
+
+    await runFixers(fileName, output, statusBar, 'manual', selectedFixers);
+    runLinters(fileName, 'manual', diagnostics, output, statusBar);
+}
+
+async function openActionsMenu(
+    diagnostics: vscode.DiagnosticCollection,
+    output: vscode.OutputChannel,
+    runningStatusBar: vscode.StatusBarItem
+): Promise<void> {
+    const editor = getActiveFileEditor();
+    if (editor === undefined) {
+        vscode.window.showWarningMessage('LintRunner: No active file editor.');
+        return;
+    }
+    if (!canRunWorkspaceCommands(true)) {
+        return;
+    }
+
+    const fileName = editor.document.fileName;
+    const linters = getRunnableLinters(fileName, 'manual');
+    const fixers = getRunnableFixers(fileName, 'manual');
+    if (linters.length === 0 && fixers.length === 0) {
+        vscode.window.showWarningMessage('LintRunner: No matching linter or fix command.');
+        return;
+    }
+
+    const items: ActionQuickPickItem[] = [];
+    if (linters.length > 0) {
+        items.push({
+            label: '$(play) Run all linters',
+            description: `${linters.length} command(s)`,
+            action: async () => {
+                runLinters(fileName, 'manual', diagnostics, output, runningStatusBar);
+            },
+        });
+        items.push({
+            kind: vscode.QuickPickItemKind.Separator,
+            label: 'Linters',
+        });
+        items.push(
+            ...linters.map((linter) => ({
+                label: `$(play) ${linter.label}`,
+                description: linter.description,
+                detail: linter.detail,
+                action: async () => {
+                    await runRunnableLinters(
+                        fileName,
+                        diagnostics,
+                        output,
+                        runningStatusBar,
+                        [linter]
+                    );
+                },
+            }))
+        );
+    }
+
+    if (fixers.length > 0) {
+        items.push({
+            label: '$(wrench) Run all fixers',
+            description: `${fixers.length} command(s)`,
+            action: async () => {
+                await runManualFixersForEditor(
+                    editor,
+                    diagnostics,
+                    output,
+                    runningStatusBar,
+                    fixers
+                );
+            },
+        });
+        items.push({
+            kind: vscode.QuickPickItemKind.Separator,
+            label: 'Fixers',
+        });
+        items.push(
+            ...fixers.map((fixer) => ({
+                label: `$(wrench) ${fixer.label}`,
+                description: fixer.description,
+                detail: fixer.detail,
+                action: async () => {
+                    await runManualFixersForEditor(
+                        editor,
+                        diagnostics,
+                        output,
+                        runningStatusBar,
+                        [fixer]
+                    );
+                },
+            }))
+        );
+    }
+
+    const selectedItem = await vscode.window.showQuickPick(items, {
+        placeHolder: 'Run linter or fixer for active file',
+        title: 'LintRunner Actions',
+    });
+
+    await selectedItem?.action?.();
+}
+
 export function activate(context: vscode.ExtensionContext): void {
     const diagnostics = vscode.languages.createDiagnosticCollection('lintRunner');
     const output = vscode.window.createOutputChannel('LintRunner');
-    const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-    statusBar.name = 'LintRunner';
-    context.subscriptions.push(diagnostics, output, statusBar);
+    const runningStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    runningStatusBar.name = 'LintRunner';
+    const actionsStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    actionsStatusBar.name = 'LintRunner Actions';
+    actionsStatusBar.command = 'lintRunner.actions';
+    updateActionsStatusBar(actionsStatusBar);
+    context.subscriptions.push(diagnostics, output, runningStatusBar, actionsStatusBar);
 
     const seenOnOpenDocumentUris = new Set<string>();
     collectNewVisibleFileNames(
@@ -175,8 +348,9 @@ export function activate(context: vscode.ExtensionContext): void {
                 seenOnOpenDocumentUris,
                 diffDocumentUrisByColumn
             )) {
-                runLinters(fileName, 'onOpen', diagnostics, output, statusBar);
+                runLinters(fileName, 'onOpen', diagnostics, output, runningStatusBar);
             }
+            updateActionsStatusBar(actionsStatusBar);
         })
     );
 
@@ -186,9 +360,10 @@ export function activate(context: vscode.ExtensionContext): void {
                 return;
             }
             if (!skipFixersOnSave.delete(doc.fileName)) {
-                await runFixers(doc.fileName, output, statusBar, 'onSave');
+                await runFixers(doc.fileName, output, runningStatusBar, 'onSave');
             }
-            runLinters(doc.fileName, 'onSave', diagnostics, output, statusBar);
+            runLinters(doc.fileName, 'onSave', diagnostics, output, runningStatusBar);
+            updateActionsStatusBar(actionsStatusBar);
         })
     );
 
@@ -196,58 +371,56 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.workspace.onDidCloseTextDocument((doc) => {
             seenOnOpenDocumentUris.delete(documentKey(doc));
             diagnostics.delete(doc.uri);
+            updateActionsStatusBar(actionsStatusBar);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.window.onDidChangeActiveTextEditor(() => {
+            updateActionsStatusBar(actionsStatusBar);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration((event) => {
+            if (event.affectsConfiguration('lintRunner')) {
+                updateActionsStatusBar(actionsStatusBar);
+            }
         })
     );
 
     context.subscriptions.push(
         vscode.commands.registerCommand('lintRunner.run', () => {
-            const editor = vscode.window.activeTextEditor;
+            const editor = getActiveFileEditor();
             if (editor === undefined) {
-                vscode.window.showWarningMessage('LintRunner: No active editor.');
+                vscode.window.showWarningMessage('LintRunner: No active file editor.');
                 return;
             }
             if (!canRunWorkspaceCommands(true)) {
                 return;
             }
-            runLinters(editor.document.fileName, 'manual', diagnostics, output, statusBar);
+            runLinters(editor.document.fileName, 'manual', diagnostics, output, runningStatusBar);
         })
     );
 
     context.subscriptions.push(
         vscode.commands.registerCommand('lintRunner.fix', async () => {
-            const editor = vscode.window.activeTextEditor;
+            const editor = getActiveFileEditor();
             if (editor === undefined) {
-                vscode.window.showWarningMessage('LintRunner: No active editor.');
+                vscode.window.showWarningMessage('LintRunner: No active file editor.');
                 return;
             }
             if (!canRunWorkspaceCommands(true)) {
                 return;
             }
 
-            const fileName = editor.document.fileName;
-            skipFixersOnSave.add(fileName);
-            let saved: boolean;
-            try {
-                saved = await editor.document.save();
-            } finally {
-                skipFixersOnSave.delete(fileName);
-            }
-            if (!saved) {
-                vscode.window.showWarningMessage('LintRunner: File was not saved.');
-                return;
-            }
+            await runManualFixersForEditor(editor, diagnostics, output, runningStatusBar);
+        })
+    );
 
-            const fixers = await selectManualFixers(fileName);
-            if (fixers === undefined) {
-                return;
-            }
-            if (fixers.length === 0) {
-                vscode.window.showWarningMessage('LintRunner: No matching fix command.');
-                return;
-            }
-
-            await runFixers(fileName, output, statusBar, 'manual', fixers);
-            runLinters(fileName, 'manual', diagnostics, output, statusBar);
+    context.subscriptions.push(
+        vscode.commands.registerCommand('lintRunner.actions', async () => {
+            await openActionsMenu(diagnostics, output, runningStatusBar);
         })
     );
 }

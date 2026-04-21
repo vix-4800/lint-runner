@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import {
     applyCommandTemplate,
+    collectRunnableLinters,
     buildCommandEnv,
     collectRunnableFixers,
     normalizeDiagnosticRanges,
@@ -500,6 +501,57 @@ suite('Linter Runner', () => {
         assert.deepStrictEqual(
             onSaveFixers.map((fixer) => fixer.label),
             ['eslint --fix']
+        );
+    });
+
+    test('collects runnable linters for matching targets', () => {
+        const targets = resolveConfiguredTargets(
+            [
+                {
+                    name: 'TypeScript',
+                    filePatterns: ['*.ts'],
+                    run: 'onSave',
+                    linters: [
+                        {
+                            name: 'ESLint',
+                            command: 'eslint',
+                            args: ['${file}'],
+                            parser: 'json',
+                        },
+                        {
+                            name: 'manual only',
+                            command: 'biome',
+                            args: ['check', '${file}'],
+                            parser: 'json',
+                            run: 'manual',
+                        },
+                        {
+                            name: 'disabled',
+                            command: 'tsc',
+                            args: ['--noEmit', '${file}'],
+                            parser: 'parsable',
+                            enabled: false,
+                        },
+                    ],
+                },
+            ],
+            []
+        );
+
+        const manualLinters = collectRunnableLinters(targets, '/tmp/example.ts', 'manual');
+        assert.deepStrictEqual(
+            manualLinters.map((linter) => linter.label),
+            ['ESLint', 'manual only']
+        );
+        assert.deepStrictEqual(
+            manualLinters.map((linter) => linter.description),
+            ['TypeScript', 'TypeScript']
+        );
+
+        const onSaveLinters = collectRunnableLinters(targets, '/tmp/example.ts', 'onSave');
+        assert.deepStrictEqual(
+            onSaveLinters.map((linter) => linter.label),
+            ['ESLint']
         );
     });
 });

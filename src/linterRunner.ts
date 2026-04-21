@@ -88,6 +88,14 @@ export interface RunnableFixer {
     linter?: LinterConfig;
 }
 
+export interface RunnableLinter {
+    label: string;
+    description: string;
+    detail: string;
+    target: ResolvedTargetConfig;
+    linter: LinterConfig;
+}
+
 export interface CommandResult {
     code: number | null;
     stdout: string;
@@ -703,6 +711,16 @@ function linterFixerToRunnable(target: ResolvedTargetConfig, linter: LinterConfi
     };
 }
 
+function linterToRunnable(target: ResolvedTargetConfig, linter: LinterConfig): RunnableLinter {
+    return {
+        label: linter.name,
+        description: target.name,
+        detail: formatCommand(linter.command, linter.args),
+        target,
+        linter,
+    };
+}
+
 async function runTargetFixer(
     targetName: string,
     fixer: FixerConfig,
@@ -754,6 +772,29 @@ export function getRunnableFixers(
     trigger: FixerRunMode = 'manual'
 ): RunnableFixer[] {
     return collectRunnableFixers(getConfiguredTargets(), filePath, trigger);
+}
+
+export function collectRunnableLinters(
+    targets: ResolvedTargetConfig[],
+    filePath: string,
+    trigger: RunMode = 'manual'
+): RunnableLinter[] {
+    const matching = targets.filter((target) => matchesPatterns(filePath, target.filePatterns));
+    const linters: RunnableLinter[] = [];
+
+    for (const target of matching) {
+        for (const linter of target.linters) {
+            if (shouldRunLinter(linter, trigger)) {
+                linters.push(linterToRunnable(target, linter));
+            }
+        }
+    }
+
+    return linters;
+}
+
+export function getRunnableLinters(filePath: string, trigger: RunMode = 'manual'): RunnableLinter[] {
+    return collectRunnableLinters(getConfiguredTargets(), filePath, trigger);
 }
 
 async function runRunnableFixer(
@@ -833,4 +874,86 @@ export async function runFixers(
     }
 
     return fixersRun;
+}
+
+export async function runRunnableLinters(
+    filePath: string,
+    diagnostics: vscode.DiagnosticCollection,
+    output: vscode.OutputChannel,
+    statusBar: vscode.StatusBarItem,
+    linters: readonly RunnableLinter[]
+): Promise<number> {
+    if (linters.length === 0) {
+        return 0;
+    }
+
+    const uri = vscode.Uri.file(filePath);
+    const runId = nextRunId++;
+    activeRunIds.set(filePath, runId);
+    diagnostics.delete(uri);
+    const currentDiagnostics: vscode.Diagnostic[] = [];
+    let lintersRun = 0;
+    const lintersByTarget = new Map<ResolvedTargetConfig, RunnableLinter[]>();
+
+    for (const runnable of linters) {
+        const targetLinters = lintersByTarget.get(runnable.target);
+        if (targetLinters === undefined) {
+            lintersByTarget.set(runnable.target, [runnable]);
+            continue;
+        }
+
+        targetLinters.push(runnable);
+    }
+
+    try {
+        const allDiags = await Promise.all(
+            [...lintersByTarget.entries()].map(async ([target, targetLinters]) => {
+                const shouldRunTargetLinters = await runPreCommands(
+                    target.name,
+                    target.preCommands,
+                    filePath,
+                    output
+                );
+                if (!shouldRunTargetLinters) {
+                    return [];
+                }
+
+                const targetDiagnostics = await Promise.all(
+                    targetLinters.map(async (runnable) => {
+                        lintersRun++;
+                        const linterDiagnostics = await spawnLinter(
+                            runnable.linter,
+                            filePath,
+                            output,
+                            statusBar
+                        );
+                        if (
+                            activeRunIds.get(filePath) !== runId ||
+                            linterDiagnostics.length === 0
+                        ) {
+                            return linterDiagnostics;
+                        }
+
+                        currentDiagnostics.push(...linterDiagnostics);
+                        diagnostics.set(uri, currentDiagnostics);
+                        return linterDiagnostics;
+                    })
+                );
+
+                return targetDiagnostics.flat();
+            })
+        );
+
+        if (activeRunIds.get(filePath) === runId) {
+            activeRunIds.delete(filePath);
+            diagnostics.set(uri, allDiags.flat());
+        }
+    } catch (err) {
+        if (activeRunIds.get(filePath) === runId) {
+            activeRunIds.delete(filePath);
+        }
+        output.appendLine(`[LintRunner] failed: ${String(err)}`);
+    }
+
+    return lintersRun;
 }

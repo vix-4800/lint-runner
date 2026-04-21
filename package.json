@@ -42,6 +42,10 @@
       {
         "command": "lintRunner.fix",
         "title": "LintRunner: Run Fixers"
+      },
+      {
+        "command": "lintRunner.actions",
+        "title": "LintRunner: Open Actions Menu"
       }
     ],
     "configuration": {
