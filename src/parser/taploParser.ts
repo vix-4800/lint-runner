@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { createDiagnostic } from './diagnostic.js';
 
 const MESSAGE_RE = /^(error|warning|warn|info|information):\s*(.+)$/i;
 const LOCATION_RE = /^\s*\S+\s+(.+):(\d+):(\d+)\s*$/;
@@ -51,8 +52,7 @@ export function parseTaploOutput(output: string, source: string): vscode.Diagnos
         if (locationMatch !== null && pending !== undefined) {
             const lineNo = Math.max(0, parseInt(locationMatch[2], 10) - 1);
             const colNo = Math.max(0, parseInt(locationMatch[3], 10) - 1);
-            const range = new vscode.Range(lineNo, colNo, lineNo, colNo + 1);
-            const diagnostic = new vscode.Diagnostic(range, pending.message, pending.severity);
+            const diagnostic = createDiagnostic(lineNo, colNo, pending.message, pending.severity);
             diagnostic.source = source;
             diagnostics.push(diagnostic);
             last = { diagnostic, message: pending.message };

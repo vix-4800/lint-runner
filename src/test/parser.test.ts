@@ -5,6 +5,7 @@ import {
     applyCommandTemplate,
     buildCommandEnv,
     collectRunnableFixers,
+    normalizeDiagnosticRanges,
     parseLinterOutput,
     resolveConfiguredTargets,
     shouldRunLinter,
@@ -259,6 +260,36 @@ suite('Linter Runner', () => {
         );
 
         assert.strictEqual(diagnostics.length, 0);
+    });
+
+    test('moves diagnostics without explicit column to first non-whitespace word', async () => {
+        const filePath = path.resolve(__dirname, '../../lint-test/test.php');
+        const diagnostics = parseParsableOutput(
+            'lint-test/test.php:5 LowercaseKey: The key should be uppercase',
+            'dotenv-linter'
+        );
+
+        await normalizeDiagnosticRanges(filePath, diagnostics);
+
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].range.start.line, 4);
+        assert.strictEqual(diagnostics[0].range.start.character, 4);
+        assert.strictEqual(diagnostics[0].range.end.character, 11);
+    });
+
+    test('extends diagnostics with explicit column to first whitespace', async () => {
+        const filePath = path.resolve(__dirname, '../../lint-test/test.js');
+        const diagnostics = parseJsonOutput(
+            JSON.stringify([{ line: 2, column: 7, message: 'Unused variable', severity: 2 }]),
+            'eslint'
+        );
+
+        await normalizeDiagnosticRanges(filePath, diagnostics);
+
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].range.start.line, 1);
+        assert.strictEqual(diagnostics[0].range.start.character, 6);
+        assert.strictEqual(diagnostics[0].range.end.character, 12);
     });
 
     test('prepends shell PATH to command PATH', () => {

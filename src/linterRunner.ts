@@ -2,6 +2,7 @@ import * as cp from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { diagnosticHasExplicitColumn } from './parser/diagnostic.js';
 import { parseAnsibleLintOutput } from './parser/ansibleLintParser.js';
 import { parseJsonOutput } from './parser/jsonParser.js';
 import { parseJsonlintOutput } from './parser/jsonlintParser.js';
@@ -529,7 +530,20 @@ export function parseLinterOutput(
     return diagnostics;
 }
 
-async function moveLineStartDiagnosticsToFirstNonWhitespace(
+function findDiagnosticEndCharacter(text: string, startCharacter: number): number {
+    let endCharacter = startCharacter;
+    while (endCharacter < text.length && !/\s/.test(text[endCharacter])) {
+        endCharacter++;
+    }
+
+    if (endCharacter > startCharacter) {
+        return endCharacter;
+    }
+
+    return Math.min(text.length, startCharacter + 1);
+}
+
+export async function normalizeDiagnosticRanges(
     filePath: string,
     diagnostics: vscode.Diagnostic[]
 ): Promise<void> {
@@ -539,24 +553,28 @@ async function moveLineStartDiagnosticsToFirstNonWhitespace(
 
     const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
     for (const diagnostic of diagnostics) {
-        if (
-            diagnostic.range.start.character !== 0 ||
-            diagnostic.range.start.line >= document.lineCount
-        ) {
+        if (diagnostic.range.start.line >= document.lineCount) {
             continue;
         }
 
         const line = document.lineAt(diagnostic.range.start.line);
-        const firstNonWhitespace = line.firstNonWhitespaceCharacterIndex;
-        if (firstNonWhitespace === 0 || line.isEmptyOrWhitespace) {
+        if (line.isEmptyOrWhitespace) {
             continue;
         }
 
+        const startCharacter = diagnosticHasExplicitColumn(diagnostic)
+            ? diagnostic.range.start.character
+            : line.firstNonWhitespaceCharacterIndex;
+        const boundedStartCharacter = Math.min(
+            Math.max(0, startCharacter),
+            Math.max(0, line.text.length - 1)
+        );
+        const endCharacter = findDiagnosticEndCharacter(line.text, boundedStartCharacter);
         diagnostic.range = new vscode.Range(
             diagnostic.range.start.line,
-            firstNonWhitespace,
-            diagnostic.range.end.line,
-            Math.max(firstNonWhitespace + 1, diagnostic.range.end.character)
+            boundedStartCharacter,
+            diagnostic.range.start.line,
+            endCharacter
         );
     }
 }
@@ -581,7 +599,7 @@ async function spawnLinter(
 
         const result = await runCommand(linter.name, linter, filePath, output);
         const diags = parseLinterOutput(linter, result);
-        await moveLineStartDiagnosticsToFirstNonWhitespace(filePath, diags);
+        await normalizeDiagnosticRanges(filePath, diags);
         logCommandResult(linter.name, result, output, diags.length);
         return diags;
     } catch (err) {

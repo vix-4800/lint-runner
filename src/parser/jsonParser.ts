@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { createDiagnostic } from './diagnostic.js';
 
 interface RawItem {
     line: number;
@@ -308,10 +309,10 @@ export function parseJsonOutput(stdout: string, source: string): vscode.Diagnost
 
     return flatItems.filter(isRawItem).map((item) => {
         const line = Math.max(0, item.line - 1);
-        const col = Math.max(0, (item.column ?? item.col ?? 1) - 1);
-        const range = new vscode.Range(line, col, line, col + 1);
+        const rawColumn = item.column ?? item.col;
+        const col = typeof rawColumn === 'number' ? Math.max(0, rawColumn - 1) : undefined;
         const severity = parseSeverity(item.level ?? item.severity ?? item.type);
-        const diagnostic = new vscode.Diagnostic(range, item.message, severity);
+        const diagnostic = createDiagnostic(line, col, item.message, severity);
         diagnostic.source = source;
         const nestedRuleId =
             typeof item.rule === 'object' && item.rule !== null && typeof item.rule.id === 'string'

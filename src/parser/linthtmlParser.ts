@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { createDiagnostic } from './diagnostic.js';
 
 // linthtml --no-color output:
 //  2:1  error  <HTML> tag should specify the language  html-req-lang
@@ -22,8 +23,7 @@ export function parseLinthtmlOutput(stdout: string, source: string): vscode.Diag
         const severity =
             level === 'error' ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning;
 
-        const range = new vscode.Range(lineNo, colNo, lineNo, colNo + 1);
-        const diag = new vscode.Diagnostic(range, message, severity);
+        const diag = createDiagnostic(lineNo, colNo, message, severity);
         diag.source = source;
         diag.code = rule;
         diagnostics.push(diag);

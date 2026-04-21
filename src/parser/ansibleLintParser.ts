@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { createDiagnostic } from './diagnostic.js';
 
 // ansible-lint text output format (default / --format full):
 //
@@ -33,13 +34,15 @@ export function parseAnsibleLintOutput(stdout: string, source: string): vscode.D
             if (locMatch !== null) {
                 const lineNo = Math.max(0, parseInt(locMatch[1], 10) - 1);
                 const colNo =
-                    locMatch[2] !== undefined ? Math.max(0, parseInt(locMatch[2], 10) - 1) : 0;
+                    locMatch[2] !== undefined
+                        ? Math.max(0, parseInt(locMatch[2], 10) - 1)
+                        : undefined;
                 const detail = locMatch[3]?.trim();
                 const message = detail ? `${ruleId}: ${detail}` : `${ruleId}: ${ruleDesc}`;
 
-                const range = new vscode.Range(lineNo, colNo, lineNo, colNo + 1);
-                const diag = new vscode.Diagnostic(
-                    range,
+                const diag = createDiagnostic(
+                    lineNo,
+                    colNo,
                     message,
                     vscode.DiagnosticSeverity.Warning
                 );

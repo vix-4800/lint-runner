@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { createDiagnostic } from './diagnostic.js';
 
 // yamllint --format parsable:
 //   file.yml:1:1: [warning] missing document start "---" (document-start)
@@ -27,7 +28,8 @@ export function parseParsableOutput(stdout: string, source: string): vscode.Diag
         }
 
         const lineNo = Math.max(0, parseInt(lineColMatch?.[1] ?? lineCodeMatch?.[1] ?? '1', 10) - 1);
-        const colNo = lineColMatch === null ? 0 : Math.max(0, parseInt(lineColMatch[2], 10) - 1);
+        const colNo =
+            lineColMatch === null ? undefined : Math.max(0, parseInt(lineColMatch[2], 10) - 1);
         const level = lineColMatch === null ? 'warning' : lineColMatch[3].toLowerCase();
         const code = lineCodeMatch?.[2];
         const message = (lineColMatch?.[4] ?? lineCodeMatch?.[3] ?? '').trim();
@@ -46,8 +48,7 @@ export function parseParsableOutput(stdout: string, source: string): vscode.Diag
                 break;
         }
 
-        const range = new vscode.Range(lineNo, colNo, lineNo, colNo + 1);
-        const diag = new vscode.Diagnostic(range, message, severity);
+        const diag = createDiagnostic(lineNo, colNo, message, severity);
         diag.source = source;
         if (code !== undefined) {
             diag.code = code;

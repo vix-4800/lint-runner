@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { createDiagnostic } from './diagnostic.js';
 
 // Matches: /path/to/file: line 4, col 11, Some message.
 // or just:  line 4, col 11, Some message.   (when file path is stripped by the tool)
@@ -25,8 +26,12 @@ export function parseJsonlintOutput(
         const lineNo = Math.max(0, parseInt(m[1], 10) - 1);
         const colNo = Math.max(0, parseInt(m[2], 10) - 1);
         const message = m[3].replace(/\.$/, '').trim();
-        const range = new vscode.Range(lineNo, colNo, lineNo, colNo + 1);
-        const diagnostic = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Error);
+        const diagnostic = createDiagnostic(
+            lineNo,
+            colNo,
+            message,
+            vscode.DiagnosticSeverity.Error
+        );
         diagnostic.source = source;
         diags.push(diagnostic);
     }

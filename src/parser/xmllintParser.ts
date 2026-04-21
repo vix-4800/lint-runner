@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { createDiagnostic } from './diagnostic.js';
 
 // xmllint --noout writes errors to stderr:
 //   file.xml:6: parser error : Opening and ending tag mismatch: value line 5 and item
@@ -25,8 +26,7 @@ export function parseXmllintOutput(stderr: string, source: string): vscode.Diagn
             ? vscode.DiagnosticSeverity.Warning
             : vscode.DiagnosticSeverity.Error;
 
-        const range = new vscode.Range(lineNo, 0, lineNo, 1);
-        const diag = new vscode.Diagnostic(range, message, severity);
+        const diag = createDiagnostic(lineNo, undefined, message, severity);
         diag.source = source;
         diagnostics.push(diag);
     }
