@@ -5,7 +5,15 @@ let untrustedWorkspaceWarningShown = false;
 const skipFixersOnSave = new Set<string>();
 
 type OnOpenDocument = Pick<vscode.TextDocument, 'fileName' | 'isUntitled' | 'uri'>;
-type OnOpenEditor = { readonly document: OnOpenDocument };
+type OnOpenEditor = {
+    readonly document: OnOpenDocument;
+    readonly viewColumn?: vscode.ViewColumn;
+};
+type OnOpenTab = Pick<vscode.Tab, 'input'>;
+type OnOpenTabGroup = {
+    readonly activeTab: OnOpenTab | undefined;
+    readonly viewColumn: vscode.ViewColumn;
+};
 
 function documentKey(document: Pick<vscode.TextDocument, 'uri'>): string {
     return document.uri.toString();
@@ -15,15 +23,71 @@ function isUserOpenDocument(document: OnOpenDocument): boolean {
     return document.uri.scheme === 'file' && !document.isUntitled;
 }
 
+function addDiffDocumentUri(
+    diffDocumentUrisByColumn: Map<vscode.ViewColumn, Set<string>>,
+    viewColumn: vscode.ViewColumn,
+    uri: vscode.Uri
+): void {
+    let diffDocumentUris = diffDocumentUrisByColumn.get(viewColumn);
+    if (diffDocumentUris === undefined) {
+        diffDocumentUris = new Set<string>();
+        diffDocumentUrisByColumn.set(viewColumn, diffDocumentUris);
+    }
+
+    diffDocumentUris.add(uri.toString());
+}
+
+export function collectVisibleDiffDocumentUrisByColumn(
+    tabGroups: readonly OnOpenTabGroup[]
+): Map<vscode.ViewColumn, Set<string>> {
+    const diffDocumentUrisByColumn = new Map<vscode.ViewColumn, Set<string>>();
+
+    for (const group of tabGroups) {
+        const input = group.activeTab?.input;
+        if (!(input instanceof vscode.TabInputTextDiff)) {
+            continue;
+        }
+
+        addDiffDocumentUri(diffDocumentUrisByColumn, group.viewColumn, input.original);
+        addDiffDocumentUri(diffDocumentUrisByColumn, group.viewColumn, input.modified);
+    }
+
+    return diffDocumentUrisByColumn;
+}
+
+function isVisibleDiffDocument(
+    editor: OnOpenEditor,
+    diffDocumentUrisByColumn: ReadonlyMap<vscode.ViewColumn, ReadonlySet<string>>
+): boolean {
+    const key = documentKey(editor.document);
+
+    if (editor.viewColumn !== undefined) {
+        return diffDocumentUrisByColumn.get(editor.viewColumn)?.has(key) ?? false;
+    }
+
+    for (const diffDocumentUris of diffDocumentUrisByColumn.values()) {
+        if (diffDocumentUris.has(key)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 export function collectNewVisibleFileNames(
     editors: readonly OnOpenEditor[],
-    seenDocumentUris: Set<string>
+    seenDocumentUris: Set<string>,
+    diffDocumentUrisByColumn: ReadonlyMap<vscode.ViewColumn, ReadonlySet<string>> = new Map()
 ): string[] {
     const fileNames: string[] = [];
 
     for (const editor of editors) {
         const document = editor.document;
         if (!isUserOpenDocument(document)) {
+            continue;
+        }
+
+        if (isVisibleDiffDocument(editor, diffDocumentUrisByColumn)) {
             continue;
         }
 
@@ -62,7 +126,11 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(diagnostics, output, statusBar);
 
     const seenOnOpenDocumentUris = new Set<string>();
-    collectNewVisibleFileNames(vscode.window.visibleTextEditors, seenOnOpenDocumentUris);
+    collectNewVisibleFileNames(
+        vscode.window.visibleTextEditors,
+        seenOnOpenDocumentUris,
+        collectVisibleDiffDocumentUrisByColumn(vscode.window.tabGroups.all)
+    );
 
     context.subscriptions.push(
         vscode.window.onDidChangeVisibleTextEditors((editors) => {
@@ -70,7 +138,14 @@ export function activate(context: vscode.ExtensionContext): void {
                 return;
             }
 
-            for (const fileName of collectNewVisibleFileNames(editors, seenOnOpenDocumentUris)) {
+            const diffDocumentUrisByColumn = collectVisibleDiffDocumentUrisByColumn(
+                vscode.window.tabGroups.all
+            );
+            for (const fileName of collectNewVisibleFileNames(
+                editors,
+                seenOnOpenDocumentUris,
+                diffDocumentUrisByColumn
+            )) {
                 runLinters(fileName, 'onOpen', diagnostics, output, statusBar);
             }
         })
