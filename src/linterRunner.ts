@@ -40,6 +40,7 @@ export interface CommandConfig {
 
 export interface FixerConfig extends CommandConfig {
     run?: FixerRunMode;
+    enabled?: boolean;
 }
 
 export interface TargetLinterConfig {
@@ -48,6 +49,7 @@ export interface TargetLinterConfig {
     args: string[];
     parser: ParserName | string;
     run?: RunMode;
+    enabled?: boolean;
     preCommands?: CommandConfig[];
     fixCommand?: FixerConfig;
     showDiagnosticCodes?: boolean;
@@ -275,9 +277,10 @@ function getCommandEnv(): Promise<NodeJS.ProcessEnv> {
 
 export function shouldRunLinter(linter: LinterConfig, trigger: RunMode): boolean {
     return (
-        trigger === 'manual' ||
-        linter.run === trigger ||
-        (trigger === 'onSave' && linter.run === 'onOpen')
+        linter.enabled !== false &&
+        (trigger === 'manual' ||
+            linter.run === trigger ||
+            (trigger === 'onSave' && linter.run === 'onOpen'))
     );
 }
 
@@ -649,7 +652,7 @@ async function runFixer(
 }
 
 function shouldRunFixer(fixer: FixerConfig, trigger: FixerRunMode): boolean {
-    return trigger === 'manual' || fixer.run === trigger;
+    return fixer.enabled !== false && (trigger === 'manual' || fixer.run === trigger);
 }
 
 function getFixerName(fixer: FixerConfig): string {

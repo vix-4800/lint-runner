@@ -364,6 +364,21 @@ suite('Linter Runner', () => {
         assert.strictEqual(shouldRunLinter(linter, 'onSave'), true);
     });
 
+    test('does not run disabled linters', () => {
+        const linter = {
+            name: 'eslint',
+            filePatterns: ['*.ts'],
+            command: 'eslint',
+            args: ['${file}'],
+            parser: 'json',
+            run: 'onSave' as const,
+            enabled: false,
+        };
+
+        assert.strictEqual(shouldRunLinter(linter, 'manual'), false);
+        assert.strictEqual(shouldRunLinter(linter, 'onSave'), false);
+    });
+
     test('keeps legacy linter-first configs working as targets', () => {
         const targets = resolveConfiguredTargets([], [
             {
@@ -398,6 +413,12 @@ suite('Linter Runner', () => {
                     fixers: [
                         { name: 'prettier', command: 'prettier', args: ['--write', '${file}'] },
                         {
+                            name: 'disabled prettier',
+                            command: 'prettier',
+                            args: ['--write', '${file}'],
+                            enabled: false,
+                        },
+                        {
                             name: 'eslint --fix',
                             command: 'eslint',
                             args: ['--fix', '${file}'],
@@ -414,6 +435,18 @@ suite('Linter Runner', () => {
                                 name: 'eslint legacy --fix',
                                 command: 'eslint',
                                 args: ['--fix', '${file}'],
+                            },
+                        },
+                        {
+                            name: 'Disabled ESLint',
+                            command: 'eslint',
+                            args: ['${file}'],
+                            parser: 'json',
+                            fixCommand: {
+                                name: 'disabled legacy --fix',
+                                command: 'eslint',
+                                args: ['--fix', '${file}'],
+                                enabled: false,
                             },
                         },
                     ],
