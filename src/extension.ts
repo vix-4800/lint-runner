@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { runFixers, runLinters } from './linterRunner.js';
+import { getRunnableFixers, runFixers, runLinters, type RunnableFixer } from './linterRunner.js';
 
 let untrustedWorkspaceWarningShown = false;
 const skipFixersOnSave = new Set<string>();
@@ -14,6 +14,10 @@ type OnOpenTabGroup = {
     readonly activeTab: OnOpenTab | undefined;
     readonly viewColumn: vscode.ViewColumn;
 };
+
+interface FixerQuickPickItem extends vscode.QuickPickItem {
+    fixer: RunnableFixer;
+}
 
 function documentKey(document: Pick<vscode.TextDocument, 'uri'>): string {
     return document.uri.toString();
@@ -118,6 +122,31 @@ function canRunWorkspaceCommands(showRepeatedWarning: boolean): boolean {
     return false;
 }
 
+async function selectManualFixers(fileName: string): Promise<readonly RunnableFixer[] | undefined> {
+    const fixers = getRunnableFixers(fileName, 'manual');
+    if (fixers.length <= 1) {
+        return fixers;
+    }
+
+    const items: FixerQuickPickItem[] = fixers.map((fixer) => ({
+        label: fixer.label,
+        description: fixer.description,
+        detail: fixer.detail,
+        fixer,
+    }));
+    const selectedItems = await vscode.window.showQuickPick(items, {
+        canPickMany: true,
+        placeHolder: 'Select fixers to run',
+        title: 'LintRunner: Run Fixers',
+    });
+
+    if (selectedItems === undefined || selectedItems.length === 0) {
+        return undefined;
+    }
+
+    return selectedItems.map((item) => item.fixer);
+}
+
 export function activate(context: vscode.ExtensionContext): void {
     const diagnostics = vscode.languages.createDiagnosticCollection('lintRunner');
     const output = vscode.window.createOutputChannel('LintRunner');
@@ -208,12 +237,16 @@ export function activate(context: vscode.ExtensionContext): void {
                 return;
             }
 
-            const fixersRun = await runFixers(fileName, output, statusBar);
-            if (fixersRun === 0) {
+            const fixers = await selectManualFixers(fileName);
+            if (fixers === undefined) {
+                return;
+            }
+            if (fixers.length === 0) {
                 vscode.window.showWarningMessage('LintRunner: No matching fix command.');
                 return;
             }
 
+            await runFixers(fileName, output, statusBar, 'manual', fixers);
             runLinters(fileName, 'manual', diagnostics, output, statusBar);
         })
     );

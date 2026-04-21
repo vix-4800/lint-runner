@@ -76,6 +76,15 @@ export interface ResolvedTargetConfig {
     fixers: FixerConfig[];
 }
 
+export interface RunnableFixer {
+    label: string;
+    description: string;
+    detail: string;
+    targetName: string;
+    fixer: FixerConfig;
+    linter?: LinterConfig;
+}
+
 export interface CommandResult {
     code: number | null;
     stdout: string;
@@ -643,6 +652,36 @@ function shouldRunFixer(fixer: FixerConfig, trigger: FixerRunMode): boolean {
     return trigger === 'manual' || fixer.run === trigger;
 }
 
+function getFixerName(fixer: FixerConfig): string {
+    return fixer.name ?? fixer.command;
+}
+
+function targetFixerToRunnable(target: ResolvedTargetConfig, fixer: FixerConfig): RunnableFixer {
+    return {
+        label: getFixerName(fixer),
+        description: target.name,
+        detail: formatCommand(fixer.command, fixer.args),
+        targetName: target.name,
+        fixer,
+    };
+}
+
+function linterFixerToRunnable(target: ResolvedTargetConfig, linter: LinterConfig): RunnableFixer {
+    const fixCommand = linter.fixCommand;
+    if (fixCommand === undefined) {
+        throw new Error(`Linter '${linter.name}' has no fix command.`);
+    }
+
+    return {
+        label: getFixerName(fixCommand),
+        description: `${target.name} / ${linter.name}`,
+        detail: formatCommand(fixCommand.command, fixCommand.args),
+        targetName: target.name,
+        fixer: fixCommand,
+        linter,
+    };
+}
+
 async function runTargetFixer(
     targetName: string,
     fixer: FixerConfig,
@@ -662,6 +701,52 @@ async function runTargetFixer(
     } finally {
         stopLinterStatus(statusName, statusBar);
     }
+}
+
+export function collectRunnableFixers(
+    targets: ResolvedTargetConfig[],
+    filePath: string,
+    trigger: FixerRunMode = 'manual'
+): RunnableFixer[] {
+    const matching = targets.filter((target) => matchesPatterns(filePath, target.filePatterns));
+    const fixers: RunnableFixer[] = [];
+
+    for (const target of matching) {
+        for (const fixer of target.fixers) {
+            if (shouldRunFixer(fixer, trigger)) {
+                fixers.push(targetFixerToRunnable(target, fixer));
+            }
+        }
+
+        for (const linter of target.linters) {
+            if (linter.fixCommand !== undefined && shouldRunFixer(linter.fixCommand, trigger)) {
+                fixers.push(linterFixerToRunnable(target, linter));
+            }
+        }
+    }
+
+    return fixers;
+}
+
+export function getRunnableFixers(
+    filePath: string,
+    trigger: FixerRunMode = 'manual'
+): RunnableFixer[] {
+    return collectRunnableFixers(getConfiguredTargets(), filePath, trigger);
+}
+
+async function runRunnableFixer(
+    fixer: RunnableFixer,
+    filePath: string,
+    output: vscode.OutputChannel,
+    statusBar: vscode.StatusBarItem
+): Promise<void> {
+    if (fixer.linter !== undefined) {
+        await runFixer(fixer.linter, filePath, output, statusBar);
+        return;
+    }
+
+    await runTargetFixer(fixer.targetName, fixer.fixer, filePath, output, statusBar);
 }
 
 export function runLinters(
@@ -716,28 +801,14 @@ export async function runFixers(
     filePath: string,
     output: vscode.OutputChannel,
     statusBar: vscode.StatusBarItem,
-    trigger: FixerRunMode = 'manual'
+    trigger: FixerRunMode = 'manual',
+    fixers: readonly RunnableFixer[] = getRunnableFixers(filePath, trigger)
 ): Promise<number> {
-    const targets = getConfiguredTargets();
-    const matching = targets.filter((target) => matchesPatterns(filePath, target.filePatterns));
     let fixersRun = 0;
 
-    for (const target of matching) {
-        for (const fixer of target.fixers) {
-            if (!shouldRunFixer(fixer, trigger)) {
-                continue;
-            }
-            fixersRun++;
-            await runTargetFixer(target.name, fixer, filePath, output, statusBar);
-        }
-
-        for (const linter of target.linters) {
-            if (linter.fixCommand === undefined || !shouldRunFixer(linter.fixCommand, trigger)) {
-                continue;
-            }
-            fixersRun++;
-            await runFixer(linter, filePath, output, statusBar);
-        }
+    for (const fixer of fixers) {
+        fixersRun++;
+        await runRunnableFixer(fixer, filePath, output, statusBar);
     }
 
     return fixersRun;

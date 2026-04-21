@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import {
     applyCommandTemplate,
     buildCommandEnv,
+    collectRunnableFixers,
     parseLinterOutput,
     resolveConfiguredTargets,
     shouldRunLinter,
@@ -386,6 +387,56 @@ suite('Linter Runner', () => {
         assert.deepStrictEqual(targets[0].filePatterns, ['*.ts']);
         assert.strictEqual(targets[0].linters[0].name, 'ESLint');
         assert.strictEqual(targets[0].linters[0].fixCommand?.run, 'onSave');
+    });
+
+    test('collects runnable fixers for matching targets', () => {
+        const targets = resolveConfiguredTargets(
+            [
+                {
+                    name: 'TypeScript',
+                    filePatterns: ['*.ts'],
+                    fixers: [
+                        { name: 'prettier', command: 'prettier', args: ['--write', '${file}'] },
+                        {
+                            name: 'eslint --fix',
+                            command: 'eslint',
+                            args: ['--fix', '${file}'],
+                            run: 'onSave',
+                        },
+                    ],
+                    linters: [
+                        {
+                            name: 'ESLint',
+                            command: 'eslint',
+                            args: ['${file}'],
+                            parser: 'json',
+                            fixCommand: {
+                                name: 'eslint legacy --fix',
+                                command: 'eslint',
+                                args: ['--fix', '${file}'],
+                            },
+                        },
+                    ],
+                },
+            ],
+            []
+        );
+
+        const manualFixers = collectRunnableFixers(targets, '/tmp/example.ts', 'manual');
+        assert.deepStrictEqual(
+            manualFixers.map((fixer) => fixer.label),
+            ['prettier', 'eslint --fix', 'eslint legacy --fix']
+        );
+        assert.deepStrictEqual(
+            manualFixers.map((fixer) => fixer.description),
+            ['TypeScript', 'TypeScript', 'TypeScript / ESLint']
+        );
+
+        const onSaveFixers = collectRunnableFixers(targets, '/tmp/example.ts', 'onSave');
+        assert.deepStrictEqual(
+            onSaveFixers.map((fixer) => fixer.label),
+            ['eslint --fix']
+        );
     });
 });
 
