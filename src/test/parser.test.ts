@@ -554,6 +554,42 @@ suite('Linter Runner', () => {
             ['ESLint']
         );
     });
+
+    test('matches files with brace-expanded glob patterns', () => {
+        const targets = resolveConfiguredTargets(
+            [
+                {
+                    name: 'TypeScript',
+                    filePatterns: ['*.{ts,tsx}'],
+                    linters: [
+                        {
+                            name: 'ESLint',
+                            command: 'eslint',
+                            args: ['${file}'],
+                            parser: 'json',
+                        },
+                    ],
+                },
+            ],
+            []
+        );
+
+        assert.strictEqual(
+            collectRunnableLinters(targets, '/tmp/example.ts', 'manual').length,
+            1,
+            '*.{ts,tsx} should match .ts files'
+        );
+        assert.strictEqual(
+            collectRunnableLinters(targets, '/tmp/example.tsx', 'manual').length,
+            1,
+            '*.{ts,tsx} should match .tsx files'
+        );
+        assert.strictEqual(
+            collectRunnableLinters(targets, '/tmp/example.js', 'manual').length,
+            0,
+            '*.{ts,tsx} should not match .js files'
+        );
+    });
 });
 
 suite('Jsonlint Parser', () => {
@@ -616,6 +652,25 @@ suite('Parsable Parser', () => {
         const input = 'file:1:1: [info] some note';
         const diags = parseParsableOutput(input, 'test');
         assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Information);
+    });
+
+    test('parseLinterOutput parsable parser merges stdout and stderr', () => {
+        const stdoutDiag = 'file.sh:2:1: [error] missing semicolon';
+        const stderrDiag = 'file.sh:5:1: [warning] unreachable code';
+        const diags = parseLinterOutput(
+            {
+                name: 'shellcheck',
+                filePatterns: ['*.sh'],
+                command: 'shellcheck',
+                args: ['${file}'],
+                parser: 'parsable',
+                run: 'manual',
+            },
+            { code: 1, stdout: stdoutDiag, stderr: stderrDiag }
+        );
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Warning);
     });
 });
 

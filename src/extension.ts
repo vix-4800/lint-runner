@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 import {
     getRunnableFixers,
@@ -5,6 +6,8 @@ import {
     runFixers,
     runLinters,
     runRunnableLinters,
+    resetCommandEnv,
+    clearDiagnosticsCache,
     type RunnableFixer,
 } from './linterRunner.js';
 
@@ -384,6 +387,8 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration((event) => {
             if (event.affectsConfiguration('lintRunner')) {
+                resetCommandEnv();
+                clearDiagnosticsCache();
                 updateActionsStatusBar(actionsStatusBar);
             }
         })
@@ -399,7 +404,15 @@ export function activate(context: vscode.ExtensionContext): void {
             if (!canRunWorkspaceCommands(true)) {
                 return;
             }
-            runLinters(editor.document.fileName, 'manual', diagnostics, output, runningStatusBar);
+            const fileName = editor.document.fileName;
+            vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: `LintRunner: Linting ${path.basename(fileName)}…`,
+                    cancellable: false,
+                },
+                () => runLinters(fileName, 'manual', diagnostics, output, runningStatusBar)
+            );
         })
     );
 
@@ -415,6 +428,17 @@ export function activate(context: vscode.ExtensionContext): void {
             }
 
             await runManualFixersForEditor(editor, diagnostics, output, runningStatusBar);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('lintRunner.clearDiagnostics', () => {
+            const editor = getActiveFileEditor();
+            if (editor !== undefined) {
+                diagnostics.delete(editor.document.uri);
+            } else {
+                diagnostics.clear();
+            }
         })
     );
 

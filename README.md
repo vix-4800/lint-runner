@@ -9,6 +9,7 @@ VS Code extension for running external CLI linters and reporting found issues in
 - run linters when a file is opened;
 - run linters when a file is saved;
 - run auto-fixers when a file is saved;
+- clear diagnostics for the active file (or all files) via `LintRunner: Clear Diagnostics`;
 - select linters by file glob patterns;
 - substitute command variables in commands and arguments;
 - support `~` in command and argument paths;
