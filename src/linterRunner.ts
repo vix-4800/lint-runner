@@ -1,4 +1,5 @@
 import * as cp from 'child_process';
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -14,6 +15,23 @@ import { parseXmllintOutput } from './parser/xmllintParser.js';
 const runningLinters = new Map<string, number>();
 const activeRunIds = new Map<string, number>();
 let nextRunId = 0;
+
+interface LinterCacheEntry {
+    mtime: number;
+    size: number;
+    diagnostics: vscode.Diagnostic[];
+}
+const linterDiagnosticsCache = new Map<string, LinterCacheEntry>();
+
+function linterCacheKey(filePath: string, linterName: string): string {
+    return `${filePath}\x00${linterName}`;
+}
+
+export function clearDiagnosticsCache(): void {
+    linterDiagnosticsCache.clear();
+}
+
+const unknownParserWarned = new Set<string>();
 
 const SUPPORTED_PARSERS = [
     'json',
@@ -103,8 +121,8 @@ export interface CommandResult {
     error?: string;
 }
 
-function globToRegex(pattern: string): RegExp {
-    let result = '^';
+function globPatternToRegexBody(pattern: string): string {
+    let result = '';
     for (let i = 0; i < pattern.length; i++) {
         const c = pattern[i];
         if (c === '*' && pattern[i + 1] === '*') {
@@ -117,14 +135,44 @@ function globToRegex(pattern: string): RegExp {
             result += '[^/]*';
         } else if (c === '?') {
             result += '[^/]';
-        } else if (/[.+^${}()|[\]\\]/.test(c)) {
+        } else if (c === '{') {
+            let j = i + 1;
+            let depth = 1;
+            while (j < pattern.length && depth > 0) {
+                if (pattern[j] === '{') { depth++; }
+                else if (pattern[j] === '}') { depth--; }
+                j++;
+            }
+            if (depth === 0) {
+                const inner = pattern.slice(i + 1, j - 1);
+                const alternatives: string[] = [];
+                let start = 0;
+                let innerDepth = 0;
+                for (let k = 0; k < inner.length; k++) {
+                    if (inner[k] === '{') { innerDepth++; }
+                    else if (inner[k] === '}') { innerDepth--; }
+                    else if (inner[k] === ',' && innerDepth === 0) {
+                        alternatives.push(inner.slice(start, k));
+                        start = k + 1;
+                    }
+                }
+                alternatives.push(inner.slice(start));
+                result += `(${alternatives.map(globPatternToRegexBody).join('|')})`;
+                i = j - 1;
+            } else {
+                result += '\\{';
+            }
+        } else if (/[.+^$}()|[\]\\]/.test(c)) {
             result += `\\${c}`;
         } else {
             result += c;
         }
     }
-    result += '$';
-    return new RegExp(result);
+    return result;
+}
+
+function globToRegex(pattern: string): RegExp {
+    return new RegExp(`^${globPatternToRegexBody(pattern)}$`);
 }
 
 function normalizePath(value: string): string {
@@ -284,6 +332,10 @@ function getCommandEnv(): Promise<NodeJS.ProcessEnv> {
     return commandEnvPromise;
 }
 
+export function resetCommandEnv(): void {
+    commandEnvPromise = undefined;
+}
+
 export function shouldRunLinter(linter: LinterConfig, trigger: RunMode): boolean {
     return (
         linter.enabled !== false &&
@@ -414,7 +466,7 @@ async function runCommand(
     return new Promise((resolve) => {
         let proc: cp.ChildProcess;
         try {
-            proc = cp.spawn(command, args, { cwd, env });
+            proc = cp.spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
         } catch (err) {
             resolve({ code: null, stdout: '', stderr: '', error: String(err) });
             return;
@@ -511,7 +563,7 @@ export function parseLinterOutput(
             diagnostics = parseAnsibleLintOutput(result.stdout, linter.name);
             break;
         case 'parsable':
-            diagnostics = parseParsableOutput(result.stdout, linter.name);
+            diagnostics = parseParsableOutput(`${result.stdout}\n${result.stderr}`, linter.name);
             break;
         case 'taplo':
             diagnostics = parseTaploOutput(`${result.stdout}\n${result.stderr}`, linter.name);
@@ -522,11 +574,16 @@ export function parseLinterOutput(
         case 'linthtml':
             diagnostics = parseLinthtmlOutput(result.stdout, linter.name);
             break;
-        default:
-            vscode.window.showWarningMessage(
-                `LintRunner: unknown parser '${linter.parser}' in linter '${linter.name}'.`
-            );
+        default: {
+            const warnKey = `${linter.name}:${linter.parser}`;
+            if (!unknownParserWarned.has(warnKey)) {
+                unknownParserWarned.add(warnKey);
+                vscode.window.showWarningMessage(
+                    `LintRunner: unknown parser '${linter.parser}' in linter '${linter.name}'.`
+                );
+            }
             return [];
+        }
     }
 
     if (linter.showDiagnosticCodes === false) {
@@ -591,8 +648,24 @@ async function spawnLinter(
     linter: LinterConfig,
     filePath: string,
     output: vscode.OutputChannel,
-    statusBar: vscode.StatusBarItem
+    statusBar: vscode.StatusBarItem,
+    trigger: RunMode = 'manual'
 ): Promise<vscode.Diagnostic[]> {
+    if (trigger !== 'manual') {
+        const key = linterCacheKey(filePath, linter.name);
+        const cached = linterDiagnosticsCache.get(key);
+        if (cached !== undefined) {
+            try {
+                const stat = await fs.promises.stat(filePath);
+                if (stat.mtimeMs === cached.mtime && stat.size === cached.size) {
+                    return cached.diagnostics;
+                }
+            } catch {
+                // If stat fails proceed to run the linter normally
+            }
+        }
+    }
+
     startLinterStatus(linter.name, statusBar);
     try {
         const shouldRunLinter = await runPreCommands(
@@ -609,6 +682,18 @@ async function spawnLinter(
         const diags = parseLinterOutput(linter, result);
         await normalizeDiagnosticRanges(filePath, diags);
         logCommandResult(linter.name, result, output, diags.length);
+
+        try {
+            const stat = await fs.promises.stat(filePath);
+            linterDiagnosticsCache.set(linterCacheKey(filePath, linter.name), {
+                mtime: stat.mtimeMs,
+                size: stat.size,
+                diagnostics: diags,
+            });
+        } catch {
+            // Cache update failure is non-critical
+        }
+
         return diags;
     } catch (err) {
         output.appendLine(`[${linter.name}] failed: ${String(err)}`);
@@ -643,7 +728,7 @@ async function spawnTargetLinters(
 
     const diagnostics = await Promise.all(
         matchingLinters.map(async (linter) => {
-            const linterDiagnostics = await spawnLinter(linter, filePath, output, statusBar);
+            const linterDiagnostics = await spawnLinter(linter, filePath, output, statusBar, trigger);
             onLinterDiagnostics(linterDiagnostics);
             return linterDiagnostics;
         })
@@ -817,7 +902,7 @@ export function runLinters(
     diagnostics: vscode.DiagnosticCollection,
     output: vscode.OutputChannel,
     statusBar: vscode.StatusBarItem
-): void {
+): Promise<void> {
     const targets = getConfiguredTargets();
     const uri = vscode.Uri.file(filePath);
     const runId = nextRunId++;
@@ -829,10 +914,10 @@ export function runLinters(
 
     if (matching.length === 0) {
         activeRunIds.delete(filePath);
-        return;
+        return Promise.resolve();
     }
 
-    Promise.all(
+    return Promise.all(
         matching.map((target) =>
             spawnTargetLinters(target, filePath, trigger, output, statusBar, (linterDiagnostics) => {
                 if (activeRunIds.get(filePath) !== runId || linterDiagnostics.length === 0) {
@@ -925,7 +1010,8 @@ export async function runRunnableLinters(
                             runnable.linter,
                             filePath,
                             output,
-                            statusBar
+                            statusBar,
+                            'manual'
                         );
                         if (
                             activeRunIds.get(filePath) !== runId ||

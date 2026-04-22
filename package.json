@@ -45,6 +45,10 @@
         "title": "LintRunner: Run Fixers"
       },
       {
+        "command": "lintRunner.clearDiagnostics",
+        "title": "LintRunner: Clear Diagnostics"
+      },
+      {
         "command": "lintRunner.actions",
         "title": "LintRunner: Open Actions Menu"
       }
