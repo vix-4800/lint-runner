@@ -278,6 +278,18 @@
                               "enum": ["stdout", "stderr", "both"],
                               "default": "both",
                               "description": "Which output stream(s) to parse. Defaults to 'both'."
+                            },
+                            "defaultSeverity": {
+                              "type": "string",
+                              "enum": ["error", "warning", "info", "information"],
+                              "default": "warning",
+                              "description": "Severity to use when the regex pattern does not capture a severity group."
+                            },
+                            "messageFormat": {
+                              "type": "string",
+                              "enum": ["plain", "json"],
+                              "default": "plain",
+                              "description": "How to decode the captured message group. Use 'json' when matching inside JSON string values."
                             }
                           }
                         }
@@ -501,6 +513,18 @@
                         "enum": ["stdout", "stderr", "both"],
                         "default": "both",
                         "description": "Which output stream(s) to parse. Defaults to 'both'."
+                      },
+                      "defaultSeverity": {
+                        "type": "string",
+                        "enum": ["error", "warning", "info", "information"],
+                        "default": "warning",
+                        "description": "Severity to use when the regex pattern does not capture a severity group."
+                      },
+                      "messageFormat": {
+                        "type": "string",
+                        "enum": ["plain", "json"],
+                        "default": "plain",
+                        "description": "How to decode the captured message group. Use 'json' when matching inside JSON string values."
                       }
                     }
                   }
