@@ -57,6 +57,25 @@
     "configuration": {
       "title": "LintRunner",
       "properties": {
+        "lintRunner.debounceMs": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Delay in milliseconds before running linters and fixers after a file is saved. Useful when auto-save is enabled with a short interval. Set to 0 to disable debouncing."
+        },
+        "lintRunner.ignorePatterns": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Glob patterns for files to skip. Checked against the file name, workspace-relative path, and full path. Files matching any pattern are not linted or fixed."
+        },
+        "lintRunner.respectGitignore": {
+          "type": "boolean",
+          "default": false,
+          "description": "Skip files ignored by .gitignore. Requires git to be available on PATH. The workspace root is used as the working directory for git check-ignore."
+        },
         "lintRunner.targets": {
           "type": "array",
           "default": [],
