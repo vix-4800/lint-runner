@@ -11,6 +11,7 @@ import {
     parseLinterOutput,
     resolveConfiguredTargets,
     shouldRunLinter,
+    type LinterConfig,
 } from '../linterRunner.js';
 import { parseAnsibleLintOutput } from '../parser/ansibleLintParser.js';
 import { parseJsonOutput } from '../parser/jsonParser.js';
@@ -251,7 +252,7 @@ suite('Linter Runner', () => {
                 filePatterns: ['*.html'],
                 command: 'lint',
                 args: ['${file}'],
-                parser: 'missing-parser',
+                parser: 'missing-parser' as LinterConfig['parser'],
                 run: 'manual',
             },
             {
@@ -370,13 +371,13 @@ suite('Linter Runner', () => {
     });
 
     test('runs onOpen linters again on save', () => {
-        const linter = {
+        const linter: LinterConfig = {
             name: 'markdownlint',
             filePatterns: ['*.md'],
             command: 'markdownlint',
             args: ['${file}'],
             parser: 'json',
-            run: 'onOpen' as const,
+            run: 'onOpen',
         };
 
         assert.strictEqual(shouldRunLinter(linter, 'onOpen'), true);
@@ -384,13 +385,13 @@ suite('Linter Runner', () => {
     });
 
     test('does not run onSave linters on open', () => {
-        const linter = {
+        const linter: LinterConfig = {
             name: 'eslint',
             filePatterns: ['*.ts'],
             command: 'eslint',
             args: ['${file}'],
             parser: 'json',
-            run: 'onSave' as const,
+            run: 'onSave',
         };
 
         assert.strictEqual(shouldRunLinter(linter, 'onOpen'), false);
@@ -398,13 +399,13 @@ suite('Linter Runner', () => {
     });
 
     test('does not run disabled linters', () => {
-        const linter = {
+        const linter: LinterConfig = {
             name: 'eslint',
             filePatterns: ['*.ts'],
             command: 'eslint',
             args: ['${file}'],
             parser: 'json',
-            run: 'onSave' as const,
+            run: 'onSave',
             enabled: false,
         };
 
@@ -899,6 +900,271 @@ suite('Ansible-lint Parser', () => {
     test('multiple pairs', () => {
         const input = 'rule-a: Desc A.\nfile.yml:1 msg A\n\nrule-b: Desc B.\nfile.yml:5 msg B';
         const diags = parseAnsibleLintOutput(input, 'ansible-lint');
+        assert.strictEqual(diags.length, 2);
+    });
+});
+
+suite('Regex Parser', () => {
+    const BASIC_PATTERN = String.raw`(?<line>\d+):(?<message>.+)`;
+    const FULL_PATTERN =
+        String.raw`(?<line>\d+):(?<col>\d+):\s*(?<severity>\w+):\s*(?<message>.+?)\s*\[(?<code>[\w-]+)\]`;
+
+    test('empty input returns no diagnostics', () => {
+        const diags = parseLinterOutput(
+            {
+                name: 'test',
+                filePatterns: ['*'],
+                command: 'test',
+                args: [],
+                parser: { pattern: BASIC_PATTERN },
+                run: 'manual',
+            },
+            { code: 0, stdout: '', stderr: '' }
+        );
+        assert.strictEqual(diags.length, 0);
+    });
+
+    test('basic match: line and message', () => {
+        const diags = parseLinterOutput(
+            {
+                name: 'test',
+                filePatterns: ['*'],
+                command: 'test',
+                args: [],
+                parser: { pattern: BASIC_PATTERN },
+                run: 'manual',
+            },
+            { code: 1, stdout: '3:Something went wrong', stderr: '' }
+        );
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].range.start.line, 2);
+        assert.strictEqual(diags[0].message, 'Something went wrong');
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
+        assert.strictEqual(diags[0].source, 'test');
+    });
+
+    test('with column: sets explicit character position', () => {
+        const diags = parseLinterOutput(
+            {
+                name: 'test',
+                filePatterns: ['*'],
+                command: 'test',
+                args: [],
+                parser: { pattern: String.raw`(?<line>\d+):(?<col>\d+):(?<message>.+)` },
+                run: 'manual',
+            },
+            { code: 1, stdout: '5:10:Some issue', stderr: '' }
+        );
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].range.start.line, 4);
+        assert.strictEqual(diags[0].range.start.character, 9);
+    });
+
+    test('severity mapping: error', () => {
+        const diags = parseLinterOutput(
+            {
+                name: 'test',
+                filePatterns: ['*'],
+                command: 'test',
+                args: [],
+                parser: {
+                    pattern: String.raw`(?<line>\d+):(?<severity>\w+):(?<message>.+)`,
+                    flags: 'g',
+                },
+                run: 'manual',
+            },
+            { code: 1, stdout: '1:error:Bad thing', stderr: '' }
+        );
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+    });
+
+    test('severity mapping: info/information', () => {
+        const pattern = String.raw`(?<line>\d+):(?<severity>\w+):(?<message>.+)`;
+        const mkLinter = (sev: string) =>
+            parseLinterOutput(
+                {
+                    name: 'test',
+                    filePatterns: ['*'],
+                    command: 'test',
+                    args: [],
+                    parser: { pattern },
+                    run: 'manual',
+                },
+                { code: 0, stdout: `1:${sev}:Hint`, stderr: '' }
+            );
+
+        assert.strictEqual(mkLinter('info')[0].severity, vscode.DiagnosticSeverity.Information);
+        assert.strictEqual(
+            mkLinter('information')[0].severity,
+            vscode.DiagnosticSeverity.Information
+        );
+    });
+
+    test('severity mapping: unknown defaults to warning', () => {
+        const diags = parseLinterOutput(
+            {
+                name: 'test',
+                filePatterns: ['*'],
+                command: 'test',
+                args: [],
+                parser: { pattern: String.raw`(?<line>\d+):(?<severity>\w+):(?<message>.+)` },
+                run: 'manual',
+            },
+            { code: 1, stdout: '1:notice:Something', stderr: '' }
+        );
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
+    });
+
+    test('code group sets diagnostic code', () => {
+        const diags = parseLinterOutput(
+            {
+                name: 'test',
+                filePatterns: ['*'],
+                command: 'test',
+                args: [],
+                parser: {
+                    pattern: FULL_PATTERN,
+                    flags: 'g',
+                },
+                run: 'manual',
+            },
+            { code: 1, stdout: '3:7: error: Unused import [no-unused-imports]', stderr: '' }
+        );
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].code, 'no-unused-imports');
+        assert.strictEqual(diags[0].message, 'Unused import');
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+    });
+
+    test('multiple matches returns one diagnostic per match', () => {
+        const diags = parseLinterOutput(
+            {
+                name: 'test',
+                filePatterns: ['*'],
+                command: 'test',
+                args: [],
+                parser: { pattern: BASIC_PATTERN, flags: 'gm' },
+                run: 'manual',
+            },
+            { code: 1, stdout: '1:First error\n2:Second error\n3:Third error', stderr: '' }
+        );
+        assert.strictEqual(diags.length, 3);
+        assert.strictEqual(diags[0].range.start.line, 0);
+        assert.strictEqual(diags[1].range.start.line, 1);
+        assert.strictEqual(diags[2].range.start.line, 2);
+    });
+
+    test('unmatched lines are silently skipped', () => {
+        const diags = parseLinterOutput(
+            {
+                name: 'test',
+                filePatterns: ['*'],
+                command: 'test',
+                args: [],
+                parser: { pattern: BASIC_PATTERN, flags: 'gm' },
+                run: 'manual',
+            },
+            {
+                code: 1,
+                stdout: 'This line does not match\n5:This line matches\nAnother non-match',
+                stderr: '',
+            }
+        );
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].range.start.line, 4);
+    });
+
+    test('invalid regex returns no diagnostics', () => {
+        const diags = parseLinterOutput(
+            {
+                name: 'test',
+                filePatterns: ['*'],
+                command: 'test',
+                args: [],
+                parser: { pattern: '(?<line>\\d+' }, // unclosed group
+                run: 'manual',
+            },
+            { code: 1, stdout: '1:message', stderr: '' }
+        );
+        assert.strictEqual(diags.length, 0);
+    });
+
+    test('match missing required message group is skipped', () => {
+        // Pattern has line but no message group
+        const diags = parseLinterOutput(
+            {
+                name: 'test',
+                filePatterns: ['*'],
+                command: 'test',
+                args: [],
+                parser: { pattern: String.raw`(?<line>\d+):\w+` },
+                run: 'manual',
+            },
+            { code: 1, stdout: '5:error', stderr: '' }
+        );
+        assert.strictEqual(diags.length, 0);
+    });
+
+    test('output:stdout parses only stdout', () => {
+        const diags = parseLinterOutput(
+            {
+                name: 'test',
+                filePatterns: ['*'],
+                command: 'test',
+                args: [],
+                parser: { pattern: BASIC_PATTERN, output: 'stdout' },
+                run: 'manual',
+            },
+            { code: 1, stdout: '1:From stdout', stderr: '2:From stderr' }
+        );
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].message, 'From stdout');
+    });
+
+    test('output:stderr parses only stderr', () => {
+        const diags = parseLinterOutput(
+            {
+                name: 'test',
+                filePatterns: ['*'],
+                command: 'test',
+                args: [],
+                parser: { pattern: BASIC_PATTERN, output: 'stderr' },
+                run: 'manual',
+            },
+            { code: 1, stdout: '1:From stdout', stderr: '2:From stderr' }
+        );
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].message, 'From stderr');
+    });
+
+    test('output:both (default) parses stdout and stderr', () => {
+        const diags = parseLinterOutput(
+            {
+                name: 'test',
+                filePatterns: ['*'],
+                command: 'test',
+                args: [],
+                parser: { pattern: BASIC_PATTERN, output: 'both' },
+                run: 'manual',
+            },
+            { code: 1, stdout: '1:From stdout', stderr: '2:From stderr' }
+        );
+        assert.strictEqual(diags.length, 2);
+    });
+
+    test('g flag is added automatically when absent', () => {
+        // Without 'g' flag exec would only return first match; with auto-added 'g' all matches found
+        const diags = parseLinterOutput(
+            {
+                name: 'test',
+                filePatterns: ['*'],
+                command: 'test',
+                args: [],
+                parser: { pattern: BASIC_PATTERN, flags: 'm' }, // no g, multiline
+                run: 'manual',
+            },
+            { code: 1, stdout: '1:First\n2:Second', stderr: '' }
+        );
         assert.strictEqual(diags.length, 2);
     });
 });

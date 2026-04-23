@@ -244,17 +244,45 @@
                       }
                     },
                     "parser": {
-                      "type": "string",
-                      "enum": [
-                        "json",
-                        "jsonlint",
-                        "parsable",
-                        "taplo",
-                        "xmllint",
-                        "linthtml",
-                        "ansible-lint"
+                      "oneOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "json",
+                            "jsonlint",
+                            "parsable",
+                            "taplo",
+                            "xmllint",
+                            "linthtml",
+                            "ansible-lint"
+                          ],
+                          "description": "Built-in output parser to use."
+                        },
+                        {
+                          "type": "object",
+                          "required": ["pattern"],
+                          "additionalProperties": false,
+                          "description": "Regex parser: extract diagnostics using named capture groups in the pattern.",
+                          "properties": {
+                            "pattern": {
+                              "type": "string",
+                              "description": "JavaScript regular expression. Named capture groups: `line` and `message` are required; `col`, `severity` (error/warning/info), and `code` are optional."
+                            },
+                            "flags": {
+                              "type": "string",
+                              "default": "g",
+                              "description": "JavaScript regex flags (e.g. \"gm\"). The 'g' flag is added automatically."
+                            },
+                            "output": {
+                              "type": "string",
+                              "enum": ["stdout", "stderr", "both"],
+                              "default": "both",
+                              "description": "Which output stream(s) to parse. Defaults to 'both'."
+                            }
+                          }
+                        }
                       ],
-                      "description": "Output parser to use."
+                      "description": "Output parser to use. Provide a built-in parser name or a regex parser config object."
                     },
                     "run": {
                       "type": "string",
@@ -439,17 +467,45 @@
                 }
               },
               "parser": {
-                "type": "string",
-                "enum": [
-                  "json",
-                  "jsonlint",
-                  "parsable",
-                  "taplo",
-                  "xmllint",
-                  "linthtml",
-                  "ansible-lint"
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "json",
+                      "jsonlint",
+                      "parsable",
+                      "taplo",
+                      "xmllint",
+                      "linthtml",
+                      "ansible-lint"
+                    ],
+                    "description": "Built-in output parser to use."
+                  },
+                  {
+                    "type": "object",
+                    "required": ["pattern"],
+                    "additionalProperties": false,
+                    "description": "Regex parser: extract diagnostics using named capture groups in the pattern.",
+                    "properties": {
+                      "pattern": {
+                        "type": "string",
+                        "description": "JavaScript regular expression. Named capture groups: `line` and `message` are required; `col`, `severity` (error/warning/info), and `code` are optional."
+                      },
+                      "flags": {
+                        "type": "string",
+                        "default": "g",
+                        "description": "JavaScript regex flags (e.g. \"gm\"). The 'g' flag is added automatically."
+                      },
+                      "output": {
+                        "type": "string",
+                        "enum": ["stdout", "stderr", "both"],
+                        "default": "both",
+                        "description": "Which output stream(s) to parse. Defaults to 'both'."
+                      }
+                    }
+                  }
                 ],
-                "description": "Output parser to use."
+                "description": "Output parser to use. Provide a built-in parser name or a regex parser config object."
               },
               "run": {
                 "type": "string",
