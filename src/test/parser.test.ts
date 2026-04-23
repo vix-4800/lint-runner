@@ -632,7 +632,7 @@ suite('Linter Runner', () => {
             [
                 {
                     name: 'Non-JS',
-                    filePatterns: ['*.[!j][!s]'],
+                    filePatterns: ['*.[!j]s'],
                     linters: [
                         {
                             name: 'test',
@@ -649,12 +649,12 @@ suite('Linter Runner', () => {
         assert.strictEqual(
             collectRunnableLinters(targets, '/tmp/example.ts', 'manual').length,
             1,
-            '*.[!j][!s] should match .ts'
+            '*.[!j]s should match .ts'
         );
         assert.strictEqual(
             collectRunnableLinters(targets, '/tmp/example.js', 'manual').length,
             0,
-            '*.[!j][!s] should not match .js'
+            '*.[!j]s should not match .js'
         );
     });
 
