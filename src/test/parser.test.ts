@@ -6,6 +6,7 @@ import {
     collectRunnableLinters,
     buildCommandEnv,
     collectRunnableFixers,
+    matchesIgnorePatterns,
     normalizeDiagnosticRanges,
     parseLinterOutput,
     resolveConfiguredTargets,
@@ -589,6 +590,117 @@ suite('Linter Runner', () => {
             0,
             '*.{ts,tsx} should not match .js files'
         );
+    });
+    test('matches files with bracket expression glob patterns', () => {
+        const targets = resolveConfiguredTargets(
+            [
+                {
+                    name: 'Makefile',
+                    filePatterns: ['[Mm]akefile'],
+                    linters: [
+                        {
+                            name: 'checkmake',
+                            command: 'checkmake',
+                            args: ['${file}'],
+                            parser: 'json',
+                        },
+                    ],
+                },
+            ],
+            []
+        );
+
+        assert.strictEqual(
+            collectRunnableLinters(targets, '/tmp/Makefile', 'manual').length,
+            1,
+            '[Mm]akefile should match Makefile'
+        );
+        assert.strictEqual(
+            collectRunnableLinters(targets, '/tmp/makefile', 'manual').length,
+            1,
+            '[Mm]akefile should match makefile'
+        );
+        assert.strictEqual(
+            collectRunnableLinters(targets, '/tmp/GNUMakefile', 'manual').length,
+            0,
+            '[Mm]akefile should not match GNUMakefile'
+        );
+    });
+
+    test('matches files with negated bracket expression glob patterns', () => {
+        const targets = resolveConfiguredTargets(
+            [
+                {
+                    name: 'Non-JS',
+                    filePatterns: ['*.[!j][!s]'],
+                    linters: [
+                        {
+                            name: 'test',
+                            command: 'test',
+                            args: ['${file}'],
+                            parser: 'json',
+                        },
+                    ],
+                },
+            ],
+            []
+        );
+
+        assert.strictEqual(
+            collectRunnableLinters(targets, '/tmp/example.ts', 'manual').length,
+            1,
+            '*.[!j][!s] should match .ts'
+        );
+        assert.strictEqual(
+            collectRunnableLinters(targets, '/tmp/example.js', 'manual').length,
+            0,
+            '*.[!j][!s] should not match .js'
+        );
+    });
+
+    test('treats unclosed [ as literal character', () => {
+        const targets = resolveConfiguredTargets(
+            [
+                {
+                    name: 'Literal Bracket',
+                    filePatterns: ['[file.txt'],
+                    linters: [
+                        {
+                            name: 'test',
+                            command: 'test',
+                            args: ['${file}'],
+                            parser: 'json',
+                        },
+                    ],
+                },
+            ],
+            []
+        );
+
+        assert.strictEqual(
+            collectRunnableLinters(targets, '/tmp/[file.txt', 'manual').length,
+            1,
+            'unclosed [ should be treated as literal'
+        );
+        assert.strictEqual(
+            collectRunnableLinters(targets, '/tmp/file.txt', 'manual').length,
+            0,
+            'unclosed [ should not be dropped silently'
+        );
+    });
+
+    test('matchesIgnorePatterns returns false for empty patterns', () => {
+        assert.strictEqual(matchesIgnorePatterns('/tmp/example.ts', []), false);
+    });
+
+    test('matchesIgnorePatterns matches file names', () => {
+        assert.strictEqual(matchesIgnorePatterns('/tmp/vendor/lib.ts', ['vendor/**']), true);
+        assert.strictEqual(matchesIgnorePatterns('/tmp/src/lib.ts', ['vendor/**']), false);
+    });
+
+    test('matchesIgnorePatterns matches extension patterns', () => {
+        assert.strictEqual(matchesIgnorePatterns('/tmp/example.min.js', ['*.min.js']), true);
+        assert.strictEqual(matchesIgnorePatterns('/tmp/example.ts', ['*.min.js']), false);
     });
 });
 

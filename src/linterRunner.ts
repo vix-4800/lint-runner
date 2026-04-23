@@ -135,6 +135,33 @@ function globPatternToRegexBody(pattern: string): string {
             result += '[^/]*';
         } else if (c === '?') {
             result += '[^/]';
+        } else if (c === '[') {
+            // Handle bracket expressions like [abc], [a-z], [!abc]
+            let j = i + 1;
+            // Per POSIX glob spec, ] and ^ at the very start (or right after !)
+            // are treated as literal characters, not as end-of-class or negation.
+            // ^ is accepted here as an alias for ! (same as many shells/tools).
+            if (j < pattern.length && (pattern[j] === '!' || pattern[j] === '^')) {
+                j++;
+            }
+            if (j < pattern.length && pattern[j] === ']') {
+                j++;
+            }
+            while (j < pattern.length && pattern[j] !== ']') {
+                j++;
+            }
+            if (j < pattern.length) {
+                let inner = pattern.slice(i + 1, j);
+                // Convert glob negation [!...] to regex negation [^...]
+                if (inner.startsWith('!')) {
+                    inner = `^${inner.slice(1)}`;
+                }
+                result += `[${inner}]`;
+                i = j;
+            } else {
+                // No closing ], treat [ as a literal character
+                result += '\\[';
+            }
         } else if (c === '{') {
             let j = i + 1;
             let depth = 1;
@@ -882,6 +909,94 @@ export function getRunnableLinters(filePath: string, trigger: RunMode = 'manual'
     return collectRunnableLinters(getConfiguredTargets(), filePath, trigger);
 }
 
+export function matchesIgnorePatterns(filePath: string, patterns: string[]): boolean {
+    if (patterns.length === 0) {
+        return false;
+    }
+    return matchesPatterns(filePath, patterns);
+}
+
+async function checkGitIgnore(filePath: string): Promise<boolean> {
+    const cwd = resolveWorkingDirectory(filePath);
+    if (cwd === undefined) {
+        return false;
+    }
+    return new Promise<boolean>((resolve) => {
+        let done = false;
+        // filePath is a VS Code file URI path (already validated by the editor).
+        // It is passed as an argv element, not interpolated into a shell string,
+        // so there is no shell-injection risk. The -- separator prevents git from
+        // misinterpreting paths that start with '-'.
+        const proc = cp.spawn('git', ['check-ignore', '-q', '--', filePath], {
+            cwd,
+            stdio: 'ignore',
+        });
+        proc.on('close', (code) => {
+            if (done) {
+                return;
+            }
+            done = true;
+            resolve(code === 0);
+        });
+        proc.on('error', () => {
+            if (done) {
+                return;
+            }
+            done = true;
+            resolve(false);
+        });
+    });
+}
+
+async function shouldSkipFile(filePath: string): Promise<boolean> {
+    const config = vscode.workspace.getConfiguration('lintRunner');
+    const ignorePatterns = config.get<string[]>('ignorePatterns') ?? [];
+    if (matchesIgnorePatterns(filePath, ignorePatterns)) {
+        return true;
+    }
+    if (config.get<boolean>('respectGitignore') === true) {
+        return checkGitIgnore(filePath);
+    }
+    return false;
+}
+
+function createDiagnosticsRun(
+    filePath: string,
+    uri: vscode.Uri,
+    diagnostics: vscode.DiagnosticCollection
+): {
+    publish: DiagnosticsHandler;
+    finish: () => void;
+    abort: () => void;
+} {
+    const runId = nextRunId++;
+    activeRunIds.set(filePath, runId);
+    diagnostics.delete(uri);
+    const accumulated: vscode.Diagnostic[] = [];
+
+    const isActive = (): boolean => activeRunIds.get(filePath) === runId;
+
+    return {
+        publish(diags) {
+            if (!isActive() || diags.length === 0) {
+                return;
+            }
+            accumulated.push(...diags);
+            diagnostics.set(uri, accumulated);
+        },
+        finish() {
+            if (isActive()) {
+                activeRunIds.delete(filePath);
+            }
+        },
+        abort() {
+            if (isActive()) {
+                activeRunIds.delete(filePath);
+            }
+        },
+    };
+}
+
 async function runRunnableFixer(
     fixer: RunnableFixer,
     filePath: string,
@@ -896,50 +1011,37 @@ async function runRunnableFixer(
     await runTargetFixer(fixer.targetName, fixer.fixer, filePath, output, statusBar);
 }
 
-export function runLinters(
+export async function runLinters(
     filePath: string,
     trigger: RunMode,
     diagnostics: vscode.DiagnosticCollection,
     output: vscode.OutputChannel,
     statusBar: vscode.StatusBarItem
 ): Promise<void> {
+    if (await shouldSkipFile(filePath)) {
+        return;
+    }
+
     const targets = getConfiguredTargets();
     const uri = vscode.Uri.file(filePath);
-    const runId = nextRunId++;
-    activeRunIds.set(filePath, runId);
-    diagnostics.delete(uri);
-    const currentDiagnostics: vscode.Diagnostic[] = [];
+    const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics);
 
     const matching = targets.filter((target) => matchesPatterns(filePath, target.filePatterns));
-
     if (matching.length === 0) {
-        activeRunIds.delete(filePath);
-        return Promise.resolve();
+        finish();
+        return;
     }
 
     return Promise.all(
         matching.map((target) =>
-            spawnTargetLinters(target, filePath, trigger, output, statusBar, (linterDiagnostics) => {
-                if (activeRunIds.get(filePath) !== runId || linterDiagnostics.length === 0) {
-                    return;
-                }
-
-                currentDiagnostics.push(...linterDiagnostics);
-                diagnostics.set(uri, currentDiagnostics);
-            })
+            spawnTargetLinters(target, filePath, trigger, output, statusBar, publish)
         )
     )
-        .then((allDiags) => {
-            if (activeRunIds.get(filePath) !== runId) {
-                return;
-            }
-            activeRunIds.delete(filePath);
-            diagnostics.set(uri, allDiags.flat());
+        .then(() => {
+            finish();
         })
         .then(undefined, (err: unknown) => {
-            if (activeRunIds.get(filePath) === runId) {
-                activeRunIds.delete(filePath);
-            }
+            abort();
             output.appendLine(`[LintRunner] failed: ${String(err)}`);
         });
 }
@@ -951,6 +1053,10 @@ export async function runFixers(
     trigger: FixerRunMode = 'manual',
     fixers: readonly RunnableFixer[] = getRunnableFixers(filePath, trigger)
 ): Promise<number> {
+    if (await shouldSkipFile(filePath)) {
+        return 0;
+    }
+
     let fixersRun = 0;
 
     for (const fixer of fixers) {
@@ -973,25 +1079,21 @@ export async function runRunnableLinters(
     }
 
     const uri = vscode.Uri.file(filePath);
-    const runId = nextRunId++;
-    activeRunIds.set(filePath, runId);
-    diagnostics.delete(uri);
-    const currentDiagnostics: vscode.Diagnostic[] = [];
+    const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics);
     let lintersRun = 0;
     const lintersByTarget = new Map<ResolvedTargetConfig, RunnableLinter[]>();
 
     for (const runnable of linters) {
-        const targetLinters = lintersByTarget.get(runnable.target);
-        if (targetLinters === undefined) {
+        const existing = lintersByTarget.get(runnable.target);
+        if (existing === undefined) {
             lintersByTarget.set(runnable.target, [runnable]);
-            continue;
+        } else {
+            existing.push(runnable);
         }
-
-        targetLinters.push(runnable);
     }
 
     try {
-        const allDiags = await Promise.all(
+        await Promise.all(
             [...lintersByTarget.entries()].map(async ([target, targetLinters]) => {
                 const shouldRunTargetLinters = await runPreCommands(
                     target.name,
@@ -1000,10 +1102,10 @@ export async function runRunnableLinters(
                     output
                 );
                 if (!shouldRunTargetLinters) {
-                    return [];
+                    return;
                 }
 
-                const targetDiagnostics = await Promise.all(
+                await Promise.all(
                     targetLinters.map(async (runnable) => {
                         lintersRun++;
                         const linterDiagnostics = await spawnLinter(
@@ -1013,31 +1115,14 @@ export async function runRunnableLinters(
                             statusBar,
                             'manual'
                         );
-                        if (
-                            activeRunIds.get(filePath) !== runId ||
-                            linterDiagnostics.length === 0
-                        ) {
-                            return linterDiagnostics;
-                        }
-
-                        currentDiagnostics.push(...linterDiagnostics);
-                        diagnostics.set(uri, currentDiagnostics);
-                        return linterDiagnostics;
+                        publish(linterDiagnostics);
                     })
                 );
-
-                return targetDiagnostics.flat();
             })
         );
-
-        if (activeRunIds.get(filePath) === runId) {
-            activeRunIds.delete(filePath);
-            diagnostics.set(uri, allDiags.flat());
-        }
+        finish();
     } catch (err) {
-        if (activeRunIds.get(filePath) === runId) {
-            activeRunIds.delete(filePath);
-        }
+        abort();
         output.appendLine(`[LintRunner] failed: ${String(err)}`);
     }
 

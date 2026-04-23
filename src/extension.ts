@@ -13,6 +13,7 @@ import {
 
 let untrustedWorkspaceWarningShown = false;
 const skipFixersOnSave = new Set<string>();
+const saveDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 type OnOpenDocument = Pick<vscode.TextDocument, 'fileName' | 'isUntitled' | 'uri'>;
 type OnOpenEditor = {
@@ -357,16 +358,50 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
+    const debounceTimerDisposable: vscode.Disposable = {
+        dispose() {
+            for (const t of saveDebounceTimers.values()) {
+                clearTimeout(t);
+            }
+            saveDebounceTimers.clear();
+        },
+    };
+
     context.subscriptions.push(
+        debounceTimerDisposable,
         vscode.workspace.onDidSaveTextDocument(async (doc) => {
             if (!canRunWorkspaceCommands(false)) {
                 return;
             }
-            if (!skipFixersOnSave.delete(doc.fileName)) {
-                await runFixers(doc.fileName, output, runningStatusBar, 'onSave');
+
+            // Capture the fixer-skip flag synchronously before any async delay,
+            // because runManualFixersForEditor removes the entry from the Set during
+            // the save() call and the finally block runs right after it resolves.
+            const skipFixer = skipFixersOnSave.delete(doc.fileName);
+
+            const existingTimer = saveDebounceTimers.get(doc.fileName);
+            if (existingTimer !== undefined) {
+                clearTimeout(existingTimer);
             }
-            runLinters(doc.fileName, 'onSave', diagnostics, output, runningStatusBar);
-            updateActionsStatusBar(actionsStatusBar);
+
+            const debounceMs =
+                vscode.workspace.getConfiguration('lintRunner').get<number>('debounceMs') ?? 0;
+
+            const doRun = async (): Promise<void> => {
+                saveDebounceTimers.delete(doc.fileName);
+                if (!skipFixer) {
+                    await runFixers(doc.fileName, output, runningStatusBar, 'onSave');
+                }
+                runLinters(doc.fileName, 'onSave', diagnostics, output, runningStatusBar);
+                updateActionsStatusBar(actionsStatusBar);
+            };
+
+            if (debounceMs <= 0) {
+                await doRun();
+            } else {
+                const timer = setTimeout(() => { doRun().catch(() => undefined); }, debounceMs);
+                saveDebounceTimers.set(doc.fileName, timer);
+            }
         })
     );
 

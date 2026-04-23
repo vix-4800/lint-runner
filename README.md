@@ -142,6 +142,45 @@ Unknown variables are left unchanged.
 LintRunner does not run commands from workspace config until the workspace is trusted. In an untrusted workspace,
 `LintRunner: Run Linters`, `LintRunner: Run Fixers`, runs on open, and runs on save are skipped.
 
+## Ignoring Files
+
+### `lintRunner.ignorePatterns`
+
+Glob patterns for files that LintRunner should never lint or fix. The same matching rules apply as for target
+`filePatterns` (checked against the file name, workspace-relative path, and full path).
+
+```json
+{
+    "lintRunner.ignorePatterns": ["vendor/**", "*.min.js", "dist/**"]
+}
+```
+
+### `lintRunner.respectGitignore`
+
+When `true`, LintRunner skips any file that `git check-ignore` reports as ignored by `.gitignore`. Requires `git` to
+be available on `PATH`. The file's workspace folder is used as the working directory.
+
+```json
+{
+    "lintRunner.respectGitignore": true
+}
+```
+
+## Debounce
+
+`lintRunner.debounceMs` sets a delay (in milliseconds) between a save event and the actual linter/fixer run. This is
+useful when VS Code's auto-save is enabled with a very short interval, to avoid spawning a new process on every
+keystroke.
+
+```json
+{
+    "lintRunner.debounceMs": 300
+}
+```
+
+The default is `0` (no debounce). When multiple saves arrive within the debounce window, only the last one triggers a
+run.
+
 ## Fix Commands
 
 `fixCommand` and `fixers` run via `LintRunner: Run Fixers`. If a fixer command has `run: "onSave"`, it also runs when a
