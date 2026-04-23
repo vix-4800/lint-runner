@@ -12,6 +12,7 @@ import {
     resolveConfiguredTargets,
     shouldRunLinter,
     type LinterConfig,
+    type RegexParserConfig,
 } from '../linterRunner.js';
 import { parseAnsibleLintOutput } from '../parser/ansibleLintParser.js';
 import { parseJsonOutput } from '../parser/jsonParser.js';
@@ -20,6 +21,25 @@ import { parseLinthtmlOutput } from '../parser/linthtmlParser.js';
 import { parseParsableOutput } from '../parser/parsableParser.js';
 import { parseTaploOutput } from '../parser/taploParser.js';
 import { parseXmllintOutput } from '../parser/xmllintParser.js';
+
+function parseRegexFixture(
+    name: string,
+    parser: RegexParserConfig,
+    stdout: string,
+    stderr = ''
+): vscode.Diagnostic[] {
+    return parseLinterOutput(
+        {
+            name,
+            filePatterns: ['*'],
+            command: 'test',
+            args: [],
+            parser,
+            run: 'manual',
+        },
+        { code: 1, stdout, stderr }
+    );
+}
 
 suite('JSON Parser', () => {
     test('empty input returns no diagnostics', () => {
@@ -1239,6 +1259,35 @@ suite('Regex Parser', () => {
         );
     });
 
+    test('severity mapping: aliases used by CLI formatters', () => {
+        const pattern = String.raw`(?<line>\d+):(?<severity>\w+):(?<message>.+)`;
+        const cases: Array<[string, vscode.DiagnosticSeverity]> = [
+            ['fatal', vscode.DiagnosticSeverity.Error],
+            ['err', vscode.DiagnosticSeverity.Error],
+            ['warn', vscode.DiagnosticSeverity.Warning],
+            ['notice', vscode.DiagnosticSeverity.Warning],
+            ['note', vscode.DiagnosticSeverity.Information],
+            ['style', vscode.DiagnosticSeverity.Information],
+            ['hint', vscode.DiagnosticSeverity.Information],
+        ];
+
+        for (const [severity, expected] of cases) {
+            const diags = parseRegexFixture('test', { pattern }, `1:${severity}:Message`);
+            assert.strictEqual(diags[0].severity, expected);
+        }
+    });
+
+    test('defaultSeverity is used when severity group is missing', () => {
+        const diags = parseRegexFixture(
+            'test',
+            { pattern: BASIC_PATTERN, defaultSeverity: 'error' },
+            '1:Missing severity'
+        );
+
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+    });
+
     test('severity mapping: unknown defaults to warning', () => {
         const diags = parseLinterOutput(
             {
@@ -1405,5 +1454,470 @@ suite('Regex Parser', () => {
             { code: 1, stdout: '1:First\n2:Second', stderr: '' }
         );
         assert.strictEqual(diags.length, 2);
+    });
+
+    test('zero-width matches do not hang parser', () => {
+        const diags = parseRegexFixture(
+            'test',
+            { pattern: String.raw`(?=(?<line>\d):(?<message>\w+))`, flags: 'gm' },
+            '1:First\n2:Second'
+        );
+
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].message, 'First');
+        assert.strictEqual(diags[1].message, 'Second');
+    });
+});
+
+suite('Regex Utility Parser Configs', () => {
+    test('shellcheck gcc format', () => {
+        const output = [
+            'lint-test/test.sh:7:16: note: Double quote to prevent globbing and word splitting. [SC2086]',
+            'lint-test/test.sh:7:16: note: Prefer putting braces around variable references even when not strictly required. [SC2250]',
+        ].join('\n');
+        const diags = parseRegexFixture(
+            'Shell Check',
+            {
+                pattern: String.raw`^.+?:(?<line>\d+):(?<col>\d+): (?<severity>\w+): (?<message>.+?) \[(?<code>SC\d+)\]$`,
+                flags: 'gm',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].range.start.line, 6);
+        assert.strictEqual(diags[0].range.start.character, 15);
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Information);
+        assert.strictEqual(diags[0].code, 'SC2086');
+    });
+
+    test('hadolint tty format', () => {
+        const output = [
+            'lint-test/Dockerfile:4 DL3007 warning: Using latest is prone to errors if the image will ever update. Pin the version explicitly to a release tag',
+            'lint-test/Dockerfile:12 DL3025 error: Use arguments JSON notation for CMD and ENTRYPOINT arguments',
+        ].join('\n');
+        const diags = parseRegexFixture(
+            'HadoLint',
+            {
+                pattern: String.raw`^.+?:(?<line>\d+) (?<code>\S+) (?<severity>\w+): (?<message>.+)$`,
+                flags: 'gm',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[1].range.start.line, 11);
+        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diags[1].code, 'DL3025');
+    });
+
+    test('markdownlint default format', () => {
+        const output =
+            'lint-test/test.md:9:1 error MD029/ol-prefix Ordered list item prefix [Expected: 3; Actual: 1; Style: 1/2/3]';
+        const diags = parseRegexFixture(
+            'Markdown Lint',
+            {
+                pattern: String.raw`^.+?:(?<line>\d+):(?<col>\d+) (?<severity>\w+) (?<code>[A-Z0-9]+)(?:/\S+)? (?<message>.+)$`,
+                flags: 'gm',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].code, 'MD029');
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+    });
+
+    test('yamllint parsable format', () => {
+        const output = 'lint-test/test.yml:1:1: [warning] missing document start "---" (document-start)';
+        const diags = parseRegexFixture(
+            'YAML Lint',
+            {
+                pattern: String.raw`^.+?:(?<line>\d+):(?<col>\d+): \[(?<severity>\w+)\] (?<message>.+?) \((?<code>[^)]+)\)$`,
+                flags: 'gm',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].code, 'document-start');
+        assert.strictEqual(diags[0].message, 'missing document start "---"');
+    });
+
+    test('ansible-lint full format', () => {
+        const output = [
+            'fqcn[action-core]: Use FQCN for builtin module actions (debug).',
+            'lint-test/ansible.yml:8:7 Use `ansible.builtin.debug` or `ansible.legacy.debug` instead.',
+            '',
+            'no-changed-when: Commands should not change things if nothing needs doing.',
+            'lint-test/ansible.yml:10 Task/Handler: shell echo done',
+        ].join('\n');
+        const diags = parseRegexFixture(
+            'Ansible Lint',
+            {
+                pattern: String.raw`^(?<code>[a-z][\w.\[\]-]+): (?<message>.+)\n.+?:(?<line>\d+)(?::(?<col>\d+))?`,
+                flags: 'gm',
+                defaultSeverity: 'warning',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].range.start.line, 7);
+        assert.strictEqual(diags[0].range.start.character, 6);
+        assert.strictEqual(diags[0].code, 'fqcn[action-core]');
+        assert.strictEqual(diags[1].range.start.line, 9);
+        assert.strictEqual(diags[1].code, 'no-changed-when');
+    });
+
+    test('ruff github format', () => {
+        const output =
+            '::error title=ruff (F841),file=/home/vix/Code/lint-runner/lint-test/test.py,line=2,col=5,endLine=2,endColumn=6::lint-test/test.py:2:5: F841 Local variable `x` is assigned to but never used%0A  help: Remove assignment to unused variable `x`';
+        const diags = parseRegexFixture(
+            'Ruff',
+            {
+                pattern: String.raw`^::(?<severity>error|warning) title=ruff \((?<code>[^)]+)\),file=[^,]+,line=(?<line>\d+),col=(?<col>\d+),endLine=\d+,endColumn=\d+::(?:[^:]+:\d+:\d+: [A-Z]\d+ )?(?<message>[^\n%]+)`,
+                flags: 'gm',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].range.start.character, 4);
+        assert.strictEqual(diags[0].code, 'F841');
+        assert.strictEqual(diags[0].message, 'Local variable `x` is assigned to but never used');
+    });
+
+    test('dotenv-linter plain format', () => {
+        const output = [
+            'Checking lint-test/.env',
+            'lint-test/.env:1 LowercaseKey: The app_name key should be in uppercase',
+            'lint-test/.env:2 IncorrectDelimiter: The APP ENV key has incorrect delimiter',
+            '',
+            'Found 2 problems',
+        ].join('\n');
+        const diags = parseRegexFixture(
+            'Dotenv Linter',
+            {
+                pattern: String.raw`^.+?:(?<line>\d+) (?<code>[A-Za-z][\w-]*): (?<message>.+)$`,
+                flags: 'gm',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].code, 'LowercaseKey');
+        assert.strictEqual(diags[1].range.start.line, 1);
+    });
+
+    test('luacheck plain format', () => {
+        const output = [
+            "/tmp/lint-runner-test.lua:1:7: (W211) unused variable 'unused'",
+            "/tmp/lint-runner-test.lua:2:7: (W113) accessing undefined variable 'unknown'",
+        ].join('\n');
+        const diags = parseRegexFixture(
+            'LuaCheck',
+            {
+                pattern: String.raw`^.+?:(?<line>\d+):(?<col>\d+): \((?<code>[A-Z]\d+)\) (?<message>.+)$`,
+                flags: 'gm',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].code, 'W211');
+        assert.strictEqual(diags[1].range.start.character, 6);
+    });
+
+    test('taplo syntax format', () => {
+        const output = [
+            'error: invalid TOML',
+            '  ┌─ /tmp/test.toml:1:5',
+            '  │',
+            '1 │ x = ]',
+            '  │     ^ expected value',
+        ].join('\n');
+        const diags = parseRegexFixture(
+            'Taplo',
+            {
+                pattern: String.raw`(?<severity>error|warning|info):\s*(?<message>[^\n]+)[\s\S]*?\u250c\u2500\s+[^:\n]+:(?<line>\d+):(?<col>\d+)`,
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].range.start.line, 0);
+        assert.strictEqual(diags[0].range.start.character, 4);
+        assert.strictEqual(diags[0].message, 'invalid TOML');
+    });
+
+    test('eslint stylish format', () => {
+        const output = [
+            '/home/vix/Code/lint-runner/lint-test/test.js',
+            "  2:7  error    'unused' is assigned a value but never used  no-unused-vars",
+            '  8:1  warning  Unexpected console statement                 no-console',
+        ].join('\n');
+        const diags = parseRegexFixture(
+            'ESLint',
+            {
+                pattern: String.raw`^\s*(?<line>\d+):(?<col>\d+)\s+(?<severity>error|warning)\s+(?<message>.+?)\s{2,}(?<code>\S+)\s*$`,
+                flags: 'gm',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Warning);
+        assert.strictEqual(diags[1].code, 'no-console');
+    });
+
+    test('stylelint compact format', () => {
+        const output =
+            '/home/vix/Code/lint-runner/lint-test/test.css: line 6, col 12, error - Disallowed named color "red" (color-named)';
+        const diags = parseRegexFixture(
+            'Style Lint',
+            {
+                pattern: String.raw`^.+?: line (?<line>\d+), col (?<col>\d+), (?<severity>\w+) - (?<message>.+?) \((?<code>[^)]+)\)$`,
+                flags: 'gm',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].range.start.line, 5);
+        assert.strictEqual(diags[0].code, 'color-named');
+    });
+
+    test('linthtml no-color format', () => {
+        const output = [
+            ' 2:1  error  <HTML> tag should specify the language of the page using the "lang" attribute  html-req-lang      ',
+            ' 8:9  error  Invalid case for tag <h1>, tag names must be written in lowercase              tag-name-lowercase ',
+        ].join('\n');
+        const diags = parseRegexFixture(
+            'Lint HTML',
+            {
+                pattern: String.raw`^\s*(?<line>\d+):(?<col>\d+)\s+(?<severity>error|warning)\s+(?<message>.+?)\s{2,}(?<code>\S+)\s*$`,
+                flags: 'gm',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].code, 'html-req-lang');
+        assert.strictEqual(diags[1].range.start.character, 8);
+    });
+
+    test('htmlhint unix format', () => {
+        const output = [
+            '/home/vix/Code/lint-runner/lint-test/test.html:2:6: An lang attribute must be present on <html> elements. [warning/html-lang-require]',
+            '/home/vix/Code/lint-runner/lint-test/test.html:8:9: The html element name of [ H1 ] must be in lowercase. [error/tagname-lowercase]',
+        ].join('\n');
+        const diags = parseRegexFixture(
+            'HTML Hint',
+            {
+                pattern: String.raw`^.+?:(?<line>\d+):(?<col>\d+): (?<message>.+) \[(?<severity>[^/\]]+)/(?<code>[^\]]+)\]$`,
+                flags: 'gm',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
+        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diags[1].code, 'tagname-lowercase');
+    });
+
+    test('sqlfluff github annotation native format', () => {
+        const output = [
+            '::warning title=SQLFluff,file=lint-test/test.sql,line=1,col=1,endLine=1,endColumn=7::CP01: Keywords must be upper case. [capitalisation.keywords]',
+            "::warning title=SQLFluff,file=lint-test/test.sql,line=1,col=35,endLine=1,endColumn=40::LT14: The 'where' keyword should always start a new line. [layout.keyword_newline]",
+        ].join('\n');
+        const diags = parseRegexFixture(
+            'Sql Fluff',
+            {
+                pattern: String.raw`^::(?<severity>error|warning|notice) title=SQLFluff,file=[^,]+,line=(?<line>\d+),col=(?<col>\d+),endLine=\d+,endColumn=\d+::(?<code>[A-Z]+\d+): (?<message>.+?)(?: \[[^\]]+\])?$`,
+                flags: 'gm',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].code, 'CP01');
+        assert.strictEqual(diags[1].range.start.character, 34);
+    });
+
+    test('checkmake json format with regex', () => {
+        const output = JSON.stringify(
+            [
+                {
+                    rule: 'phonydeclared',
+                    violation: 'Target "all" should be declared PHONY.',
+                    file_name: 'lint-test/Makefile',
+                    line_number: 10,
+                },
+                {
+                    rule: 'minphony',
+                    violation: 'Required target "clean" must be declared PHONY.',
+                    file_name: 'lint-test/Makefile',
+                    line_number: 10,
+                },
+            ],
+            null,
+            2
+        );
+        const diags = parseRegexFixture(
+            'Check Make',
+            {
+                pattern: String.raw`\{\s*"rule":\s*"(?<code>[^"]+)",\s*"violation":\s*"(?<message>(?:\\.|[^"])*)",\s*"file_name":\s*"[^"]+",\s*"line_number":\s*(?<line>\d+)\s*\}`,
+                messageFormat: 'json',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].code, 'phonydeclared');
+        assert.strictEqual(diags[1].message, 'Required target "clean" must be declared PHONY.');
+    });
+
+    test('nginx-lint errorformat', () => {
+        const output = [
+            "/tmp/lint-runner-nginx.conf:1:1: error[syntax/invalid-directive-context]: 'server' directive must be inside one of: http, stream, mail, not in main context",
+            '/tmp/lint-runner-nginx.conf:2:13: error[syntax/missing-semicolon]: Missing semicolon at end of directive',
+        ].join('\n');
+        const diags = parseRegexFixture(
+            'Nginx Lint',
+            {
+                pattern: String.raw`^.+?:(?<line>\d+):(?<col>\d+): (?<severity>\w+)\[(?<code>[^\]]+)\]: (?<message>.+)$`,
+                flags: 'gm',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diags[0].code, 'syntax/invalid-directive-context');
+    });
+
+    test('xmllint stderr format', () => {
+        const stderr = [
+            'lint-test/test.xml:6: parser error : Opening and ending tag mismatch: value line 5 and item',
+            '    </item>',
+            '           ^',
+        ].join('\n');
+        const diags = parseRegexFixture(
+            'XML Lint',
+            {
+                pattern: String.raw`^.+?:(?<line>\d+): (?:(?:parser )?(?<severity>error|warning)) : (?<message>.+)$`,
+                flags: 'gm',
+                output: 'stderr',
+            },
+            '',
+            stderr
+        );
+
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].range.start.line, 5);
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+    });
+
+    test('jsonlint single-line format', () => {
+        const output = 'lint-test/test.json: line 4, col 11, Duplicate key: "name".';
+        const diags = parseRegexFixture(
+            'JSON Lint',
+            {
+                pattern: String.raw`^(?:.+?:\s*)?line\s+(?<line>\d+),\s*col\s+(?<col>\d+),\s*(?<message>.+?)(?:\.)?$`,
+                flags: 'gm',
+                defaultSeverity: 'error',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].range.start.character, 10);
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diags[0].message, 'Duplicate key: "name"');
+    });
+
+    test('actionlint default format', () => {
+        const output = [
+            'lint-test/.github/workflows/test.yml:14:9: step must run script with "run" section or run action with "uses" section [syntax-check]',
+            "lint-test/.github/workflows/test.yml:15:29: got unexpected character ' ' while lexing == operator, expecting '=' [expression]",
+        ].join('\n');
+        const diags = parseRegexFixture(
+            'Action Lint',
+            {
+                pattern: String.raw`^.+?:(?<line>\d+):(?<col>\d+): (?<message>.+?) \[(?<code>[^\]]+)\]$`,
+                flags: 'gm',
+                defaultSeverity: 'error',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].code, 'syntax-check');
+        assert.strictEqual(diags[1].range.start.character, 28);
+        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Error);
+    });
+
+    test('phpcs emacs format', () => {
+        const output = [
+            '/home/vix/Code/lint-runner/lint-test/test.php:1:1: warning - A file should declare new symbols and cause no other side effects.',
+            '/home/vix/Code/lint-runner/lint-test/test.php:1:1: error - Missing declare(strict_types=1).',
+        ].join('\n');
+        const diags = parseRegexFixture(
+            'PHP CodeSniffer',
+            {
+                pattern: String.raw`^.+?:(?<line>\d+):(?<col>\d+): (?<severity>warning|error) - (?<message>.+)$`,
+                flags: 'gm',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
+        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Error);
+    });
+
+    test('phpmd text format', () => {
+        const output = [
+            "/home/vix/Code/lint-runner/lint-test/test.php:5  UnusedLocalVariable  Avoid unused local variables such as '$unused'.",
+            "/home/vix/Code/lint-runner/lint-test/test.php:6  UnusedLocalVariable  Avoid unused local variables such as '$magic'.",
+        ].join('\n');
+        const diags = parseRegexFixture(
+            'PHP Mess Detector',
+            {
+                pattern: String.raw`^.+?:(?<line>\d+)\s+(?<code>\S+)\s+(?<message>.+)$`,
+                flags: 'gm',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].range.start.line, 4);
+        assert.strictEqual(diags[0].code, 'UnusedLocalVariable');
+    });
+
+    test('phpstan raw format', () => {
+        const output = [
+            'Instructions for interpreting errors',
+            '---------',
+            '/home/vix/Code/lint-runner/lint-test/test.php:3:Function greet() has no return type specified. [identifier=missingType.return]',
+            '/home/vix/Code/lint-runner/lint-test/test.php:10:Parameter #1 (mixed) of echo cannot be converted to string. [identifier=echo.nonString]',
+        ].join('\n');
+        const diags = parseRegexFixture(
+            'PHPStan',
+            {
+                pattern: String.raw`^.+?:(?<line>\d+):(?<message>.+?)(?: \[identifier=(?<code>[^\]]+)\])?$`,
+                flags: 'gm',
+                defaultSeverity: 'error',
+            },
+            output
+        );
+
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].range.start.line, 2);
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diags[0].code, 'missingType.return');
     });
 });
