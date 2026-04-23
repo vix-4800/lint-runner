@@ -332,6 +332,24 @@ suite('JSON Parser', () => {
         assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
     });
 
+    test('phpstan format with preamble text', () => {
+        const input = [
+            'Instructions for interpreting errors',
+            '---------',
+            '{"totals":{"errors":0,"file_errors":2},"files":{"/home/vix/Code/CRM/yii-application/src/backend/repositories/ChatBotsRepository.php":{"errors":2,"messages":[{"message":"Method backend\\\\repositories\\\\ChatBotsRepository::findByName() has invalid return type backend\\\\models\\\\ChatBots.","line":43,"ignorable":true,"identifier":"class.notFound"},{"message":"Call to static method findOne() on an unknown class backend\\\\models\\\\ChatBots.","line":45,"ignorable":true,"tip":"Learn more at https://phpstan.org/user-guide/discovering-symbols","identifier":"class.notFound"}]}},"errors":[]}',
+        ].join('\n');
+        const diags = parseJsonOutput(input, 'phpstan');
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(
+            diags[0].message,
+            'Method backend\\repositories\\ChatBotsRepository::findByName() has invalid return type backend\\models\\ChatBots.'
+        );
+        assert.strictEqual(diags[0].range.start.line, 42);
+        assert.strictEqual(diags[0].code, 'class.notFound');
+        assert.strictEqual(diags[1].range.start.line, 44);
+        assert.strictEqual(diags[1].code, 'class.notFound');
+    });
+
     test('skips preamble text before JSON', () => {
         const input = 'Some debug output\n[{"line": 1, "column": 1, "message": "test"}]';
         const diags = parseJsonOutput(input, 'test');
