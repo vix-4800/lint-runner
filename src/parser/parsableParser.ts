@@ -7,6 +7,9 @@ import { createDiagnostic } from './diagnostic.js';
 //
 // Generic "parsable" / gcc-style:
 //   file:LINE:COL: SEVERITY: message
+const LINE_COL_LEVEL_CODE_RE =
+    /^.+?:(\d+):(\d+):\s*(error|warning|warn|info|information)(?:\[([^\]]+)\])?:\s*(.+)$/i;
+const LINE_COL_CODE_RE = /^.+?:(\d+):(\d+):\s*\(([A-Za-z]\d+)\)\s+(.+)$/;
 const LINE_COL_RE = /^.+?:(\d+):(\d+):\s*\[?(\w+)\]?\s*(.+)$/;
 
 // dotenv-linter --plain:
@@ -21,18 +24,63 @@ export function parseParsableOutput(stdout: string, source: string): vscode.Diag
         if (line === '') {
             continue;
         }
-        const lineColMatch = LINE_COL_RE.exec(line);
-        const lineCodeMatch = lineColMatch === null ? LINE_CODE_RE.exec(line) : null;
-        if (lineColMatch === null && lineCodeMatch === null) {
+        const lineColLevelCodeMatch = LINE_COL_LEVEL_CODE_RE.exec(line);
+        const lineColCodeMatch =
+            lineColLevelCodeMatch === null ? LINE_COL_CODE_RE.exec(line) : null;
+        const lineColMatch =
+            lineColLevelCodeMatch === null && lineColCodeMatch === null ? LINE_COL_RE.exec(line) : null;
+        const lineCodeMatch =
+            lineColLevelCodeMatch === null && lineColCodeMatch === null && lineColMatch === null
+                ? LINE_CODE_RE.exec(line)
+                : null;
+        if (
+            lineColLevelCodeMatch === null &&
+            lineColCodeMatch === null &&
+            lineColMatch === null &&
+            lineCodeMatch === null
+        ) {
             continue;
         }
 
-        const lineNo = Math.max(0, parseInt(lineColMatch?.[1] ?? lineCodeMatch?.[1] ?? '1', 10) - 1);
+        const lineNo = Math.max(
+            0,
+            parseInt(
+                lineColLevelCodeMatch?.[1] ??
+                    lineColCodeMatch?.[1] ??
+                    lineColMatch?.[1] ??
+                    lineCodeMatch?.[1] ??
+                    '1',
+                10
+            ) - 1
+        );
         const colNo =
-            lineColMatch === null ? undefined : Math.max(0, parseInt(lineColMatch[2], 10) - 1);
-        const level = lineColMatch === null ? 'warning' : lineColMatch[3].toLowerCase();
-        const code = lineCodeMatch?.[2];
-        const message = (lineColMatch?.[4] ?? lineCodeMatch?.[3] ?? '').trim();
+            lineColLevelCodeMatch !== null
+                ? Math.max(0, parseInt(lineColLevelCodeMatch[2], 10) - 1)
+                : lineColCodeMatch !== null
+                  ? Math.max(0, parseInt(lineColCodeMatch[2], 10) - 1)
+                  : lineColMatch !== null
+                    ? Math.max(0, parseInt(lineColMatch[2], 10) - 1)
+                    : undefined;
+        const code =
+            lineColLevelCodeMatch?.[4] ?? lineColCodeMatch?.[3] ?? lineCodeMatch?.[2];
+        const level =
+            lineColLevelCodeMatch?.[3].toLowerCase() ??
+            (lineColCodeMatch !== null
+                ? lineColCodeMatch[3].toLowerCase().startsWith('e')
+                    ? 'error'
+                    : lineColCodeMatch[3].toLowerCase().startsWith('i')
+                      ? 'info'
+                      : 'warning'
+                : lineColMatch === null
+                  ? 'warning'
+                  : lineColMatch[3].toLowerCase());
+        const message = (
+            lineColLevelCodeMatch?.[5] ??
+            lineColCodeMatch?.[4] ??
+            lineColMatch?.[4] ??
+            lineCodeMatch?.[3] ??
+            ''
+        ).trim();
 
         let severity: vscode.DiagnosticSeverity;
         switch (level) {

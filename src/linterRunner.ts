@@ -209,14 +209,40 @@ function normalizePath(value: string): string {
     return value.split(path.sep).join('/');
 }
 
+function collectPathMatchCandidates(filePath: string): string[] {
+    const candidates = new Set<string>([path.basename(filePath)]);
+
+    const addPathCandidates = (value: string): void => {
+        const normalizedValue = normalizePath(value);
+        if (normalizedValue.length === 0) {
+            return;
+        }
+
+        candidates.add(normalizedValue);
+
+        const trimmedValue = normalizedValue.replace(/^\/+/, '');
+        if (trimmedValue.length === 0) {
+            return;
+        }
+
+        const parts = trimmedValue.split('/').filter((part) => part.length > 0);
+        for (let i = 0; i < parts.length; i++) {
+            candidates.add(parts.slice(i).join('/'));
+        }
+    };
+
+    addPathCandidates(vscode.workspace.asRelativePath(filePath, false));
+    addPathCandidates(filePath);
+
+    return [...candidates];
+}
+
 function matchesPatterns(filePath: string, patterns: string[]): boolean {
-    const fileName = path.basename(filePath);
-    const relativePath = normalizePath(vscode.workspace.asRelativePath(filePath, false));
-    const normalizedFilePath = normalizePath(filePath);
+    const candidates = collectPathMatchCandidates(filePath);
 
     return patterns.some((pattern) => {
         const re = globToRegex(pattern);
-        return re.test(fileName) || re.test(relativePath) || re.test(normalizedFilePath);
+        return candidates.some((candidate) => re.test(candidate));
     });
 }
 

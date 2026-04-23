@@ -145,17 +145,54 @@ suite('JSON Parser', () => {
         assert.strictEqual(diags[0].range.start.character, 7);
     });
 
+    test('shellcheck json format', () => {
+        const input = JSON.stringify([
+            {
+                file: 'lint-test/test.sh',
+                line: 7,
+                endLine: 7,
+                column: 16,
+                endColumn: 21,
+                level: 'info',
+                code: 2086,
+                message: 'Double quote to prevent globbing and word splitting.',
+            },
+            {
+                file: 'lint-test/test.sh',
+                line: 7,
+                endLine: 7,
+                column: 16,
+                endColumn: 21,
+                level: 'style',
+                code: 2250,
+                message: 'Prefer putting braces around variable references even when not strictly required.',
+            },
+        ]);
+        const diags = parseJsonOutput(input, 'shellcheck');
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Information);
+        assert.strictEqual(diags[0].code, '2086');
+        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Information);
+        assert.strictEqual(diags[1].code, '2250');
+    });
+
     test('sqlfluff format', () => {
         const input = JSON.stringify([
             {
                 violations: [
-                    { start_line_no: 1, start_line_pos: 1, description: 'Use uppercase keywords' },
+                    {
+                        start_line_no: 1,
+                        start_line_pos: 1,
+                        code: 'CP01',
+                        description: 'Use uppercase keywords',
+                    },
                 ],
             },
         ]);
         const diags = parseJsonOutput(input, 'sqlfluff');
         assert.strictEqual(diags.length, 1);
         assert.strictEqual(diags[0].message, 'Use uppercase keywords');
+        assert.strictEqual(diags[0].code, 'CP01');
     });
 
     test('checkmake format', () => {
@@ -183,6 +220,98 @@ suite('JSON Parser', () => {
         assert.strictEqual(diags[0].code, 'MD003');
     });
 
+    test('hadolint format', () => {
+        const input = JSON.stringify([
+            {
+                code: 'DL3007',
+                column: 1,
+                file: 'lint-test/Dockerfile',
+                level: 'warning',
+                line: 4,
+                message:
+                    'Using latest is prone to errors if the image will ever update. Pin the version explicitly to a release tag',
+            },
+            {
+                code: 'DL3049',
+                column: 1,
+                file: 'lint-test/Dockerfile',
+                level: 'info',
+                line: 4,
+                message: 'Label `author` is missing.',
+            },
+            {
+                code: 'DL3025',
+                column: 1,
+                file: 'lint-test/Dockerfile',
+                level: 'error',
+                line: 12,
+                message: 'Use arguments JSON notation for CMD and ENTRYPOINT arguments',
+            },
+        ]);
+        const diags = parseJsonOutput(input, 'hadolint');
+        assert.strictEqual(diags.length, 3);
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
+        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Information);
+        assert.strictEqual(diags[2].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diags[2].code, 'DL3025');
+    });
+
+    test('htmlhint format', () => {
+        const input = JSON.stringify([
+            {
+                file: 'lint-test/test.html',
+                messages: [
+                    {
+                        type: 'warning',
+                        message: 'An lang attribute must be present on <html> elements.',
+                        line: 2,
+                        col: 6,
+                        rule: { id: 'html-lang-require' },
+                    },
+                    {
+                        type: 'error',
+                        message: 'The html element name of [ H1 ] must be in lowercase.',
+                        line: 8,
+                        col: 9,
+                        rule: { id: 'tagname-lowercase' },
+                    },
+                ],
+            },
+        ]);
+        const diags = parseJsonOutput(input, 'htmlhint');
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
+        assert.strictEqual(diags[0].code, 'html-lang-require');
+        assert.strictEqual(diags[0].range.start.character, 5);
+        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diags[1].code, 'tagname-lowercase');
+    });
+
+    test('actionlint json template format', () => {
+        const input = JSON.stringify([
+            {
+                message:
+                    'shellcheck reported issue in this script: SC1009:info:1:1: The mentioned syntax error was in this simple command',
+                filepath: 'workflow.yml',
+                line: 7,
+                column: 9,
+                kind: 'shellcheck',
+            },
+            {
+                message: 'unexpected EOF while lexing expression',
+                filepath: 'workflow.yml',
+                line: 8,
+                column: 22,
+                kind: 'expression',
+            },
+        ]);
+        const diags = parseJsonOutput(input, 'actionlint');
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].message.includes('SC1009'), true);
+        assert.strictEqual(diags[0].range.start.line, 6);
+        assert.strictEqual(diags[1].range.start.character, 21);
+    });
+
     test('phpmd format', () => {
         const input = JSON.stringify({
             files: [
@@ -202,6 +331,24 @@ suite('JSON Parser', () => {
         assert.strictEqual(diags.length, 1);
         assert.strictEqual(diags[0].message, 'Unused variable');
         assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
+    });
+
+    test('phpstan format with preamble text', () => {
+        const input = [
+            'Instructions for interpreting errors',
+            '---------',
+            '{"totals":{"errors":0,"file_errors":2},"files":{"/home/vix/Code/CRM/yii-application/src/backend/repositories/ChatBotsRepository.php":{"errors":2,"messages":[{"message":"Method backend\\\\repositories\\\\ChatBotsRepository::findByName() has invalid return type backend\\\\models\\\\ChatBots.","line":43,"ignorable":true,"identifier":"class.notFound"},{"message":"Call to static method findOne() on an unknown class backend\\\\models\\\\ChatBots.","line":45,"ignorable":true,"tip":"Learn more at https://phpstan.org/user-guide/discovering-symbols","identifier":"class.notFound"}]}},"errors":[]}',
+        ].join('\n');
+        const diags = parseJsonOutput(input, 'phpstan');
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(
+            diags[0].message,
+            'Method backend\\repositories\\ChatBotsRepository::findByName() has invalid return type backend\\models\\ChatBots.'
+        );
+        assert.strictEqual(diags[0].range.start.line, 42);
+        assert.strictEqual(diags[0].code, 'class.notFound');
+        assert.strictEqual(diags[1].range.start.line, 44);
+        assert.strictEqual(diags[1].code, 'class.notFound');
     });
 
     test('skips preamble text before JSON', () => {
@@ -633,7 +780,7 @@ suite('Linter Runner', () => {
             [
                 {
                     name: 'Non-JS',
-                    filePatterns: ['*.[!j][!s]'],
+                    filePatterns: ['*.[!j]s'],
                     linters: [
                         {
                             name: 'test',
@@ -650,12 +797,12 @@ suite('Linter Runner', () => {
         assert.strictEqual(
             collectRunnableLinters(targets, '/tmp/example.ts', 'manual').length,
             1,
-            '*.[!j][!s] should match .ts'
+            '*.[!j]s should match .ts'
         );
         assert.strictEqual(
             collectRunnableLinters(targets, '/tmp/example.js', 'manual').length,
             0,
-            '*.[!j][!s] should not match .js'
+            '*.[!j]s should not match .js'
         );
     });
 
@@ -725,6 +872,21 @@ suite('Jsonlint Parser', () => {
         const diags = parseJsonlintOutput('', stderr, 'jsonlint');
         assert.strictEqual(diags[0].message, 'Duplicate key');
     });
+
+    test('parses multiline parse error output', () => {
+        const stderr = [
+            'File: lint-test/test.json',
+            'Parse error on line 6, column 36:',
+            '... 1, "value": "foo", },        { "id": 2...',
+            '-----------------------^',
+            'Trailing comma in object',
+        ].join('\n');
+        const diags = parseJsonlintOutput('', stderr, 'jsonlint');
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].range.start.line, 5);
+        assert.strictEqual(diags[0].range.start.character, 35);
+        assert.strictEqual(diags[0].message, 'Trailing comma in object');
+    });
 });
 
 suite('Parsable Parser', () => {
@@ -759,6 +921,40 @@ suite('Parsable Parser', () => {
         assert.strictEqual(diags[0].range.start.character, 0);
         assert.strictEqual(diags[0].message, 'The app_name key should be in uppercase');
         assert.strictEqual(diags[0].code, 'LowercaseKey');
+    });
+
+    test('parses dotenv-linter output with prologue and summary', () => {
+        const input = [
+            'Checking ../../../../tmp/test.env',
+            '../../../../tmp/test.env:1 LowercaseKey: The app_name key should be in uppercase',
+            '../../../../tmp/test.env:2 IncorrectDelimiter: The APP ENV key has incorrect delimiter',
+            '',
+            'Found 2 problems',
+        ].join('\n');
+        const diags = parseParsableOutput(input, 'dotenv-linter');
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].code, 'LowercaseKey');
+        assert.strictEqual(diags[1].code, 'IncorrectDelimiter');
+    });
+
+    test('parses luacheck plain format', () => {
+        const input = "/tmp/test.lua:1:7: (W211) unused variable 'foo'";
+        const diags = parseParsableOutput(input, 'luacheck');
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
+        assert.strictEqual(diags[0].code, 'W211');
+        assert.strictEqual(diags[0].range.start.line, 0);
+        assert.strictEqual(diags[0].range.start.character, 6);
+    });
+
+    test('parses nginx-lint errorformat output', () => {
+        const input =
+            'lint-test/test.yml:9:14: error[syntax/missing-semicolon]: Missing semicolon at end of directive';
+        const diags = parseParsableOutput(input, 'nginx-lint');
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diags[0].code, 'syntax/missing-semicolon');
+        assert.strictEqual(diags[0].message, 'Missing semicolon at end of directive');
     });
 
     test('info severity', () => {
@@ -901,6 +1097,49 @@ suite('Ansible-lint Parser', () => {
         const input = 'rule-a: Desc A.\nfile.yml:1 msg A\n\nrule-b: Desc B.\nfile.yml:5 msg B';
         const diags = parseAnsibleLintOutput(input, 'ansible-lint');
         assert.strictEqual(diags.length, 2);
+    });
+
+    test('parses json output with preamble text', () => {
+        const input = [
+            'WARNING  Found incompatible custom yamllint configuration',
+            'Failed: 2 failure(s), 0 warning(s) in 1 files processed of 1 encountered.',
+            JSON.stringify([
+                {
+                    type: 'issue',
+                    check_name: 'fqcn[action-core]',
+                    description: 'Use FQCN for builtin module actions (debug).',
+                    location: {
+                        path: 'lint-test/ansible.yml',
+                        positions: { begin: { line: 8, column: 7 } },
+                    },
+                    content: {
+                        body: 'Use `ansible.builtin.debug` or `ansible.legacy.debug` instead.',
+                    },
+                },
+                {
+                    type: 'issue',
+                    check_name: 'no-changed-when',
+                    description: 'Commands should not change things if nothing needs doing.',
+                    location: {
+                        path: 'lint-test/ansible.yml',
+                        lines: { begin: 10 },
+                    },
+                    content: { body: 'Task/Handler: shell echo done' },
+                },
+            ]),
+        ].join('\n');
+
+        const diags = parseAnsibleLintOutput(input, 'ansible-lint');
+        assert.strictEqual(diags.length, 2);
+        assert.strictEqual(diags[0].range.start.line, 7);
+        assert.strictEqual(diags[0].range.start.character, 6);
+        assert.strictEqual(diags[0].code, 'fqcn[action-core]');
+        assert.strictEqual(
+            diags[0].message,
+            'fqcn[action-core]: Use `ansible.builtin.debug` or `ansible.legacy.debug` instead.'
+        );
+        assert.strictEqual(diags[1].range.start.line, 9);
+        assert.strictEqual(diags[1].code, 'no-changed-when');
     });
 });
 

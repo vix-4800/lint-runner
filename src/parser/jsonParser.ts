@@ -169,6 +169,7 @@ function normalizeRawItems(raw: unknown[]): unknown[] {
                                 ? viol.start_line_pos
                                 : undefined,
                         message: viol.description,
+                        code: viol.code,
                         level: viol.warning === true ? 'warning' : undefined,
                     });
                 }
