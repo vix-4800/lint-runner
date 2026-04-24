@@ -34,8 +34,11 @@ Configuration is stored in `settings.json`:
                 {
                     "name": "phpcs",
                     "command": "vendor/bin/phpcs",
-                    "args": ["--report=json", "${file}"],
-                    "parser": "json",
+                    "args": ["--report=emacs", "${file}"],
+                    "parser": {
+                        "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<severity>warning|error) - (?<message>.+)$",
+                        "flags": "gm"
+                    },
                     "run": "onSave"
                 }
             ],
@@ -67,7 +70,7 @@ Configuration is stored in `settings.json`:
 | `enabled`             | `boolean`                          | no       | Enables or disables this linter. Defaults to `true`.                                       |
 | `command`             | `string`                           | yes      | Linter command. Must be in `PATH` or an absolute path. Supports `~` and command variables. |
 | `args`                | `string[]`                         | yes      | Command arguments. Supports `~` and command variables.                                     |
-| `parser`              | `string`                           | yes      | Linter output parser.                                                                      |
+| `parser`              | `RegexParserConfig`                | yes      | Regex parser config.                                                                       |
 | `run`                 | `"onOpen" \| "onSave" \| "manual"` | no       | Overrides target `run`. `onOpen` also runs on save.                                        |
 | `preCommands`         | `CommandConfig[]`                  | no       | Commands before the main linter.                                                           |
 | `fixCommand`          | `FixerConfig`                      | no       | Legacy per-linter auto-fixer. Prefer target-level `fixers` for new configs.                |
@@ -95,8 +98,11 @@ does not run.
         {
             "name": "phpcs",
             "command": "vendor/bin/phpcs",
-            "args": ["--report=json", "${file}"],
-            "parser": "json",
+            "args": ["--report=emacs", "${file}"],
+            "parser": {
+                "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<severity>warning|error) - (?<message>.+)$",
+                "flags": "gm"
+            },
             "run": "onSave"
         }
     ]
@@ -195,8 +201,11 @@ linters to update Problems.
         {
             "name": "phpcs",
             "command": "vendor/bin/phpcs",
-            "args": ["--report=json", "${file}"],
-            "parser": "json",
+            "args": ["--report=emacs", "${file}"],
+            "parser": {
+                "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<severity>warning|error) - (?<message>.+)$",
+                "flags": "gm"
+            },
             "run": "onSave"
         }
     ],
@@ -223,8 +232,11 @@ To hide the rule code:
         {
             "name": "phpcs",
             "command": "vendor/bin/phpcs",
-            "args": ["--report=json", "${file}"],
-            "parser": "json",
+            "args": ["--report=emacs", "${file}"],
+            "parser": {
+                "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<severity>warning|error) - (?<message>.+)$",
+                "flags": "gm"
+            },
             "run": "onSave"
         }
     ]
@@ -237,17 +249,33 @@ Result:
 Expected 1 newline at end of file; 0 found phpcs
 ```
 
-## Parsers
+## Regex Parser
 
-| Parser         | Format                                                                                                                            |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `json`         | JSON output with `line`, `column`, `message`, `level`/`severity`/`type`, `code`/`rule`/`ruleId` fields. Also supports phpcs JSON. |
-| `jsonlint`     | `line N, col N, message`.                                                                                                         |
-| `parsable`     | `file:line:column: [level] message`.                                                                                              |
-| `taplo`        | Taplo `check` output.                                                                                                             |
-| `xmllint`      | stderr in `file:line: error: message` or `file:line: warning: message` format.                                                    |
-| `linthtml`     | `line:column error message  rule`.                                                                                                |
-| `ansible-lint` | rule line + location line from standard ansible-lint output.                                                                      |
+`parser` is a regex config object. The regex runs globally over selected command output and creates one diagnostic per
+match.
+
+| Field             | Type                                  | Required | Description                                                                 |
+| ----------------- | ------------------------------------- | -------- | --------------------------------------------------------------------------- |
+| `pattern`         | `string`                              | yes      | JavaScript regex pattern.                                                   |
+| `flags`           | `string`                              | no       | JavaScript regex flags. `g` is added automatically.                         |
+| `output`          | `"stdout" \| "stderr" \| "both"`      | no       | Output stream to parse. Defaults to `both`.                                 |
+| `defaultSeverity` | `"error" \| "warning" \| "info"`      | no       | Severity when no `severity` group matched. Defaults to `warning`.           |
+| `messageFormat`   | `"plain" \| "json"`                   | no       | Use `json` when `message` captures a JSON string value without outer quotes. |
+
+Required named groups:
+
+| Group     | Description                      |
+| --------- | -------------------------------- |
+| `line`    | 1-based line number.             |
+| `message` | Diagnostic message.              |
+
+Optional named groups:
+
+| Group      | Description                                              |
+| ---------- | -------------------------------------------------------- |
+| `col`      | 1-based column number.                                   |
+| `severity` | `error`, `warning`, `info`, plus aliases like `note`.    |
+| `code`     | Rule id shown in Problems unless `showDiagnosticCodes` is false. |
 
 ## Examples
 
@@ -271,8 +299,11 @@ Expected 1 newline at end of file; 0 found phpcs
                 {
                     "name": "phpcs",
                     "command": "vendor/bin/phpcs",
-                    "args": ["--report=json", "${file}"],
-                    "parser": "json",
+                    "args": ["--report=emacs", "${file}"],
+                    "parser": {
+                        "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<severity>warning|error) - (?<message>.+)$",
+                        "flags": "gm"
+                    },
                     "run": "onSave"
                 }
             ]
@@ -301,8 +332,11 @@ Expected 1 newline at end of file; 0 found phpcs
                 {
                     "name": "nginx-lint",
                     "command": "nginx-lint",
-                    "args": ["${file}"],
-                    "parser": "parsable"
+                    "args": ["--format", "errorformat", "--no-color", "${file}"],
+                    "parser": {
+                        "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<severity>\\w+)\\[(?<code>[^\\]]+)\\]: (?<message>.+)$",
+                        "flags": "gm"
+                    }
                 }
             ]
         }
@@ -323,7 +357,11 @@ Expected 1 newline at end of file; 0 found phpcs
                     "name": "xmllint",
                     "command": "xmllint",
                     "args": ["--noout", "${file}"],
-                    "parser": "xmllint",
+                    "parser": {
+                        "pattern": "^.+?:(?<line>\\d+): (?:(?:parser )?(?<severity>error|warning)) : (?<message>.+)$",
+                        "flags": "gm",
+                        "output": "stderr"
+                    },
                     "run": "onSave"
                 }
             ]

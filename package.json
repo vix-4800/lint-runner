@@ -244,17 +244,39 @@
                       }
                     },
                     "parser": {
-                      "type": "string",
-                      "enum": [
-                        "json",
-                        "jsonlint",
-                        "parsable",
-                        "taplo",
-                        "xmllint",
-                        "linthtml",
-                        "ansible-lint"
-                      ],
-                      "description": "Output parser to use."
+                      "type": "object",
+                      "required": ["pattern"],
+                      "additionalProperties": false,
+                      "description": "Regex parser: extract diagnostics using named capture groups in the pattern.",
+                      "properties": {
+                        "pattern": {
+                          "type": "string",
+                          "description": "JavaScript regular expression. Named capture groups: `line` and `message` are required; `col`, `severity` (error/warning/info), and `code` are optional."
+                        },
+                        "flags": {
+                          "type": "string",
+                          "default": "g",
+                          "description": "JavaScript regex flags (e.g. \"gm\"). The 'g' flag is added automatically."
+                        },
+                        "output": {
+                          "type": "string",
+                          "enum": ["stdout", "stderr", "both"],
+                          "default": "both",
+                          "description": "Which output stream(s) to parse. Defaults to 'both'."
+                        },
+                        "defaultSeverity": {
+                          "type": "string",
+                          "enum": ["error", "warning", "info", "information"],
+                          "default": "warning",
+                          "description": "Severity to use when the regex pattern does not capture a severity group."
+                        },
+                        "messageFormat": {
+                          "type": "string",
+                          "enum": ["plain", "json"],
+                          "default": "plain",
+                          "description": "How to decode the captured message group. Use 'json' when matching inside JSON string values."
+                        }
+                      }
                     },
                     "run": {
                       "type": "string",
@@ -439,17 +461,39 @@
                 }
               },
               "parser": {
-                "type": "string",
-                "enum": [
-                  "json",
-                  "jsonlint",
-                  "parsable",
-                  "taplo",
-                  "xmllint",
-                  "linthtml",
-                  "ansible-lint"
-                ],
-                "description": "Output parser to use."
+                "type": "object",
+                "required": ["pattern"],
+                "additionalProperties": false,
+                "description": "Regex parser: extract diagnostics using named capture groups in the pattern.",
+                "properties": {
+                  "pattern": {
+                    "type": "string",
+                    "description": "JavaScript regular expression. Named capture groups: `line` and `message` are required; `col`, `severity` (error/warning/info), and `code` are optional."
+                  },
+                  "flags": {
+                    "type": "string",
+                    "default": "g",
+                    "description": "JavaScript regex flags (e.g. \"gm\"). The 'g' flag is added automatically."
+                  },
+                  "output": {
+                    "type": "string",
+                    "enum": ["stdout", "stderr", "both"],
+                    "default": "both",
+                    "description": "Which output stream(s) to parse. Defaults to 'both'."
+                  },
+                  "defaultSeverity": {
+                    "type": "string",
+                    "enum": ["error", "warning", "info", "information"],
+                    "default": "warning",
+                    "description": "Severity to use when the regex pattern does not capture a severity group."
+                  },
+                  "messageFormat": {
+                    "type": "string",
+                    "enum": ["plain", "json"],
+                    "default": "plain",
+                    "description": "How to decode the captured message group. Use 'json' when matching inside JSON string values."
+                  }
+                }
               },
               "run": {
                 "type": "string",

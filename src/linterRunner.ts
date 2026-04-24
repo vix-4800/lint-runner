@@ -4,13 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { diagnosticHasExplicitColumn } from './parser/diagnostic.js';
-import { parseAnsibleLintOutput } from './parser/ansibleLintParser.js';
-import { parseJsonOutput } from './parser/jsonParser.js';
-import { parseJsonlintOutput } from './parser/jsonlintParser.js';
-import { parseLinthtmlOutput } from './parser/linthtmlParser.js';
-import { parseParsableOutput } from './parser/parsableParser.js';
-import { parseTaploOutput } from './parser/taploParser.js';
-import { parseXmllintOutput } from './parser/xmllintParser.js';
+import { parseRegexOutput, type RegexParserConfig } from './parser/regexParser.js';
 
 const runningLinters = new Map<string, number>();
 const activeRunIds = new Map<string, number>();
@@ -31,21 +25,9 @@ export function clearDiagnosticsCache(): void {
     linterDiagnosticsCache.clear();
 }
 
-const unknownParserWarned = new Set<string>();
-
-const SUPPORTED_PARSERS = [
-    'json',
-    'jsonlint',
-    'parsable',
-    'taplo',
-    'xmllint',
-    'linthtml',
-    'ansible-lint',
-] as const;
 const SHELL_ENV_TIMEOUT_MS = 3000;
 const SHELL_PATH_PREFIX = 'LINT_RUNNER_PATH=';
 
-type ParserName = (typeof SUPPORTED_PARSERS)[number];
 type RunMode = 'manual' | 'onSave' | 'onOpen';
 type FixerRunMode = Extract<RunMode, 'manual' | 'onSave'>;
 type DiagnosticsHandler = (diagnostics: vscode.Diagnostic[]) => void;
@@ -62,11 +44,13 @@ export interface FixerConfig extends CommandConfig {
     enabled?: boolean;
 }
 
+export type { RegexParserConfig };
+
 export interface TargetLinterConfig {
     name: string;
     command: string;
     args: string[];
-    parser: ParserName | string;
+    parser: RegexParserConfig;
     run?: RunMode;
     enabled?: boolean;
     preCommands?: CommandConfig[];
@@ -600,44 +584,14 @@ export function parseLinterOutput(
     linter: LinterConfig,
     result: CommandResult
 ): vscode.Diagnostic[] {
-    let diagnostics: vscode.Diagnostic[];
-
-    switch (linter.parser) {
-        case 'json':
-            diagnostics = parseJsonOutput(result.stdout, linter.name);
-            if (diagnostics.length === 0) {
-                diagnostics = parseJsonOutput(result.stderr, linter.name);
-            }
-            break;
-        case 'jsonlint':
-            diagnostics = parseJsonlintOutput(result.stdout, result.stderr, linter.name);
-            break;
-        case 'ansible-lint':
-            diagnostics = parseAnsibleLintOutput(result.stdout, linter.name);
-            break;
-        case 'parsable':
-            diagnostics = parseParsableOutput(`${result.stdout}\n${result.stderr}`, linter.name);
-            break;
-        case 'taplo':
-            diagnostics = parseTaploOutput(`${result.stdout}\n${result.stderr}`, linter.name);
-            break;
-        case 'xmllint':
-            diagnostics = parseXmllintOutput(result.stderr, linter.name);
-            break;
-        case 'linthtml':
-            diagnostics = parseLinthtmlOutput(result.stdout, linter.name);
-            break;
-        default: {
-            const warnKey = `${linter.name}:${linter.parser}`;
-            if (!unknownParserWarned.has(warnKey)) {
-                unknownParserWarned.add(warnKey);
-                vscode.window.showWarningMessage(
-                    `LintRunner: unknown parser '${linter.parser}' in linter '${linter.name}'.`
-                );
-            }
-            return [];
-        }
-    }
+    const cfg = linter.parser;
+    const text =
+        cfg.output === 'stdout'
+            ? result.stdout
+            : cfg.output === 'stderr'
+              ? result.stderr
+              : `${result.stdout}\n${result.stderr}`;
+    const diagnostics = parseRegexOutput(text, cfg, linter.name);
 
     if (linter.showDiagnosticCodes === false) {
         for (const diagnostic of diagnostics) {
