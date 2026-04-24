@@ -14,13 +14,10 @@ import {
     type LinterConfig,
     type RegexParserConfig,
 } from '../linterRunner.js';
-import { parseAnsibleLintOutput } from '../parser/ansibleLintParser.js';
-import { parseJsonOutput } from '../parser/jsonParser.js';
-import { parseJsonlintOutput } from '../parser/jsonlintParser.js';
-import { parseLinthtmlOutput } from '../parser/linthtmlParser.js';
-import { parseParsableOutput } from '../parser/parsableParser.js';
-import { parseTaploOutput } from '../parser/taploParser.js';
-import { parseXmllintOutput } from '../parser/xmllintParser.js';
+
+const TEST_REGEX_PARSER: RegexParserConfig = {
+    pattern: String.raw`(?<line>\d+):(?<col>\d+):(?<severity>\w+):(?<message>.+)`,
+};
 
 function parseRegexFixture(
     name: string,
@@ -40,348 +37,6 @@ function parseRegexFixture(
         { code: 1, stdout, stderr }
     );
 }
-
-suite('JSON Parser', () => {
-    test('empty input returns no diagnostics', () => {
-        assert.strictEqual(parseJsonOutput('', 'test').length, 0);
-        assert.strictEqual(parseJsonOutput('   ', 'test').length, 0);
-    });
-
-    test('phpcs format', () => {
-        const input = JSON.stringify({
-            files: {
-                '/tmp/test.php': {
-                    messages: [
-                        {
-                            line: 5,
-                            column: 1,
-                            message: 'Missing newline',
-                            type: 'error',
-                            source: 'PSR2.Files.EndFileNewline',
-                        },
-                    ],
-                },
-            },
-        });
-        const diags = parseJsonOutput(input, 'phpcs');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].message, 'Missing newline');
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
-        assert.strictEqual(diags[0].source, 'phpcs');
-        assert.strictEqual(diags[0].code, 'PSR2.Files.EndFileNewline');
-        assert.strictEqual(diags[0].range.start.line, 4);
-        assert.strictEqual(diags[0].range.start.character, 0);
-    });
-
-    test('eslint format', () => {
-        const input = JSON.stringify([
-            {
-                messages: [
-                    {
-                        line: 3,
-                        column: 7,
-                        message: 'Unused variable',
-                        severity: 2,
-                        ruleId: 'no-unused-vars',
-                    },
-                    {
-                        line: 10,
-                        column: 1,
-                        message: 'Use const',
-                        severity: 1,
-                        ruleId: 'prefer-const',
-                    },
-                ],
-            },
-        ]);
-        const diags = parseJsonOutput(input, 'eslint');
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
-        assert.strictEqual(diags[0].code, 'no-unused-vars');
-        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Warning);
-    });
-
-    test('stylelint warnings format', () => {
-        const input = JSON.stringify([
-            {
-                parseErrors: [],
-                warnings: [
-                    {
-                        line: 2,
-                        column: 5,
-                        text: 'Unexpected color',
-                        severity: 'error',
-                        rule: 'color-no-invalid-hex',
-                    },
-                ],
-            },
-        ]);
-        const diags = parseJsonOutput(input, 'stylelint');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].message, 'Unexpected color');
-        assert.strictEqual(diags[0].code, 'color-no-invalid-hex');
-    });
-
-    test('stylelint parseErrors format', () => {
-        const input = JSON.stringify([
-            {
-                parseErrors: [{ line: 1, column: 10, text: 'Unexpected token', type: 'error' }],
-                warnings: [],
-            },
-        ]);
-        const diags = parseJsonOutput(input, 'stylelint');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].message, 'Unexpected token');
-    });
-
-    test('stylelint combined parseErrors and warnings', () => {
-        const input = JSON.stringify([
-            {
-                parseErrors: [{ line: 1, column: 1, text: 'Parse error', type: 'error' }],
-                warnings: [
-                    {
-                        line: 5,
-                        column: 3,
-                        text: 'Named color',
-                        severity: 'warning',
-                        rule: 'color-named',
-                    },
-                ],
-            },
-        ]);
-        const diags = parseJsonOutput(input, 'stylelint');
-        assert.strictEqual(diags.length, 2);
-    });
-
-    test('ruff format', () => {
-        const input = JSON.stringify([
-            { message: 'Unused import', location: { row: 1, column: 8 }, code: 'F401' },
-        ]);
-        const diags = parseJsonOutput(input, 'ruff');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].message, 'Unused import');
-        assert.strictEqual(diags[0].code, 'F401');
-        assert.strictEqual(diags[0].range.start.line, 0);
-        assert.strictEqual(diags[0].range.start.character, 7);
-    });
-
-    test('shellcheck json format', () => {
-        const input = JSON.stringify([
-            {
-                file: 'lint-test/test.sh',
-                line: 7,
-                endLine: 7,
-                column: 16,
-                endColumn: 21,
-                level: 'info',
-                code: 2086,
-                message: 'Double quote to prevent globbing and word splitting.',
-            },
-            {
-                file: 'lint-test/test.sh',
-                line: 7,
-                endLine: 7,
-                column: 16,
-                endColumn: 21,
-                level: 'style',
-                code: 2250,
-                message: 'Prefer putting braces around variable references even when not strictly required.',
-            },
-        ]);
-        const diags = parseJsonOutput(input, 'shellcheck');
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Information);
-        assert.strictEqual(diags[0].code, '2086');
-        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Information);
-        assert.strictEqual(diags[1].code, '2250');
-    });
-
-    test('sqlfluff format', () => {
-        const input = JSON.stringify([
-            {
-                violations: [
-                    {
-                        start_line_no: 1,
-                        start_line_pos: 1,
-                        code: 'CP01',
-                        description: 'Use uppercase keywords',
-                    },
-                ],
-            },
-        ]);
-        const diags = parseJsonOutput(input, 'sqlfluff');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].message, 'Use uppercase keywords');
-        assert.strictEqual(diags[0].code, 'CP01');
-    });
-
-    test('checkmake format', () => {
-        const input = JSON.stringify([
-            { line_number: 3, rule: 'minphony', violation: 'Missing .PHONY' },
-        ]);
-        const diags = parseJsonOutput(input, 'checkmake');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].message, 'minphony: Missing .PHONY');
-        assert.strictEqual(diags[0].range.start.line, 2);
-    });
-
-    test('markdownlint format', () => {
-        const input = JSON.stringify([
-            {
-                lineNumber: 5,
-                ruleDescription: 'Heading style',
-                ruleNames: ['MD003'],
-                errorDetail: 'setext',
-            },
-        ]);
-        const diags = parseJsonOutput(input, 'markdownlint');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].message, 'Heading style: setext');
-        assert.strictEqual(diags[0].code, 'MD003');
-    });
-
-    test('hadolint format', () => {
-        const input = JSON.stringify([
-            {
-                code: 'DL3007',
-                column: 1,
-                file: 'lint-test/Dockerfile',
-                level: 'warning',
-                line: 4,
-                message:
-                    'Using latest is prone to errors if the image will ever update. Pin the version explicitly to a release tag',
-            },
-            {
-                code: 'DL3049',
-                column: 1,
-                file: 'lint-test/Dockerfile',
-                level: 'info',
-                line: 4,
-                message: 'Label `author` is missing.',
-            },
-            {
-                code: 'DL3025',
-                column: 1,
-                file: 'lint-test/Dockerfile',
-                level: 'error',
-                line: 12,
-                message: 'Use arguments JSON notation for CMD and ENTRYPOINT arguments',
-            },
-        ]);
-        const diags = parseJsonOutput(input, 'hadolint');
-        assert.strictEqual(diags.length, 3);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
-        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Information);
-        assert.strictEqual(diags[2].severity, vscode.DiagnosticSeverity.Error);
-        assert.strictEqual(diags[2].code, 'DL3025');
-    });
-
-    test('htmlhint format', () => {
-        const input = JSON.stringify([
-            {
-                file: 'lint-test/test.html',
-                messages: [
-                    {
-                        type: 'warning',
-                        message: 'An lang attribute must be present on <html> elements.',
-                        line: 2,
-                        col: 6,
-                        rule: { id: 'html-lang-require' },
-                    },
-                    {
-                        type: 'error',
-                        message: 'The html element name of [ H1 ] must be in lowercase.',
-                        line: 8,
-                        col: 9,
-                        rule: { id: 'tagname-lowercase' },
-                    },
-                ],
-            },
-        ]);
-        const diags = parseJsonOutput(input, 'htmlhint');
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
-        assert.strictEqual(diags[0].code, 'html-lang-require');
-        assert.strictEqual(diags[0].range.start.character, 5);
-        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Error);
-        assert.strictEqual(diags[1].code, 'tagname-lowercase');
-    });
-
-    test('actionlint json template format', () => {
-        const input = JSON.stringify([
-            {
-                message:
-                    'shellcheck reported issue in this script: SC1009:info:1:1: The mentioned syntax error was in this simple command',
-                filepath: 'workflow.yml',
-                line: 7,
-                column: 9,
-                kind: 'shellcheck',
-            },
-            {
-                message: 'unexpected EOF while lexing expression',
-                filepath: 'workflow.yml',
-                line: 8,
-                column: 22,
-                kind: 'expression',
-            },
-        ]);
-        const diags = parseJsonOutput(input, 'actionlint');
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].message.includes('SC1009'), true);
-        assert.strictEqual(diags[0].range.start.line, 6);
-        assert.strictEqual(diags[1].range.start.character, 21);
-    });
-
-    test('phpmd format', () => {
-        const input = JSON.stringify({
-            files: [
-                {
-                    violations: [
-                        {
-                            beginLine: 7,
-                            description: 'Unused variable',
-                            rule: 'UnusedLocalVariable',
-                            priority: 3,
-                        },
-                    ],
-                },
-            ],
-        });
-        const diags = parseJsonOutput(input, 'phpmd');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].message, 'Unused variable');
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
-    });
-
-    test('phpstan format with preamble text', () => {
-        const input = [
-            'Instructions for interpreting errors',
-            '---------',
-            '{"totals":{"errors":0,"file_errors":2},"files":{"/home/vix/Code/CRM/yii-application/src/backend/repositories/ChatBotsRepository.php":{"errors":2,"messages":[{"message":"Method backend\\\\repositories\\\\ChatBotsRepository::findByName() has invalid return type backend\\\\models\\\\ChatBots.","line":43,"ignorable":true,"identifier":"class.notFound"},{"message":"Call to static method findOne() on an unknown class backend\\\\models\\\\ChatBots.","line":45,"ignorable":true,"tip":"Learn more at https://phpstan.org/user-guide/discovering-symbols","identifier":"class.notFound"}]}},"errors":[]}',
-        ].join('\n');
-        const diags = parseJsonOutput(input, 'phpstan');
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(
-            diags[0].message,
-            'Method backend\\repositories\\ChatBotsRepository::findByName() has invalid return type backend\\models\\ChatBots.'
-        );
-        assert.strictEqual(diags[0].range.start.line, 42);
-        assert.strictEqual(diags[0].code, 'class.notFound');
-        assert.strictEqual(diags[1].range.start.line, 44);
-        assert.strictEqual(diags[1].code, 'class.notFound');
-    });
-
-    test('skips preamble text before JSON', () => {
-        const input = 'Some debug output\n[{"line": 1, "column": 1, "message": "test"}]';
-        const diags = parseJsonOutput(input, 'test');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].message, 'test');
-    });
-
-    test('invalid JSON returns empty', () => {
-        assert.strictEqual(parseJsonOutput('not json at all', 'test').length, 0);
-    });
-});
 
 suite('Linter Runner', () => {
     test('expands command variables and leaves unknown variables unchanged', () => {
@@ -412,31 +67,15 @@ suite('Linter Runner', () => {
         );
     });
 
-    test('unknown parser returns no diagnostics', () => {
-        const diagnostics = parseLinterOutput(
-            {
-                name: 'unknown',
-                filePatterns: ['*.html'],
-                command: 'lint',
-                args: ['${file}'],
-                parser: 'missing-parser' as LinterConfig['parser'],
-                run: 'manual',
-            },
-            {
-                code: 1,
-                stdout: '  2:1  error  message  rule-id',
-                stderr: '',
-            }
-        );
-
-        assert.strictEqual(diagnostics.length, 0);
-    });
-
     test('moves diagnostics without explicit column to first non-whitespace word', async () => {
         const filePath = path.resolve(__dirname, '../../lint-test/test.php');
-        const diagnostics = parseParsableOutput(
-            'lint-test/test.php:5 LowercaseKey: The key should be uppercase',
-            'dotenv-linter'
+        const diagnostics = parseRegexFixture(
+            'dotenv-linter',
+            {
+                pattern: String.raw`^.+?:(?<line>\d+) (?<code>[A-Za-z][\w-]*): (?<message>.+)$`,
+                flags: 'gm',
+            },
+            'lint-test/test.php:5 LowercaseKey: The key should be uppercase'
         );
 
         await normalizeDiagnosticRanges(filePath, diagnostics);
@@ -449,9 +88,10 @@ suite('Linter Runner', () => {
 
     test('extends diagnostics with explicit column to first whitespace', async () => {
         const filePath = path.resolve(__dirname, '../../lint-test/test.js');
-        const diagnostics = parseJsonOutput(
-            JSON.stringify([{ line: 2, column: 7, message: 'Unused variable', severity: 2 }]),
-            'eslint'
+        const diagnostics = parseRegexFixture(
+            'eslint',
+            TEST_REGEX_PARSER,
+            '2:7:error:Unused variable'
         );
 
         await normalizeDiagnosticRanges(filePath, diagnostics);
@@ -484,13 +124,13 @@ suite('Linter Runner', () => {
                             name: 'PHPStan',
                             command: 'phpstan',
                             args: ['analyse', '${file}'],
-                            parser: 'json',
+                            parser: TEST_REGEX_PARSER,
                         },
                         {
                             name: 'PHPCS',
                             command: 'phpcs',
                             args: ['${file}'],
-                            parser: 'json',
+                            parser: TEST_REGEX_PARSER,
                             run: 'onSave',
                             showDiagnosticCodes: true,
                         },
@@ -526,7 +166,7 @@ suite('Linter Runner', () => {
                             name: 'markdownlint',
                             command: 'markdownlint',
                             args: ['${file}'],
-                            parser: 'json',
+                            parser: TEST_REGEX_PARSER,
                         },
                     ],
                 },
@@ -543,7 +183,7 @@ suite('Linter Runner', () => {
             filePatterns: ['*.md'],
             command: 'markdownlint',
             args: ['${file}'],
-            parser: 'json',
+            parser: TEST_REGEX_PARSER,
             run: 'onOpen',
         };
 
@@ -557,7 +197,7 @@ suite('Linter Runner', () => {
             filePatterns: ['*.ts'],
             command: 'eslint',
             args: ['${file}'],
-            parser: 'json',
+            parser: TEST_REGEX_PARSER,
             run: 'onSave',
         };
 
@@ -571,7 +211,7 @@ suite('Linter Runner', () => {
             filePatterns: ['*.ts'],
             command: 'eslint',
             args: ['${file}'],
-            parser: 'json',
+            parser: TEST_REGEX_PARSER,
             run: 'onSave',
             enabled: false,
         };
@@ -587,7 +227,7 @@ suite('Linter Runner', () => {
                 filePatterns: ['*.ts'],
                 command: 'eslint',
                 args: ['${file}'],
-                parser: 'json',
+                parser: TEST_REGEX_PARSER,
                 run: 'onSave',
                 fixCommand: {
                     name: 'eslint --fix',
@@ -631,7 +271,7 @@ suite('Linter Runner', () => {
                             name: 'ESLint',
                             command: 'eslint',
                             args: ['${file}'],
-                            parser: 'json',
+                            parser: TEST_REGEX_PARSER,
                             fixCommand: {
                                 name: 'eslint legacy --fix',
                                 command: 'eslint',
@@ -642,7 +282,7 @@ suite('Linter Runner', () => {
                             name: 'Disabled ESLint',
                             command: 'eslint',
                             args: ['${file}'],
-                            parser: 'json',
+                            parser: TEST_REGEX_PARSER,
                             fixCommand: {
                                 name: 'disabled legacy --fix',
                                 command: 'eslint',
@@ -685,20 +325,20 @@ suite('Linter Runner', () => {
                             name: 'ESLint',
                             command: 'eslint',
                             args: ['${file}'],
-                            parser: 'json',
+                            parser: TEST_REGEX_PARSER,
                         },
                         {
                             name: 'manual only',
                             command: 'biome',
                             args: ['check', '${file}'],
-                            parser: 'json',
+                            parser: TEST_REGEX_PARSER,
                             run: 'manual',
                         },
                         {
                             name: 'disabled',
                             command: 'tsc',
                             args: ['--noEmit', '${file}'],
-                            parser: 'parsable',
+                            parser: TEST_REGEX_PARSER,
                             enabled: false,
                         },
                     ],
@@ -735,7 +375,7 @@ suite('Linter Runner', () => {
                             name: 'ESLint',
                             command: 'eslint',
                             args: ['${file}'],
-                            parser: 'json',
+                            parser: TEST_REGEX_PARSER,
                         },
                     ],
                 },
@@ -770,7 +410,7 @@ suite('Linter Runner', () => {
                             name: 'checkmake',
                             command: 'checkmake',
                             args: ['${file}'],
-                            parser: 'json',
+                            parser: TEST_REGEX_PARSER,
                         },
                     ],
                 },
@@ -806,7 +446,7 @@ suite('Linter Runner', () => {
                             name: 'test',
                             command: 'test',
                             args: ['${file}'],
-                            parser: 'json',
+                            parser: TEST_REGEX_PARSER,
                         },
                     ],
                 },
@@ -837,7 +477,7 @@ suite('Linter Runner', () => {
                             name: 'test',
                             command: 'test',
                             args: ['${file}'],
-                            parser: 'json',
+                            parser: TEST_REGEX_PARSER,
                         },
                     ],
                 },
@@ -869,297 +509,6 @@ suite('Linter Runner', () => {
     test('matchesIgnorePatterns matches extension patterns', () => {
         assert.strictEqual(matchesIgnorePatterns('/tmp/example.min.js', ['*.min.js']), true);
         assert.strictEqual(matchesIgnorePatterns('/tmp/example.ts', ['*.min.js']), false);
-    });
-});
-
-suite('Jsonlint Parser', () => {
-    test('empty input returns no diagnostics', () => {
-        assert.strictEqual(parseJsonlintOutput('', '', 'test').length, 0);
-    });
-
-    test('parses jsonlint error from stderr', () => {
-        const stderr = '/tmp/test.json: line 4, col 11, found: STRING expected: EOF.';
-        const diags = parseJsonlintOutput('', stderr, 'jsonlint');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.line, 3);
-        assert.strictEqual(diags[0].range.start.character, 10);
-        assert.strictEqual(diags[0].message, 'found: STRING expected: EOF');
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
-    });
-
-    test('strips trailing period', () => {
-        const stderr = 'test.json: line 1, col 1, Duplicate key.';
-        const diags = parseJsonlintOutput('', stderr, 'jsonlint');
-        assert.strictEqual(diags[0].message, 'Duplicate key');
-    });
-
-    test('parses multiline parse error output', () => {
-        const stderr = [
-            'File: lint-test/test.json',
-            'Parse error on line 6, column 36:',
-            '... 1, "value": "foo", },        { "id": 2...',
-            '-----------------------^',
-            'Trailing comma in object',
-        ].join('\n');
-        const diags = parseJsonlintOutput('', stderr, 'jsonlint');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.line, 5);
-        assert.strictEqual(diags[0].range.start.character, 35);
-        assert.strictEqual(diags[0].message, 'Trailing comma in object');
-    });
-});
-
-suite('Parsable Parser', () => {
-    test('empty input returns no diagnostics', () => {
-        assert.strictEqual(parseParsableOutput('', 'test').length, 0);
-    });
-
-    test('parses yamllint-style output', () => {
-        const input =
-            'file.yml:1:1: [warning] missing document start "---" (document-start)\nfile.yml:3:1: [error] too many blank lines (empty-lines)';
-        const diags = parseParsableOutput(input, 'yamllint');
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
-        assert.strictEqual(diags[0].range.start.line, 0);
-        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Error);
-    });
-
-    test('parses gcc-style without brackets', () => {
-        const input = 'main.c:10:5: error unexpected token';
-        const diags = parseParsableOutput(input, 'gcc');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
-    });
-
-    test('parses dotenv-linter plain output', () => {
-        const input =
-            'lint-test/.env:1 LowercaseKey: The app_name key should be in uppercase\nlint-test/.env:2 IncorrectDelimiter: The APP ENV key has incorrect delimiter';
-        const diags = parseParsableOutput(input, 'dotenv-linter');
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
-        assert.strictEqual(diags[0].range.start.line, 0);
-        assert.strictEqual(diags[0].range.start.character, 0);
-        assert.strictEqual(diags[0].message, 'The app_name key should be in uppercase');
-        assert.strictEqual(diags[0].code, 'LowercaseKey');
-    });
-
-    test('parses dotenv-linter output with prologue and summary', () => {
-        const input = [
-            'Checking ../../../../tmp/test.env',
-            '../../../../tmp/test.env:1 LowercaseKey: The app_name key should be in uppercase',
-            '../../../../tmp/test.env:2 IncorrectDelimiter: The APP ENV key has incorrect delimiter',
-            '',
-            'Found 2 problems',
-        ].join('\n');
-        const diags = parseParsableOutput(input, 'dotenv-linter');
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].code, 'LowercaseKey');
-        assert.strictEqual(diags[1].code, 'IncorrectDelimiter');
-    });
-
-    test('parses luacheck plain format', () => {
-        const input = "/tmp/test.lua:1:7: (W211) unused variable 'foo'";
-        const diags = parseParsableOutput(input, 'luacheck');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
-        assert.strictEqual(diags[0].code, 'W211');
-        assert.strictEqual(diags[0].range.start.line, 0);
-        assert.strictEqual(diags[0].range.start.character, 6);
-    });
-
-    test('parses nginx-lint errorformat output', () => {
-        const input =
-            'lint-test/test.yml:9:14: error[syntax/missing-semicolon]: Missing semicolon at end of directive';
-        const diags = parseParsableOutput(input, 'nginx-lint');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
-        assert.strictEqual(diags[0].code, 'syntax/missing-semicolon');
-        assert.strictEqual(diags[0].message, 'Missing semicolon at end of directive');
-    });
-
-    test('info severity', () => {
-        const input = 'file:1:1: [info] some note';
-        const diags = parseParsableOutput(input, 'test');
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Information);
-    });
-
-    test('parseLinterOutput parsable parser merges stdout and stderr', () => {
-        const stdoutDiag = 'file.sh:2:1: [error] missing semicolon';
-        const stderrDiag = 'file.sh:5:1: [warning] unreachable code';
-        const diags = parseLinterOutput(
-            {
-                name: 'shellcheck',
-                filePatterns: ['*.sh'],
-                command: 'shellcheck',
-                args: ['${file}'],
-                parser: 'parsable',
-                run: 'manual',
-            },
-            { code: 1, stdout: stdoutDiag, stderr: stderrDiag }
-        );
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
-        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Warning);
-    });
-});
-
-suite('Xmllint Parser', () => {
-    test('empty input returns no diagnostics', () => {
-        assert.strictEqual(parseXmllintOutput('', 'test').length, 0);
-    });
-
-    test('parses parser error', () => {
-        const stderr = 'file.xml:6: parser error : Opening and ending tag mismatch';
-        const diags = parseXmllintOutput(stderr, 'xmllint');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.line, 5);
-        assert.strictEqual(diags[0].message, 'Opening and ending tag mismatch');
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
-    });
-
-    test('parses warning', () => {
-        const stderr = 'file.xml:2: warning : xmlns: URI is not absolute';
-        const diags = parseXmllintOutput(stderr, 'xmllint');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
-    });
-
-    test('skips non-matching lines', () => {
-        const stderr = '      ^  \nfile.xml:6: parser error : Something';
-        const diags = parseXmllintOutput(stderr, 'xmllint');
-        assert.strictEqual(diags.length, 1);
-    });
-});
-
-suite('Taplo Parser', () => {
-    test('parses syntax error output', () => {
-        const input = [
-            'error: invalid TOML',
-            '  ┌─ /tmp/test.toml:1:5',
-            '  │',
-            '1 │ x = ]',
-            '  │     ^ expected value',
-            '',
-            'ERROR invalid file error=syntax errors found path="/tmp/test.toml"',
-        ].join('\n');
-
-        const diags = parseTaploOutput(input, 'taplo');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.line, 0);
-        assert.strictEqual(diags[0].range.start.character, 4);
-        assert.strictEqual(diags[0].message, 'invalid TOML: expected value');
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
-        assert.strictEqual(diags[0].source, 'taplo');
-    });
-});
-
-suite('Linthtml Parser', () => {
-    test('empty input returns no diagnostics', () => {
-        assert.strictEqual(parseLinthtmlOutput('', 'test').length, 0);
-    });
-
-    test('parses error line', () => {
-        const input = '  2:1  error  <HTML> tag should specify the language  html-req-lang';
-        const diags = parseLinthtmlOutput(input, 'linthtml');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.line, 1);
-        assert.strictEqual(diags[0].range.start.character, 0);
-        assert.strictEqual(diags[0].message, '<HTML> tag should specify the language');
-        assert.strictEqual(diags[0].code, 'html-req-lang');
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
-    });
-
-    test('parses warning line', () => {
-        const input = '  8:9  warning  Invalid case for tag  tag-name-lowercase';
-        const diags = parseLinthtmlOutput(input, 'linthtml');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
-    });
-});
-
-suite('Ansible-lint Parser', () => {
-    test('empty input returns no diagnostics', () => {
-        assert.strictEqual(parseAnsibleLintOutput('', 'test').length, 0);
-    });
-
-    test('parses rule + location pair', () => {
-        const input =
-            'command-instead-of-shell: Use command instead of shell.\nplaybook.yml:10 Use command module';
-        const diags = parseAnsibleLintOutput(input, 'ansible-lint');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.line, 9);
-        assert.strictEqual(diags[0].message, 'command-instead-of-shell: Use command module');
-        assert.strictEqual(diags[0].code, 'command-instead-of-shell');
-    });
-
-    test('parses with column', () => {
-        const input = 'yaml[truthy]: Truthy value.\nfile.yml:3:5 Some detail';
-        const diags = parseAnsibleLintOutput(input, 'ansible-lint');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.line, 2);
-        assert.strictEqual(diags[0].range.start.character, 4);
-    });
-
-    test('falls back to rule description when no detail', () => {
-        const input = 'no-changed-when: Commands should not change things.\nplaybook.yml:7';
-        const diags = parseAnsibleLintOutput(input, 'ansible-lint');
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].message, 'no-changed-when: Commands should not change things.');
-    });
-
-    test('skips orphan lines', () => {
-        const input = '\nsome random line\n\nrule-id: Desc.\nfile.yml:1 msg';
-        const diags = parseAnsibleLintOutput(input, 'ansible-lint');
-        assert.strictEqual(diags.length, 1);
-    });
-
-    test('multiple pairs', () => {
-        const input = 'rule-a: Desc A.\nfile.yml:1 msg A\n\nrule-b: Desc B.\nfile.yml:5 msg B';
-        const diags = parseAnsibleLintOutput(input, 'ansible-lint');
-        assert.strictEqual(diags.length, 2);
-    });
-
-    test('parses json output with preamble text', () => {
-        const input = [
-            'WARNING  Found incompatible custom yamllint configuration',
-            'Failed: 2 failure(s), 0 warning(s) in 1 files processed of 1 encountered.',
-            JSON.stringify([
-                {
-                    type: 'issue',
-                    check_name: 'fqcn[action-core]',
-                    description: 'Use FQCN for builtin module actions (debug).',
-                    location: {
-                        path: 'lint-test/ansible.yml',
-                        positions: { begin: { line: 8, column: 7 } },
-                    },
-                    content: {
-                        body: 'Use `ansible.builtin.debug` or `ansible.legacy.debug` instead.',
-                    },
-                },
-                {
-                    type: 'issue',
-                    check_name: 'no-changed-when',
-                    description: 'Commands should not change things if nothing needs doing.',
-                    location: {
-                        path: 'lint-test/ansible.yml',
-                        lines: { begin: 10 },
-                    },
-                    content: { body: 'Task/Handler: shell echo done' },
-                },
-            ]),
-        ].join('\n');
-
-        const diags = parseAnsibleLintOutput(input, 'ansible-lint');
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].range.start.line, 7);
-        assert.strictEqual(diags[0].range.start.character, 6);
-        assert.strictEqual(diags[0].code, 'fqcn[action-core]');
-        assert.strictEqual(
-            diags[0].message,
-            'fqcn[action-core]: Use `ansible.builtin.debug` or `ansible.legacy.debug` instead.'
-        );
-        assert.strictEqual(diags[1].range.start.line, 9);
-        assert.strictEqual(diags[1].code, 'no-changed-when');
     });
 });
 
