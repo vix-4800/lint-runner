@@ -245,12 +245,15 @@ suite('Linter Runner', () => {
         assert.strictEqual(targets[0].linters[0].fixCommand?.run, 'onSave');
     });
 
-    test('collects runnable fixers for matching targets', () => {
+    test('collects runnable fixers for matching targets', async () => {
+        const tsFilePath = path.resolve(__dirname, '../../lint-test/test.ts');
+        await vscode.workspace.openTextDocument(tsFilePath);
+
         const targets = resolveConfiguredTargets(
             [
                 {
                     name: 'TypeScript',
-                    filePatterns: ['*.ts'],
+                    languages: ['typescript'],
                     fixers: [
                         { name: 'prettier', command: 'prettier', args: ['--write', '${file}'] },
                         {
@@ -296,7 +299,7 @@ suite('Linter Runner', () => {
             []
         );
 
-        const manualFixers = collectRunnableFixers(targets, '/tmp/example.ts', 'manual');
+        const manualFixers = collectRunnableFixers(targets, tsFilePath, 'manual');
         assert.deepStrictEqual(
             manualFixers.map((fixer) => fixer.label),
             ['prettier', 'eslint --fix', 'eslint legacy --fix']
@@ -306,19 +309,22 @@ suite('Linter Runner', () => {
             ['TypeScript', 'TypeScript', 'TypeScript / ESLint']
         );
 
-        const onSaveFixers = collectRunnableFixers(targets, '/tmp/example.ts', 'onSave');
+        const onSaveFixers = collectRunnableFixers(targets, tsFilePath, 'onSave');
         assert.deepStrictEqual(
             onSaveFixers.map((fixer) => fixer.label),
             ['eslint --fix']
         );
     });
 
-    test('collects runnable linters for matching targets', () => {
+    test('collects runnable linters for matching targets', async () => {
+        const tsFilePath = path.resolve(__dirname, '../../lint-test/test.ts');
+        await vscode.workspace.openTextDocument(tsFilePath);
+
         const targets = resolveConfiguredTargets(
             [
                 {
                     name: 'TypeScript',
-                    filePatterns: ['*.ts'],
+                    languages: ['typescript'],
                     run: 'onSave',
                     linters: [
                         {
@@ -347,7 +353,7 @@ suite('Linter Runner', () => {
             []
         );
 
-        const manualLinters = collectRunnableLinters(targets, '/tmp/example.ts', 'manual');
+        const manualLinters = collectRunnableLinters(targets, tsFilePath, 'manual');
         assert.deepStrictEqual(
             manualLinters.map((linter) => linter.label),
             ['ESLint', 'manual only']
@@ -357,7 +363,7 @@ suite('Linter Runner', () => {
             ['TypeScript', 'TypeScript']
         );
 
-        const onSaveLinters = collectRunnableLinters(targets, '/tmp/example.ts', 'onSave');
+        const onSaveLinters = collectRunnableLinters(targets, tsFilePath, 'onSave');
         assert.deepStrictEqual(
             onSaveLinters.map((linter) => linter.label),
             ['ESLint']
@@ -365,134 +371,62 @@ suite('Linter Runner', () => {
     });
 
     test('matches files with brace-expanded glob patterns', () => {
-        const targets = resolveConfiguredTargets(
-            [
-                {
-                    name: 'TypeScript',
-                    filePatterns: ['*.{ts,tsx}'],
-                    linters: [
-                        {
-                            name: 'ESLint',
-                            command: 'eslint',
-                            args: ['${file}'],
-                            parser: TEST_REGEX_PARSER,
-                        },
-                    ],
-                },
-            ],
-            []
-        );
-
         assert.strictEqual(
-            collectRunnableLinters(targets, '/tmp/example.ts', 'manual').length,
-            1,
+            matchesIgnorePatterns('/tmp/example.ts', ['*.{ts,tsx}']),
+            true,
             '*.{ts,tsx} should match .ts files'
         );
         assert.strictEqual(
-            collectRunnableLinters(targets, '/tmp/example.tsx', 'manual').length,
-            1,
+            matchesIgnorePatterns('/tmp/example.tsx', ['*.{ts,tsx}']),
+            true,
             '*.{ts,tsx} should match .tsx files'
         );
         assert.strictEqual(
-            collectRunnableLinters(targets, '/tmp/example.js', 'manual').length,
-            0,
+            matchesIgnorePatterns('/tmp/example.js', ['*.{ts,tsx}']),
+            false,
             '*.{ts,tsx} should not match .js files'
         );
     });
     test('matches files with bracket expression glob patterns', () => {
-        const targets = resolveConfiguredTargets(
-            [
-                {
-                    name: 'Makefile',
-                    filePatterns: ['[Mm]akefile'],
-                    linters: [
-                        {
-                            name: 'checkmake',
-                            command: 'checkmake',
-                            args: ['${file}'],
-                            parser: TEST_REGEX_PARSER,
-                        },
-                    ],
-                },
-            ],
-            []
-        );
-
         assert.strictEqual(
-            collectRunnableLinters(targets, '/tmp/Makefile', 'manual').length,
-            1,
+            matchesIgnorePatterns('/tmp/Makefile', ['[Mm]akefile']),
+            true,
             '[Mm]akefile should match Makefile'
         );
         assert.strictEqual(
-            collectRunnableLinters(targets, '/tmp/makefile', 'manual').length,
-            1,
+            matchesIgnorePatterns('/tmp/makefile', ['[Mm]akefile']),
+            true,
             '[Mm]akefile should match makefile'
         );
         assert.strictEqual(
-            collectRunnableLinters(targets, '/tmp/GNUMakefile', 'manual').length,
-            0,
+            matchesIgnorePatterns('/tmp/GNUMakefile', ['[Mm]akefile']),
+            false,
             '[Mm]akefile should not match GNUMakefile'
         );
     });
 
     test('matches files with negated bracket expression glob patterns', () => {
-        const targets = resolveConfiguredTargets(
-            [
-                {
-                    name: 'Non-JS',
-                    filePatterns: ['*.[!j]s'],
-                    linters: [
-                        {
-                            name: 'test',
-                            command: 'test',
-                            args: ['${file}'],
-                            parser: TEST_REGEX_PARSER,
-                        },
-                    ],
-                },
-            ],
-            []
-        );
-
         assert.strictEqual(
-            collectRunnableLinters(targets, '/tmp/example.ts', 'manual').length,
-            1,
+            matchesIgnorePatterns('/tmp/example.ts', ['*.[!j]s']),
+            true,
             '*.[!j]s should match .ts'
         );
         assert.strictEqual(
-            collectRunnableLinters(targets, '/tmp/example.js', 'manual').length,
-            0,
+            matchesIgnorePatterns('/tmp/example.js', ['*.[!j]s']),
+            false,
             '*.[!j]s should not match .js'
         );
     });
 
     test('treats unclosed [ as literal character', () => {
-        const targets = resolveConfiguredTargets(
-            [
-                {
-                    name: 'Literal Bracket',
-                    filePatterns: ['[file.txt'],
-                    linters: [
-                        {
-                            name: 'test',
-                            command: 'test',
-                            args: ['${file}'],
-                            parser: TEST_REGEX_PARSER,
-                        },
-                    ],
-                },
-            ],
-            []
-        );
-
         assert.strictEqual(
-            collectRunnableLinters(targets, '/tmp/[file.txt', 'manual').length,
-            1,
+            matchesIgnorePatterns('/tmp/[file.txt', ['[file.txt']),
+            true,
             'unclosed [ should be treated as literal'
         );
         assert.strictEqual(
-            collectRunnableLinters(targets, '/tmp/file.txt', 'manual').length,
-            0,
+            matchesIgnorePatterns('/tmp/file.txt', ['[file.txt']),
+            false,
             'unclosed [ should not be dropped silently'
         );
     });
