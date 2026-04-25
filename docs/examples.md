@@ -254,8 +254,7 @@ associations, so adjust them if your editor reports a different language.
 ```json
 {
   "name": "INI",
-  "languages": ["ini", "properties"],
-  "filePatterns": ["*.ini", "*.cfg", ".editorconfig", ".gitconfig"],
+  "languages": ["ini", "properties", "editorconfig"],
   "fixers": [
     {
       "args": ["--write", "${file}"],
