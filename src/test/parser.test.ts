@@ -546,17 +546,16 @@ suite('Linter Runner', () => {
         );
     });
 
-    test('matches files by either filePatterns or languages', async () => {
+    test('filePatterns filters further on top of language match', async () => {
         const phpFilePath = path.resolve(__dirname, '../../lint-test/test.php');
-        const tsFilePath = path.resolve(__dirname, '../../lint-test/test.ts');
         await vscode.workspace.openTextDocument(phpFilePath);
 
         const targets = resolveConfiguredTargets(
             [
                 {
-                    name: 'PHP and TS',
-                    filePatterns: ['*.ts'],
+                    name: 'PHP controllers only',
                     languages: ['php'],
+                    filePatterns: ['*Controller*'],
                     linters: [
                         {
                             name: 'test-linter',
@@ -570,15 +569,53 @@ suite('Linter Runner', () => {
             []
         );
 
+        // Language matches but filePatterns does not → no match
         assert.strictEqual(
             collectRunnableLinters(targets, phpFilePath, 'manual').length,
-            1,
-            'should match PHP file via languages'
+            0,
+            'languages match but filePatterns does not → should not match'
         );
+
+        const phpControllerPath = path.resolve(__dirname, '../../lint-test/MyController.php');
+        const targetsMatchingAll = resolveConfiguredTargets(
+            [
+                {
+                    name: 'PHP with *.php pattern',
+                    languages: ['php'],
+                    filePatterns: ['*.php'],
+                    linters: [
+                        {
+                            name: 'PHPStan',
+                            command: 'phpstan',
+                            args: ['${file}'],
+                            parser: TEST_REGEX_PARSER,
+                        },
+                    ],
+                },
+            ],
+            []
+        );
+
+        // Language matches AND filePatterns matches → match
         assert.strictEqual(
-            collectRunnableLinters(targets, tsFilePath, 'manual').length,
+            collectRunnableLinters(targetsMatchingAll, phpFilePath, 'manual').length,
             1,
-            'should match TS file via filePatterns'
+            'languages match AND filePatterns matches → should match'
+        );
+
+        // filePatterns matches but document language is not php → no match
+        const tsFilePath = path.resolve(__dirname, '../../lint-test/test.ts');
+        assert.strictEqual(
+            collectRunnableLinters(targetsMatchingAll, tsFilePath, 'manual').length,
+            0,
+            'filePatterns matches but language does not → should not match'
+        );
+
+        // Test that a fake php path matches filePatterns but language wins
+        assert.strictEqual(
+            collectRunnableLinters(targetsMatchingAll, phpControllerPath, 'manual').length,
+            0,
+            'file not open (no languageId) → should not match even if filePatterns matches'
         );
     });
 });

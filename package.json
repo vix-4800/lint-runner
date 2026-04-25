@@ -96,14 +96,14 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Glob patterns for files this target applies to. At least one of `filePatterns` or `languages` is required."
+                "description": "Glob patterns for files this target applies to. When used together with `languages`, acts as an additional filter: the file must match both the language and the pattern."
               },
               "languages": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 },
-                "description": "VS Code language identifiers this target applies to (e.g. `[\"php\", \"javascript\"]`). Matched against the open document's language ID. At least one of `filePatterns` or `languages` is required."
+                "description": "VS Code language identifiers this target applies to (e.g. `[\"php\", \"javascript\"]`). When set, this is the primary filter: the file's language must match. `filePatterns` can then narrow the match further."
               },
               "run": {
                 "type": "string",
@@ -382,14 +382,14 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Glob patterns for files this linter applies to (e.g. [\"*.sh\"]). At least one of `filePatterns` or `languages` is required."
+                "description": "Glob patterns for files this linter applies to (e.g. [\"*.sh\"]). When used together with `languages`, acts as an additional filter: the file must match both the language and the pattern."
               },
               "languages": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 },
-                "description": "VS Code language identifiers this linter applies to (e.g. `[\"php\"]`). At least one of `filePatterns` or `languages` is required."
+                "description": "VS Code language identifiers this linter applies to (e.g. `[\"php\"]`). When set, this is the primary filter: the file's language must match. `filePatterns` can then narrow the match further."
               },
               "command": {
                 "type": "string",
