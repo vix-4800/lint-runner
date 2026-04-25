@@ -75,6 +75,29 @@ export interface TargetConfig {
     showDiagnosticCodes?: boolean;
 }
 
+export interface FolderLinterPatch {
+    name: string;
+    command?: string;
+    args?: string[];
+    parser?: RegexParserConfig;
+    run?: RunMode;
+    enabled?: boolean;
+    preCommands?: CommandConfig[];
+    fixCommand?: FixerConfig;
+    showDiagnosticCodes?: boolean;
+}
+
+export interface FolderTargetPatch {
+    name: string;
+    filePatterns?: string[];
+    languages?: string[];
+    run?: RunMode;
+    preCommands?: CommandConfig[];
+    linters?: FolderLinterPatch[];
+    fixers?: FixerConfig[];
+    showDiagnosticCodes?: boolean;
+}
+
 export interface ResolvedTargetConfig {
     name: string;
     filePatterns: string[];
@@ -291,12 +314,66 @@ export function resolveConfiguredTargets(
     return [...targets.map(normalizeTargetConfig), ...legacyLinters.map(legacyLinterToTarget)];
 }
 
-function getConfiguredTargets(): ResolvedTargetConfig[] {
+function mergeLinters(
+    globalLinters: TargetLinterConfig[],
+    patches: FolderLinterPatch[]
+): TargetLinterConfig[] {
+    const result: TargetLinterConfig[] = globalLinters.map((l) => ({ ...l }));
+    const newLinters: TargetLinterConfig[] = [];
+
+    for (const patch of patches) {
+        const idx = result.findIndex((l) => l.name === patch.name);
+        if (idx >= 0) {
+            result[idx] = { ...result[idx], ...patch };
+        } else {
+            newLinters.push(patch as TargetLinterConfig);
+        }
+    }
+
+    return [...result, ...newLinters];
+}
+
+export function mergeFolderTargets(
+    globalTargets: TargetConfig[],
+    folderPatches: FolderTargetPatch[]
+): TargetConfig[] {
+    if (folderPatches.length === 0) {
+        return globalTargets;
+    }
+
+    const result: TargetConfig[] = globalTargets.map((t) => ({ ...t }));
+    const newTargets: TargetConfig[] = [];
+
+    for (const patch of folderPatches) {
+        const idx = result.findIndex((t) => t.name === patch.name);
+        if (idx >= 0) {
+            const existing = result[idx];
+            const { linters: patchLinters, ...restPatch } = patch;
+            const mergedLinters =
+                patchLinters !== undefined
+                    ? mergeLinters(existing.linters ?? [], patchLinters)
+                    : existing.linters;
+            result[idx] = { ...existing, ...restPatch, linters: mergedLinters };
+        } else {
+            newTargets.push(patch as TargetConfig);
+        }
+    }
+
+    return [...result, ...newTargets];
+}
+
+function getConfiguredTargets(filePath: string): ResolvedTargetConfig[] {
     const config = vscode.workspace.getConfiguration('lintRunner');
     const targets = config.get<TargetConfig[]>('targets') ?? [];
     const legacyLinters = config.get<LinterConfig[]>('linters') ?? [];
+    const folderConfig = vscode.workspace.getConfiguration(
+        'lintRunner',
+        vscode.Uri.file(filePath)
+    );
+    const folderPatches = folderConfig.get<FolderTargetPatch[]>('folderTargets') ?? [];
+    const mergedTargets = mergeFolderTargets(targets, folderPatches);
 
-    return resolveConfiguredTargets(targets, legacyLinters);
+    return resolveConfiguredTargets(mergedTargets, legacyLinters);
 }
 
 function expandHome(value: string): string {
@@ -891,7 +968,7 @@ export function getRunnableFixers(
     filePath: string,
     trigger: FixerRunMode = 'manual'
 ): RunnableFixer[] {
-    return collectRunnableFixers(getConfiguredTargets(), filePath, trigger);
+    return collectRunnableFixers(getConfiguredTargets(filePath), filePath, trigger);
 }
 
 export function collectRunnableLinters(
@@ -914,7 +991,7 @@ export function collectRunnableLinters(
 }
 
 export function getRunnableLinters(filePath: string, trigger: RunMode = 'manual'): RunnableLinter[] {
-    return collectRunnableLinters(getConfiguredTargets(), filePath, trigger);
+    return collectRunnableLinters(getConfiguredTargets(filePath), filePath, trigger);
 }
 
 export function matchesIgnorePatterns(filePath: string, patterns: string[]): boolean {
@@ -1030,7 +1107,7 @@ export async function runLinters(
         return;
     }
 
-    const targets = getConfiguredTargets();
+    const targets = getConfiguredTargets(filePath);
     const uri = vscode.Uri.file(filePath);
     const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics);
 

@@ -7,10 +7,12 @@ import {
     buildCommandEnv,
     collectRunnableFixers,
     matchesIgnorePatterns,
+    mergeFolderTargets,
     normalizeDiagnosticRanges,
     parseLinterOutput,
     resolveConfiguredTargets,
     shouldRunLinter,
+    type FolderTargetPatch,
     type LinterConfig,
     type RegexParserConfig,
 } from '../linterRunner.js';
@@ -1310,5 +1312,133 @@ suite('Regex Utility Parser Configs', () => {
         assert.strictEqual(diags[0].range.start.line, 2);
         assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
         assert.strictEqual(diags[0].code, 'missingType.return');
+    });
+});
+
+suite('mergeFolderTargets', () => {
+    const BASE_PARSER: RegexParserConfig = {
+        pattern: String.raw`(?<line>\d+):(?<message>.+)`,
+    };
+
+    test('empty folderTargets returns global targets unchanged', () => {
+        const global = [
+            {
+                name: 'PHP',
+                languages: ['php'],
+                linters: [{ name: 'phpstan', command: 'phpstan', args: ['${file}'], parser: BASE_PARSER }],
+            },
+        ];
+        const result = mergeFolderTargets(global, []);
+        assert.deepStrictEqual(result, global);
+    });
+
+    test('patches top-level target fields by name', () => {
+        const global = [
+            { name: 'PHP', languages: ['php'], run: 'onSave' as const, linters: [] },
+        ];
+        const patches: FolderTargetPatch[] = [{ name: 'PHP', run: 'manual' }];
+        const result = mergeFolderTargets(global, patches);
+        assert.strictEqual(result.length, 1);
+        assert.strictEqual(result[0].run, 'manual');
+        assert.deepStrictEqual(result[0].languages, ['php']);
+    });
+
+    test('patches linter args by name, leaving other linter fields intact', () => {
+        const global = [
+            {
+                name: 'PHP',
+                languages: ['php'],
+                linters: [
+                    { name: 'phpstan', command: 'phpstan', args: ['analyse', '${file}'], parser: BASE_PARSER },
+                ],
+            },
+        ];
+        const patches: FolderTargetPatch[] = [
+            {
+                name: 'PHP',
+                linters: [
+                    { name: 'phpstan', args: ['analyse', '--configuration', 'phpstan.neon', '${file}'] },
+                ],
+            },
+        ];
+        const result = mergeFolderTargets(global, patches);
+        assert.strictEqual(result.length, 1);
+        const linters = result[0].linters ?? [];
+        assert.strictEqual(linters.length, 1);
+        assert.deepStrictEqual(linters[0].args, ['analyse', '--configuration', 'phpstan.neon', '${file}']);
+        assert.strictEqual(linters[0].command, 'phpstan');
+        assert.deepStrictEqual(linters[0].parser, BASE_PARSER);
+    });
+
+    test('appends new linter to existing target when name does not match', () => {
+        const global = [
+            {
+                name: 'PHP',
+                languages: ['php'],
+                linters: [
+                    { name: 'phpstan', command: 'phpstan', args: ['${file}'], parser: BASE_PARSER },
+                ],
+            },
+        ];
+        const newLinter = { name: 'phpcs', command: 'phpcs', args: ['${file}'], parser: BASE_PARSER };
+        const patches: FolderTargetPatch[] = [
+            { name: 'PHP', linters: [newLinter] },
+        ];
+        const result = mergeFolderTargets(global, patches);
+        const linters = result[0].linters ?? [];
+        assert.strictEqual(linters.length, 2);
+        assert.strictEqual(linters[1].name, 'phpcs');
+    });
+
+    test('adds a completely new target when no global target matches', () => {
+        const global = [
+            { name: 'PHP', languages: ['php'], linters: [] },
+        ];
+        const patches: FolderTargetPatch[] = [
+            {
+                name: 'JS',
+                languages: ['javascript'],
+                linters: [{ name: 'eslint', command: 'eslint', args: ['${file}'], parser: BASE_PARSER }],
+            },
+        ];
+        const result = mergeFolderTargets(global, patches);
+        assert.strictEqual(result.length, 2);
+        assert.strictEqual(result[1].name, 'JS');
+        assert.deepStrictEqual(result[1].languages, ['javascript']);
+    });
+
+    test('patches one linter in a multi-linter target leaving others intact', () => {
+        const global = [
+            {
+                name: 'PHP',
+                languages: ['php'],
+                linters: [
+                    { name: 'phpstan', command: 'phpstan', args: ['analyse', '${file}'], parser: BASE_PARSER },
+                    { name: 'phpcs', command: 'phpcs', args: ['${file}'], parser: BASE_PARSER, run: 'onSave' as const },
+                ],
+            },
+        ];
+        const patches: FolderTargetPatch[] = [
+            { name: 'PHP', linters: [{ name: 'phpstan', args: ['analyse', '--no-progress', '${file}'] }] },
+        ];
+        const result = mergeFolderTargets(global, patches);
+        const linters = result[0].linters ?? [];
+        assert.strictEqual(linters.length, 2);
+        assert.deepStrictEqual(linters[0].args, ['analyse', '--no-progress', '${file}']);
+        assert.strictEqual(linters[1].name, 'phpcs');
+        assert.strictEqual(linters[1].run, 'onSave');
+    });
+
+    test('global targets without patches remain unchanged', () => {
+        const global = [
+            { name: 'PHP', languages: ['php'], run: 'onSave' as const, linters: [] },
+            { name: 'JS', languages: ['javascript'], run: 'manual' as const, linters: [] },
+        ];
+        const patches: FolderTargetPatch[] = [{ name: 'PHP', run: 'manual' }];
+        const result = mergeFolderTargets(global, patches);
+        assert.strictEqual(result.length, 2);
+        assert.strictEqual(result[0].run, 'manual');
+        assert.strictEqual(result[1].run, 'manual');
+        assert.deepStrictEqual(result[1].languages, ['javascript']);
     });
 });
