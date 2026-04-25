@@ -10,6 +10,7 @@ VS Code extension for running external CLI linters and reporting found issues in
 - run linters when a file is saved;
 - run auto-fixers when a file is saved;
 - clear diagnostics for the active file (or all files) via `LintRunner: Clear Diagnostics`;
+- match targets by VS Code language id, with optional glob-based narrowing;
 - select linters by file glob patterns;
 - substitute command variables in commands and arguments;
 - support `~` in command and argument paths;
@@ -28,7 +29,8 @@ Configuration is stored in `settings.json`:
     "lintRunner.targets": [
         {
             "name": "PHP",
-            "filePatterns": ["*.php"],
+            "languages": ["php"],
+            "filePatterns": ["app/**/*.php"],
             "preCommands": [{ "name": "php -l", "command": "php", "args": ["-l", "${file}"] }],
             "linters": [
                 {
@@ -50,17 +52,33 @@ Configuration is stored in `settings.json`:
 
 ## Target Config
 
-`lintRunner.targets` groups a shared file set and commands that should run for those files.
+`lintRunner.targets` groups a shared file set and commands that should run for those files. A target must match the
+file's VS Code language id via `languages`. `filePatterns` is optional and further narrows the match.
 
 | Field                 | Type                               | Required | Description                                                                                                    |
 | --------------------- | ---------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------- |
 | `name`                | `string`                           | yes      | Target name in LintRunner output.                                                                              |
-| `filePatterns`        | `string[]`                         | yes      | File glob patterns. Checked against the file name, workspace-relative path, and full path.                     |
+| `languages`           | `string[]`                         | yes      | VS Code language ids this target applies to.                                                                   |
+| `filePatterns`        | `string[]`                         | no       | Optional glob patterns that further narrow matching files.                                                     |
 | `run`                 | `"onOpen" \| "onSave" \| "manual"` | no       | Default run mode for linters. Defaults to `onSave`. `onOpen` also runs on save.                                |
 | `preCommands`         | `CommandConfig[]`                  | no       | Commands executed once before target linters.                                                                  |
 | `linters`             | `TargetLinterConfig[]`             | no       | Linter commands for the target.                                                                                |
 | `fixers`              | `FixerConfig[]`                    | no       | Auto-fixer commands. By default they run via `LintRunner: Run Fixers`; `run: "onSave"` also runs them on save. |
 | `showDiagnosticCodes` | `boolean`                          | no       | Default value for target linters.                                                                              |
+
+`filePatterns` use the same path matching rules as before: the extension checks the file name, workspace-relative path,
+and full path.
+
+Example:
+
+```json
+{
+    "name": "Frontend",
+    "languages": ["javascript", "typescript", "javascriptreact", "typescriptreact"],
+    "filePatterns": ["src/**/*.{js,jsx,ts,tsx}"],
+    "linters": []
+}
+```
 
 ### Target Linter Config
 
@@ -76,7 +94,8 @@ Configuration is stored in `settings.json`:
 | `fixCommand`          | `FixerConfig`                      | no       | Legacy per-linter auto-fixer. Prefer target-level `fixers` for new configs.                |
 | `showDiagnosticCodes` | `boolean`                          | no       | Overrides target `showDiagnosticCodes`.                                                    |
 
-`lintRunner.linters` with the old linter-first format is still supported for compatibility.
+`lintRunner.linters` with the old linter-first format is still supported for compatibility. Legacy entries also use
+required `languages`, while `filePatterns` remains optional as an extra filter.
 
 ## Pre-Commands
 
@@ -86,7 +105,8 @@ does not run.
 ```json
 {
     "name": "PHP",
-    "filePatterns": ["*.php"],
+    "languages": ["php"],
+    "filePatterns": ["app/**/*.php"],
     "preCommands": [
         {
             "name": "php -l",
@@ -163,8 +183,8 @@ Glob patterns for files that LintRunner should never lint or fix. The same match
 
 ### `lintRunner.respectGitignore`
 
-When `true`, LintRunner skips any file that `git check-ignore` reports as ignored by `.gitignore`. Requires `git` to
-be available on `PATH`. The file's workspace folder is used as the working directory.
+When `true`, LintRunner skips any file that `git check-ignore` reports as ignored by `.gitignore`. Requires `git` to be
+available on `PATH`. The file's workspace folder is used as the working directory.
 
 ```json
 {
@@ -196,7 +216,7 @@ linters to update Problems.
 ```json
 {
     "name": "PHP",
-    "filePatterns": ["*.php"],
+    "languages": ["php"],
     "linters": [
         {
             "name": "phpcs",
@@ -226,7 +246,7 @@ To hide the rule code:
 ```json
 {
     "name": "PHP",
-    "filePatterns": ["*.php"],
+    "languages": ["php"],
     "showDiagnosticCodes": false,
     "linters": [
         {
@@ -254,28 +274,28 @@ Expected 1 newline at end of file; 0 found phpcs
 `parser` is a regex config object. The regex runs globally over selected command output and creates one diagnostic per
 match.
 
-| Field             | Type                                  | Required | Description                                                                 |
-| ----------------- | ------------------------------------- | -------- | --------------------------------------------------------------------------- |
-| `pattern`         | `string`                              | yes      | JavaScript regex pattern.                                                   |
-| `flags`           | `string`                              | no       | JavaScript regex flags. `g` is added automatically.                         |
-| `output`          | `"stdout" \| "stderr" \| "both"`      | no       | Output stream to parse. Defaults to `both`.                                 |
-| `defaultSeverity` | `"error" \| "warning" \| "info"`      | no       | Severity when no `severity` group matched. Defaults to `warning`.           |
-| `messageFormat`   | `"plain" \| "json"`                   | no       | Use `json` when `message` captures a JSON string value without outer quotes. |
+| Field             | Type                             | Required | Description                                                       |
+| ----------------- | -------------------------------- | -------- | ----------------------------------------------------------------- |
+| `pattern`         | `string`                         | yes      | JavaScript regex pattern.                                         |
+| `flags`           | `string`                         | no       | JavaScript regex flags. `g` is added automatically.               |
+| `output`          | `"stdout" \| "stderr" \| "both"` | no       | Output stream to parse. Defaults to `both`.                       |
+| `defaultSeverity` | `"error" \| "warning" \| "info"` | no       | Severity when no `severity` group matched. Defaults to `warning`. |
+| `messageFormat`   | `"plain" \| "json"`              | no       | Decode the captured `message` as plain text or JSON.              |
 
 Required named groups:
 
-| Group     | Description                      |
-| --------- | -------------------------------- |
-| `line`    | 1-based line number.             |
-| `message` | Diagnostic message.              |
+| Group     | Description          |
+| --------- | -------------------- |
+| `line`    | 1-based line number. |
+| `message` | Diagnostic message.  |
 
 Optional named groups:
 
-| Group      | Description                                              |
-| ---------- | -------------------------------------------------------- |
-| `col`      | 1-based column number.                                   |
-| `severity` | `error`, `warning`, `info`, plus aliases like `note`.    |
-| `code`     | Rule id shown in Problems unless `showDiagnosticCodes` is false. |
+| Group      | Description                                           |
+| ---------- | ----------------------------------------------------- |
+| `col`      | 1-based column number.                                |
+| `severity` | `error`, `warning`, `info`, plus aliases like `note`. |
+| `code`     | Rule id for the diagnostic.                           |
 
 ## Examples
 
