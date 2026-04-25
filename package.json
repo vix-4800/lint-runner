@@ -84,7 +84,7 @@
             "type": "object",
             "required": [
               "name",
-              "filePatterns"
+              "languages"
             ],
             "additionalProperties": false,
             "properties": {
@@ -97,7 +97,14 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Glob patterns for files this target applies to."
+                "description": "Glob patterns to further narrow which files this target applies to. Optional — the file must already match `languages`. Both conditions must be satisfied."
+              },
+              "languages": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Required. VS Code language identifiers this target applies to (e.g. `[\"php\", \"javascript\"]`). The file's language ID must match. Use `filePatterns` for additional narrowing."
               },
               "run": {
                 "type": "string",
@@ -355,11 +362,11 @@
             "type": "object",
             "required": [
               "name",
-              "filePatterns",
               "command",
               "args",
               "parser",
-              "run"
+              "run",
+              "languages"
             ],
             "additionalProperties": false,
             "properties": {
@@ -377,7 +384,14 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Glob patterns for files this linter applies to (e.g. [\"*.sh\"])."
+                "description": "Glob patterns to further narrow which files this linter applies to. Optional — the file must already match `languages`. Both conditions must be satisfied."
+              },
+              "languages": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Required. VS Code language identifiers this linter applies to (e.g. `[\"php\"]`). The file's language ID must match. Use `filePatterns` for additional narrowing."
               },
               "command": {
                 "type": "string",
