@@ -59,13 +59,15 @@ export interface TargetLinterConfig {
 }
 
 export interface LinterConfig extends TargetLinterConfig {
-    filePatterns: string[];
+    filePatterns?: string[];
+    languages?: string[];
     run: RunMode;
 }
 
 export interface TargetConfig {
     name: string;
-    filePatterns: string[];
+    filePatterns?: string[];
+    languages?: string[];
     run?: RunMode;
     preCommands?: CommandConfig[];
     linters?: TargetLinterConfig[];
@@ -76,6 +78,7 @@ export interface TargetConfig {
 export interface ResolvedTargetConfig {
     name: string;
     filePatterns: string[];
+    languages: string[];
     preCommands: CommandConfig[];
     linters: LinterConfig[];
     fixers: FixerConfig[];
@@ -227,19 +230,40 @@ function matchesPatterns(filePath: string, patterns: string[]): boolean {
     });
 }
 
+function getDocumentLanguageId(filePath: string): string | undefined {
+    return vscode.workspace.textDocuments.find(
+        (doc) => doc.uri.scheme === 'file' && doc.fileName === filePath
+    )?.languageId;
+}
+
+function matchesTarget(filePath: string, target: ResolvedTargetConfig): boolean {
+    if (target.filePatterns.length > 0 && matchesPatterns(filePath, target.filePatterns)) {
+        return true;
+    }
+    if (target.languages.length > 0) {
+        const languageId = getDocumentLanguageId(filePath);
+        if (languageId !== undefined && target.languages.includes(languageId)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function normalizeTargetConfig(target: TargetConfig): ResolvedTargetConfig {
     const targetRun = target.run ?? 'onSave';
     const targetShowDiagnosticCodes = target.showDiagnosticCodes;
     const linters = (target.linters ?? []).map((linter) => ({
         ...linter,
-        filePatterns: target.filePatterns,
+        filePatterns: target.filePatterns ?? [],
+        languages: target.languages ?? [],
         run: linter.run ?? targetRun,
         showDiagnosticCodes: linter.showDiagnosticCodes ?? targetShowDiagnosticCodes,
     }));
 
     return {
         name: target.name,
-        filePatterns: target.filePatterns,
+        filePatterns: target.filePatterns ?? [],
+        languages: target.languages ?? [],
         preCommands: target.preCommands ?? [],
         linters,
         fixers: target.fixers ?? [],
@@ -249,7 +273,8 @@ function normalizeTargetConfig(target: TargetConfig): ResolvedTargetConfig {
 function legacyLinterToTarget(linter: LinterConfig): ResolvedTargetConfig {
     return {
         name: linter.name,
-        filePatterns: linter.filePatterns,
+        filePatterns: linter.filePatterns ?? [],
+        languages: linter.languages ?? [],
         preCommands: [],
         linters: [linter],
         fixers: [],
@@ -839,7 +864,7 @@ export function collectRunnableFixers(
     filePath: string,
     trigger: FixerRunMode = 'manual'
 ): RunnableFixer[] {
-    const matching = targets.filter((target) => matchesPatterns(filePath, target.filePatterns));
+    const matching = targets.filter((target) => matchesTarget(filePath, target));
     const fixers: RunnableFixer[] = [];
 
     for (const target of matching) {
@@ -871,7 +896,7 @@ export function collectRunnableLinters(
     filePath: string,
     trigger: RunMode = 'manual'
 ): RunnableLinter[] {
-    const matching = targets.filter((target) => matchesPatterns(filePath, target.filePatterns));
+    const matching = targets.filter((target) => matchesTarget(filePath, target));
     const linters: RunnableLinter[] = [];
 
     for (const target of matching) {
@@ -1006,7 +1031,7 @@ export async function runLinters(
     const uri = vscode.Uri.file(filePath);
     const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics);
 
-    const matching = targets.filter((target) => matchesPatterns(filePath, target.filePatterns));
+    const matching = targets.filter((target) => matchesTarget(filePath, target));
     if (matching.length === 0) {
         finish();
         return;

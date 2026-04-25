@@ -510,6 +510,77 @@ suite('Linter Runner', () => {
         assert.strictEqual(matchesIgnorePatterns('/tmp/example.min.js', ['*.min.js']), true);
         assert.strictEqual(matchesIgnorePatterns('/tmp/example.ts', ['*.min.js']), false);
     });
+
+    test('matches files by VS Code language ID', async () => {
+        const phpFilePath = path.resolve(__dirname, '../../lint-test/test.php');
+        const tsFilePath = path.resolve(__dirname, '../../lint-test/test.ts');
+        await vscode.workspace.openTextDocument(phpFilePath);
+
+        const targets = resolveConfiguredTargets(
+            [
+                {
+                    name: 'PHP',
+                    languages: ['php'],
+                    linters: [
+                        {
+                            name: 'PHPStan',
+                            command: 'phpstan',
+                            args: ['${file}'],
+                            parser: TEST_REGEX_PARSER,
+                        },
+                    ],
+                },
+            ],
+            []
+        );
+
+        assert.strictEqual(
+            collectRunnableLinters(targets, phpFilePath, 'manual').length,
+            1,
+            'languages: [php] should match a PHP file'
+        );
+        assert.strictEqual(
+            collectRunnableLinters(targets, tsFilePath, 'manual').length,
+            0,
+            'languages: [php] should not match a TypeScript file'
+        );
+    });
+
+    test('matches files by either filePatterns or languages', async () => {
+        const phpFilePath = path.resolve(__dirname, '../../lint-test/test.php');
+        const tsFilePath = path.resolve(__dirname, '../../lint-test/test.ts');
+        await vscode.workspace.openTextDocument(phpFilePath);
+
+        const targets = resolveConfiguredTargets(
+            [
+                {
+                    name: 'PHP and TS',
+                    filePatterns: ['*.ts'],
+                    languages: ['php'],
+                    linters: [
+                        {
+                            name: 'test-linter',
+                            command: 'test',
+                            args: ['${file}'],
+                            parser: TEST_REGEX_PARSER,
+                        },
+                    ],
+                },
+            ],
+            []
+        );
+
+        assert.strictEqual(
+            collectRunnableLinters(targets, phpFilePath, 'manual').length,
+            1,
+            'should match PHP file via languages'
+        );
+        assert.strictEqual(
+            collectRunnableLinters(targets, tsFilePath, 'manual').length,
+            1,
+            'should match TS file via filePatterns'
+        );
+    });
 });
 
 suite('Regex Parser', () => {

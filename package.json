@@ -83,8 +83,7 @@
           "items": {
             "type": "object",
             "required": [
-              "name",
-              "filePatterns"
+              "name"
             ],
             "additionalProperties": false,
             "properties": {
@@ -97,7 +96,14 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Glob patterns for files this target applies to."
+                "description": "Glob patterns for files this target applies to. At least one of `filePatterns` or `languages` is required."
+              },
+              "languages": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "VS Code language identifiers this target applies to (e.g. `[\"php\", \"javascript\"]`). Matched against the open document's language ID. At least one of `filePatterns` or `languages` is required."
               },
               "run": {
                 "type": "string",
@@ -355,7 +361,6 @@
             "type": "object",
             "required": [
               "name",
-              "filePatterns",
               "command",
               "args",
               "parser",
@@ -377,7 +382,14 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Glob patterns for files this linter applies to (e.g. [\"*.sh\"])."
+                "description": "Glob patterns for files this linter applies to (e.g. [\"*.sh\"]). At least one of `filePatterns` or `languages` is required."
+              },
+              "languages": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "VS Code language identifiers this linter applies to (e.g. `[\"php\"]`). At least one of `filePatterns` or `languages` is required."
               },
               "command": {
                 "type": "string",
