@@ -237,20 +237,19 @@ function getDocumentLanguageId(filePath: string): string | undefined {
 }
 
 function matchesTarget(filePath: string, target: ResolvedTargetConfig): boolean {
-    if (target.languages.length > 0) {
-        // Language is the primary filter. The file must match one of the configured languages.
-        const languageId = getDocumentLanguageId(filePath);
-        if (languageId === undefined || !target.languages.includes(languageId)) {
-            return false;
-        }
-        // filePatterns is an optional secondary filter on top of the language match.
-        if (target.filePatterns.length > 0) {
-            return matchesPatterns(filePath, target.filePatterns);
-        }
-        return true;
+    // Language is always required.
+    if (target.languages.length === 0) {
+        return false;
     }
-    // No languages configured — fall back to filePatterns alone (backward compat).
-    return target.filePatterns.length > 0 && matchesPatterns(filePath, target.filePatterns);
+    const languageId = getDocumentLanguageId(filePath);
+    if (languageId === undefined || !target.languages.includes(languageId)) {
+        return false;
+    }
+    // filePatterns is an optional additional filter on top of the language match.
+    if (target.filePatterns.length > 0) {
+        return matchesPatterns(filePath, target.filePatterns);
+    }
+    return true;
 }
 
 function normalizeTargetConfig(target: TargetConfig): ResolvedTargetConfig {
