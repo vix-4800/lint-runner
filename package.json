@@ -3,7 +3,7 @@
   "displayName": "LintRunner",
   "description": "Run external CLI linters and show diagnostics in the editor.",
   "icon": "icon.png",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "vix",
   "repository": {
     "type": "git",
@@ -252,7 +252,9 @@
                     },
                     "parser": {
                       "type": "object",
-                      "required": ["pattern"],
+                      "required": [
+                        "pattern"
+                      ],
                       "additionalProperties": false,
                       "description": "Regex parser: extract diagnostics using named capture groups in the pattern.",
                       "properties": {
@@ -267,19 +269,31 @@
                         },
                         "output": {
                           "type": "string",
-                          "enum": ["stdout", "stderr", "both"],
+                          "enum": [
+                            "stdout",
+                            "stderr",
+                            "both"
+                          ],
                           "default": "both",
                           "description": "Which output stream(s) to parse. Defaults to 'both'."
                         },
                         "defaultSeverity": {
                           "type": "string",
-                          "enum": ["error", "warning", "info", "information"],
+                          "enum": [
+                            "error",
+                            "warning",
+                            "info",
+                            "information"
+                          ],
                           "default": "warning",
                           "description": "Severity to use when the regex pattern does not capture a severity group."
                         },
                         "messageFormat": {
                           "type": "string",
-                          "enum": ["plain", "json"],
+                          "enum": [
+                            "plain",
+                            "json"
+                          ],
                           "default": "plain",
                           "description": "How to decode the captured message group. Use 'json' when matching inside JSON string values."
                         }
@@ -476,7 +490,9 @@
               },
               "parser": {
                 "type": "object",
-                "required": ["pattern"],
+                "required": [
+                  "pattern"
+                ],
                 "additionalProperties": false,
                 "description": "Regex parser: extract diagnostics using named capture groups in the pattern.",
                 "properties": {
@@ -491,19 +507,31 @@
                   },
                   "output": {
                     "type": "string",
-                    "enum": ["stdout", "stderr", "both"],
+                    "enum": [
+                      "stdout",
+                      "stderr",
+                      "both"
+                    ],
                     "default": "both",
                     "description": "Which output stream(s) to parse. Defaults to 'both'."
                   },
                   "defaultSeverity": {
                     "type": "string",
-                    "enum": ["error", "warning", "info", "information"],
+                    "enum": [
+                      "error",
+                      "warning",
+                      "info",
+                      "information"
+                    ],
                     "default": "warning",
                     "description": "Severity to use when the regex pattern does not capture a severity group."
                   },
                   "messageFormat": {
                     "type": "string",
-                    "enum": ["plain", "json"],
+                    "enum": [
+                      "plain",
+                      "json"
+                    ],
                     "default": "plain",
                     "description": "How to decode the captured message group. Use 'json' when matching inside JSON string values."
                   }
