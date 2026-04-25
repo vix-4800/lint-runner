@@ -319,18 +319,20 @@ function mergeLinters(
     patches: FolderLinterPatch[]
 ): TargetLinterConfig[] {
     const result: TargetLinterConfig[] = globalLinters.map((l) => ({ ...l }));
-    const newLinters: TargetLinterConfig[] = [];
 
     for (const patch of patches) {
         const idx = result.findIndex((l) => l.name === patch.name);
         if (idx >= 0) {
             result[idx] = { ...result[idx], ...patch };
         } else {
-            newLinters.push(patch as TargetLinterConfig);
+            if (patch.command === undefined || patch.args === undefined || patch.parser === undefined) {
+                continue;
+            }
+            result.push(patch as TargetLinterConfig);
         }
     }
 
-    return [...result, ...newLinters];
+    return result;
 }
 
 export function mergeFolderTargets(
@@ -342,7 +344,6 @@ export function mergeFolderTargets(
     }
 
     const result: TargetConfig[] = globalTargets.map((t) => ({ ...t }));
-    const newTargets: TargetConfig[] = [];
 
     for (const patch of folderPatches) {
         const idx = result.findIndex((t) => t.name === patch.name);
@@ -355,11 +356,14 @@ export function mergeFolderTargets(
                     : existing.linters;
             result[idx] = { ...existing, ...restPatch, linters: mergedLinters };
         } else {
-            newTargets.push(patch as TargetConfig);
+            if (patch.languages === undefined || patch.languages.length === 0) {
+                continue;
+            }
+            result.push(patch as TargetConfig);
         }
     }
 
-    return [...result, ...newTargets];
+    return result;
 }
 
 function getConfiguredTargets(filePath: string): ResolvedTargetConfig[] {

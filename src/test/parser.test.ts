@@ -15,6 +15,7 @@ import {
     type FolderTargetPatch,
     type LinterConfig,
     type RegexParserConfig,
+    type TargetConfig,
 } from '../linterRunner.js';
 
 const TEST_REGEX_PARSER: RegexParserConfig = {
@@ -1429,7 +1430,7 @@ suite('mergeFolderTargets', () => {
         assert.strictEqual(linters[1].run, 'onSave');
     });
 
-    test('global targets without patches remain unchanged', () => {
+    test('targets not matching any patch remain unchanged', () => {
         const global = [
             { name: 'PHP', languages: ['php'], run: 'onSave' as const, linters: [] },
             { name: 'JS', languages: ['javascript'], run: 'manual' as const, linters: [] },
@@ -1440,5 +1441,55 @@ suite('mergeFolderTargets', () => {
         assert.strictEqual(result[0].run, 'manual');
         assert.strictEqual(result[1].run, 'manual');
         assert.deepStrictEqual(result[1].languages, ['javascript']);
+    });
+
+    test('duplicate new-target patches with same name merge rather than duplicate', () => {
+        const global: TargetConfig[] = [];
+        const patches: FolderTargetPatch[] = [
+            { name: 'NEW', languages: ['typescript'], run: 'onSave' },
+            { name: 'NEW', run: 'manual' },
+        ];
+        const result = mergeFolderTargets(global, patches);
+        assert.strictEqual(result.length, 1);
+        assert.strictEqual(result[0].name, 'NEW');
+        assert.strictEqual(result[0].run, 'manual');
+    });
+
+    test('new target without languages is skipped', () => {
+        const global: TargetConfig[] = [];
+        const patches: FolderTargetPatch[] = [{ name: 'GHOST' }];
+        const result = mergeFolderTargets(global, patches);
+        assert.strictEqual(result.length, 0);
+    });
+
+    test('duplicate new-linter patches with same name merge rather than duplicate', () => {
+        const global = [
+            { name: 'PHP', languages: ['php'], linters: [] },
+        ];
+        const patches: FolderTargetPatch[] = [
+            {
+                name: 'PHP',
+                linters: [
+                    { name: 'phpcs', command: 'phpcs', args: ['${file}'], parser: BASE_PARSER },
+                    { name: 'phpcs', args: ['--standard=PSR2', '${file}'] },
+                ],
+            },
+        ];
+        const result = mergeFolderTargets(global, patches);
+        const linters = result[0].linters ?? [];
+        assert.strictEqual(linters.length, 1);
+        assert.deepStrictEqual(linters[0].args, ['--standard=PSR2', '${file}']);
+    });
+
+    test('new linter without required fields is skipped', () => {
+        const global = [
+            { name: 'PHP', languages: ['php'], linters: [] },
+        ];
+        const patches: FolderTargetPatch[] = [
+            { name: 'PHP', linters: [{ name: 'phpcs' }] },
+        ];
+        const result = mergeFolderTargets(global, patches);
+        const linters = result[0].linters ?? [];
+        assert.strictEqual(linters.length, 0);
     });
 });
