@@ -24,31 +24,7 @@ VS Code extension for running external CLI linters and reporting found issues in
 
 Configuration is stored in `settings.json`:
 
-```json
-{
-    "lintRunner.targets": [
-        {
-            "name": "PHP",
-            "languages": ["php"],
-            "filePatterns": ["app/**/*.php"],
-            "preCommands": [{ "name": "php -l", "command": "php", "args": ["-l", "${file}"] }],
-            "linters": [
-                {
-                    "name": "phpcs",
-                    "command": "vendor/bin/phpcs",
-                    "args": ["--report=emacs", "${file}"],
-                    "parser": {
-                        "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<severity>warning|error) - (?<message>.+)$",
-                        "flags": "gm"
-                    },
-                    "run": "onSave"
-                }
-            ],
-            "fixers": [{ "name": "phpcbf", "command": "vendor/bin/phpcbf", "args": ["${file}"], "run": "onSave" }]
-        }
-    ]
-}
-```
+Real-world target examples: [docs/examples.md](docs/examples.md).
 
 ## Target Config
 
@@ -68,17 +44,6 @@ file's VS Code language id via `languages`. `filePatterns` is optional and furth
 
 `filePatterns` use the same path matching rules as before: the extension checks the file name, workspace-relative path,
 and full path.
-
-Example:
-
-```json
-{
-    "name": "Frontend",
-    "languages": ["javascript", "typescript", "javascriptreact", "typescriptreact"],
-    "filePatterns": ["src/**/*.{js,jsx,ts,tsx}"],
-    "linters": []
-}
-```
 
 ### Target Linter Config
 
@@ -101,33 +66,6 @@ required `languages`, while `filePatterns` remains optional as an extra filter.
 
 `preCommands` run sequentially before the main linter. If one command exits with a non-zero exit code, the main linter
 does not run.
-
-```json
-{
-    "name": "PHP",
-    "languages": ["php"],
-    "filePatterns": ["app/**/*.php"],
-    "preCommands": [
-        {
-            "name": "php -l",
-            "command": "php",
-            "args": ["-l", "${file}"]
-        }
-    ],
-    "linters": [
-        {
-            "name": "phpcs",
-            "command": "vendor/bin/phpcs",
-            "args": ["--report=emacs", "${file}"],
-            "parser": {
-                "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<severity>warning|error) - (?<message>.+)$",
-                "flags": "gm"
-            },
-            "run": "onSave"
-        }
-    ]
-}
-```
 
 ### Command Config
 
@@ -175,34 +113,18 @@ LintRunner does not run commands from workspace config until the workspace is tr
 Glob patterns for files that LintRunner should never lint or fix. The same matching rules apply as for target
 `filePatterns` (checked against the file name, workspace-relative path, and full path).
 
-```json
-{
-    "lintRunner.ignorePatterns": ["vendor/**", "*.min.js", "dist/**"]
-}
-```
+Example values: `vendor/**`, `*.min.js`, `dist/**`.
 
 ### `lintRunner.respectGitignore`
 
 When `true`, LintRunner skips any file that `git check-ignore` reports as ignored by `.gitignore`. Requires `git` to be
 available on `PATH`. The file's workspace folder is used as the working directory.
 
-```json
-{
-    "lintRunner.respectGitignore": true
-}
-```
-
 ## Debounce
 
 `lintRunner.debounceMs` sets a delay (in milliseconds) between a save event and the actual linter/fixer run. This is
 useful when VS Code's auto-save is enabled with a very short interval, to avoid spawning a new process on every
 keystroke.
-
-```json
-{
-    "lintRunner.debounceMs": 300
-}
-```
 
 The default is `0` (no debounce). When multiple saves arrive within the debounce window, only the last one triggers a
 run.
@@ -212,62 +134,6 @@ run.
 `fixCommand` and `fixers` run via `LintRunner: Run Fixers`. If a fixer command has `run: "onSave"`, it also runs when a
 matching file is saved. Commands run sequentially for all matching configs. After fixers finish, the extension runs
 linters to update Problems.
-
-```json
-{
-    "name": "PHP",
-    "languages": ["php"],
-    "linters": [
-        {
-            "name": "phpcs",
-            "command": "vendor/bin/phpcs",
-            "args": ["--report=emacs", "${file}"],
-            "parser": {
-                "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<severity>warning|error) - (?<message>.+)$",
-                "flags": "gm"
-            },
-            "run": "onSave"
-        }
-    ],
-    "fixers": [{ "name": "phpcbf", "command": "vendor/bin/phpcbf", "args": ["${file}"], "run": "onSave" }]
-}
-```
-
-## Diagnostic Codes
-
-By default, VS Code shows the rule code:
-
-```text
-Expected 1 newline at end of file; 0 found phpcs(PSR2.Files.EndFileNewline.NoneFound)
-```
-
-To hide the rule code:
-
-```json
-{
-    "name": "PHP",
-    "languages": ["php"],
-    "showDiagnosticCodes": false,
-    "linters": [
-        {
-            "name": "phpcs",
-            "command": "vendor/bin/phpcs",
-            "args": ["--report=emacs", "${file}"],
-            "parser": {
-                "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<severity>warning|error) - (?<message>.+)$",
-                "flags": "gm"
-            },
-            "run": "onSave"
-        }
-    ]
-}
-```
-
-Result:
-
-```text
-Expected 1 newline at end of file; 0 found phpcs
-```
 
 ## Regex Parser
 
@@ -296,99 +162,6 @@ Optional named groups:
 | `col`      | 1-based column number.                                |
 | `severity` | `error`, `warning`, `info`, plus aliases like `note`. |
 | `code`     | Rule id for the diagnostic.                           |
-
-## Examples
-
-### PHP
-
-```json
-{
-    "lintRunner.targets": [
-        {
-            "name": "PHP",
-            "filePatterns": ["*.php"],
-            "preCommands": [
-                {
-                    "name": "php -l",
-                    "command": "php",
-                    "args": ["-l", "${file}"]
-                }
-            ],
-            "showDiagnosticCodes": false,
-            "linters": [
-                {
-                    "name": "phpcs",
-                    "command": "vendor/bin/phpcs",
-                    "args": ["--report=emacs", "${file}"],
-                    "parser": {
-                        "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<severity>warning|error) - (?<message>.+)$",
-                        "flags": "gm"
-                    },
-                    "run": "onSave"
-                }
-            ]
-        }
-    ]
-}
-```
-
-### Nginx
-
-```json
-{
-    "lintRunner.targets": [
-        {
-            "name": "nginx",
-            "filePatterns": ["*.conf", "**/nginx/*.conf"],
-            "preCommands": [
-                {
-                    "name": "nginx -t",
-                    "command": "nginx",
-                    "args": ["-t"]
-                }
-            ],
-            "run": "manual",
-            "linters": [
-                {
-                    "name": "nginx-lint",
-                    "command": "nginx-lint",
-                    "args": ["--format", "errorformat", "--no-color", "${file}"],
-                    "parser": {
-                        "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<severity>\\w+)\\[(?<code>[^\\]]+)\\]: (?<message>.+)$",
-                        "flags": "gm"
-                    }
-                }
-            ]
-        }
-    ]
-}
-```
-
-### XML
-
-```json
-{
-    "lintRunner.targets": [
-        {
-            "name": "XML",
-            "filePatterns": ["*.xml"],
-            "linters": [
-                {
-                    "name": "xmllint",
-                    "command": "xmllint",
-                    "args": ["--noout", "${file}"],
-                    "parser": {
-                        "pattern": "^.+?:(?<line>\\d+): (?:(?:parser )?(?<severity>error|warning)) : (?<message>.+)$",
-                        "flags": "gm",
-                        "output": "stderr"
-                    },
-                    "run": "onSave"
-                }
-            ]
-        }
-    ]
-}
-```
 
 ## Development
 
