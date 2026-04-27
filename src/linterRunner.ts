@@ -10,6 +10,41 @@ const runningLinters = new Map<string, number>();
 const activeRunIds = new Map<string, number>();
 let nextRunId = 0;
 
+const activeFileProcesses = new Map<string, Set<cp.ChildProcess>>();
+
+function registerProcess(filePath: string, proc: cp.ChildProcess): void {
+    let procs = activeFileProcesses.get(filePath);
+    if (procs === undefined) {
+        procs = new Set();
+        activeFileProcesses.set(filePath, procs);
+    }
+    procs.add(proc);
+}
+
+function unregisterProcess(filePath: string, proc: cp.ChildProcess): void {
+    const procs = activeFileProcesses.get(filePath);
+    if (procs === undefined) {
+        return;
+    }
+    procs.delete(proc);
+    if (procs.size === 0) {
+        activeFileProcesses.delete(filePath);
+    }
+}
+
+function killFileProcesses(filePath: string): void {
+    const procs = activeFileProcesses.get(filePath);
+    if (procs === undefined) {
+        return;
+    }
+    const procsCopy = Array.from(procs);
+    procs.clear();
+    activeFileProcesses.delete(filePath);
+    for (const proc of procsCopy) {
+        proc.kill();
+    }
+}
+
 interface LinterCacheEntry {
     mtime: number;
     size: number;
@@ -533,6 +568,8 @@ async function runCommand(
             return;
         }
 
+        registerProcess(filePath, proc);
+
         let stdout = '';
         let stderr = '';
         let done = false;
@@ -542,6 +579,7 @@ async function runCommand(
                 return;
             }
             done = true;
+            unregisterProcess(filePath, proc);
             proc.kill();
             output.appendLine(`[${label}] killed: timeout after ${TIMEOUT_MS}ms`);
             resolve({ code: null, stdout, stderr, error: 'timeout' });
@@ -560,6 +598,7 @@ async function runCommand(
             }
             done = true;
             clearTimeout(timer);
+            unregisterProcess(filePath, proc);
             resolve({ code: null, stdout, stderr, error: err.message });
         });
 
@@ -569,6 +608,7 @@ async function runCommand(
             }
             done = true;
             clearTimeout(timer);
+            unregisterProcess(filePath, proc);
             resolve({ code, stdout, stderr });
         });
     });
@@ -1020,6 +1060,7 @@ export async function runLinters(
         return;
     }
 
+    killFileProcesses(filePath);
     const targets = getConfiguredTargets();
     const uri = vscode.Uri.file(filePath);
     const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics);
@@ -1076,6 +1117,7 @@ export async function runRunnableLinters(
         return 0;
     }
 
+    killFileProcesses(filePath);
     const uri = vscode.Uri.file(filePath);
     const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics);
     let lintersRun = 0;
