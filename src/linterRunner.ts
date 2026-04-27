@@ -32,6 +32,19 @@ function unregisterProcess(filePath: string, proc: cp.ChildProcess): void {
     }
 }
 
+function terminateProcessTree(proc: cp.ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): void {
+    if (proc.pid !== undefined && process.platform !== 'win32') {
+        try {
+            process.kill(-proc.pid, signal);
+            return;
+        } catch {
+            // Fall back to killing the direct child below.
+        }
+    }
+
+    proc.kill(signal);
+}
+
 function killFileProcesses(filePath: string): void {
     const procs = activeFileProcesses.get(filePath);
     if (procs === undefined) {
@@ -41,7 +54,24 @@ function killFileProcesses(filePath: string): void {
     procs.clear();
     activeFileProcesses.delete(filePath);
     for (const proc of procsCopy) {
-        proc.kill();
+        terminateProcessTree(proc);
+    }
+}
+
+function startFileRun(filePath: string): number {
+    const runId = nextRunId++;
+    activeRunIds.set(filePath, runId);
+    killFileProcesses(filePath);
+    return runId;
+}
+
+function isActiveFileRun(filePath: string, runId: number): boolean {
+    return activeRunIds.get(filePath) === runId;
+}
+
+function finishFileRun(filePath: string, runId: number): void {
+    if (isActiveFileRun(filePath, runId)) {
+        activeRunIds.delete(filePath);
     }
 }
 
@@ -541,7 +571,8 @@ async function runCommand(
     label: string,
     commandConfig: CommandConfig,
     filePath: string,
-    output: vscode.OutputChannel
+    output: vscode.OutputChannel,
+    shouldContinue: () => boolean = () => true
 ): Promise<CommandResult> {
     if (!vscode.workspace.isTrusted) {
         output.appendLine(`[${label}] skipped: workspace is not trusted`);
@@ -557,12 +588,20 @@ async function runCommand(
     const args = buildArgs(commandConfig.args, filePath);
     const cwd = resolveWorkingDirectory(filePath);
     const env = await getCommandEnv();
+    if (!shouldContinue()) {
+        return { code: null, stdout: '', stderr: '', error: 'cancelled' };
+    }
     output.appendLine(`[${label}] ${formatCommand(command, args)}`);
 
     return new Promise((resolve) => {
         let proc: cp.ChildProcess;
         try {
-            proc = cp.spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+            proc = cp.spawn(command, args, {
+                cwd,
+                detached: process.platform !== 'win32',
+                env,
+                stdio: ['ignore', 'pipe', 'pipe'],
+            });
         } catch (err) {
             resolve({ code: null, stdout: '', stderr: '', error: String(err) });
             return;
@@ -580,7 +619,7 @@ async function runCommand(
             }
             done = true;
             unregisterProcess(filePath, proc);
-            proc.kill();
+            terminateProcessTree(proc);
             output.appendLine(`[${label}] killed: timeout after ${TIMEOUT_MS}ms`);
             resolve({ code: null, stdout, stderr, error: 'timeout' });
         }, TIMEOUT_MS);
@@ -628,12 +667,16 @@ async function runPreCommands(
     ownerName: string,
     preCommands: CommandConfig[],
     filePath: string,
-    output: vscode.OutputChannel
+    output: vscode.OutputChannel,
+    shouldContinue: () => boolean = () => true
 ): Promise<boolean> {
     for (const preCommand of preCommands) {
+        if (!shouldContinue()) {
+            return false;
+        }
         const preCommandName = preCommand.name ?? preCommand.command;
         const label = `${ownerName}:pre:${preCommandName}`;
-        const result = await runCommand(label, preCommand, filePath, output);
+        const result = await runCommand(label, preCommand, filePath, output, shouldContinue);
         logCommandResult(label, result, output);
         if (result.code !== 0) {
             output.appendLine(`[${ownerName}] skipped: pre-command '${preCommandName}' failed`);
@@ -714,8 +757,13 @@ async function spawnLinter(
     filePath: string,
     output: vscode.OutputChannel,
     statusBar: vscode.StatusBarItem,
-    trigger: RunMode = 'manual'
+    trigger: RunMode = 'manual',
+    shouldContinue: () => boolean = () => true
 ): Promise<vscode.Diagnostic[]> {
+    if (!shouldContinue()) {
+        return [];
+    }
+
     if (trigger !== 'manual') {
         const key = linterCacheKey(filePath, linter.name);
         const cached = linterDiagnosticsCache.get(key);
@@ -737,13 +785,17 @@ async function spawnLinter(
             linter.name,
             linter.preCommands ?? [],
             filePath,
-            output
+            output,
+            shouldContinue
         );
-        if (!shouldRunLinter) {
+        if (!shouldRunLinter || !shouldContinue()) {
             return [];
         }
 
-        const result = await runCommand(linter.name, linter, filePath, output);
+        const result = await runCommand(linter.name, linter, filePath, output, shouldContinue);
+        if (!shouldContinue()) {
+            return [];
+        }
         const diags = parseLinterOutput(linter, result);
         await normalizeDiagnosticRanges(filePath, diags);
         logCommandResult(linter.name, result, output, diags.length);
@@ -774,8 +826,13 @@ async function spawnTargetLinters(
     trigger: RunMode,
     output: vscode.OutputChannel,
     statusBar: vscode.StatusBarItem,
-    onLinterDiagnostics: DiagnosticsHandler
+    onLinterDiagnostics: DiagnosticsHandler,
+    shouldContinue: () => boolean = () => true
 ): Promise<vscode.Diagnostic[]> {
+    if (!shouldContinue()) {
+        return [];
+    }
+
     const matchingLinters = target.linters.filter((linter) => shouldRunLinter(linter, trigger));
     if (matchingLinters.length === 0) {
         return [];
@@ -785,15 +842,23 @@ async function spawnTargetLinters(
         target.name,
         target.preCommands,
         filePath,
-        output
+        output,
+        shouldContinue
     );
-    if (!shouldRunLinters) {
+    if (!shouldRunLinters || !shouldContinue()) {
         return [];
     }
 
     const diagnostics = await Promise.all(
         matchingLinters.map(async (linter) => {
-            const linterDiagnostics = await spawnLinter(linter, filePath, output, statusBar, trigger);
+            const linterDiagnostics = await spawnLinter(
+                linter,
+                filePath,
+                output,
+                statusBar,
+                trigger,
+                shouldContinue
+            );
             onLinterDiagnostics(linterDiagnostics);
             return linterDiagnostics;
         })
@@ -1001,18 +1066,17 @@ async function shouldSkipFile(filePath: string): Promise<boolean> {
 function createDiagnosticsRun(
     filePath: string,
     uri: vscode.Uri,
-    diagnostics: vscode.DiagnosticCollection
+    diagnostics: vscode.DiagnosticCollection,
+    runId: number
 ): {
     publish: DiagnosticsHandler;
     finish: () => void;
     abort: () => void;
 } {
-    const runId = nextRunId++;
-    activeRunIds.set(filePath, runId);
     diagnostics.delete(uri);
     const accumulated: vscode.Diagnostic[] = [];
 
-    const isActive = (): boolean => activeRunIds.get(filePath) === runId;
+    const isActive = (): boolean => isActiveFileRun(filePath, runId);
 
     return {
         publish(diags) {
@@ -1023,14 +1087,10 @@ function createDiagnosticsRun(
             diagnostics.set(uri, accumulated);
         },
         finish() {
-            if (isActive()) {
-                activeRunIds.delete(filePath);
-            }
+            finishFileRun(filePath, runId);
         },
         abort() {
-            if (isActive()) {
-                activeRunIds.delete(filePath);
-            }
+            finishFileRun(filePath, runId);
         },
     };
 }
@@ -1056,14 +1116,21 @@ export async function runLinters(
     output: vscode.OutputChannel,
     statusBar: vscode.StatusBarItem
 ): Promise<void> {
+    const runId = startFileRun(filePath);
+    const shouldContinue = (): boolean => isActiveFileRun(filePath, runId);
+
     if (await shouldSkipFile(filePath)) {
+        finishFileRun(filePath, runId);
         return;
     }
 
-    killFileProcesses(filePath);
+    if (!shouldContinue()) {
+        return;
+    }
+
     const targets = getConfiguredTargets();
     const uri = vscode.Uri.file(filePath);
-    const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics);
+    const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics, runId);
 
     const matching = targets.filter((target) => matchesTarget(filePath, target));
     if (matching.length === 0) {
@@ -1073,7 +1140,15 @@ export async function runLinters(
 
     return Promise.all(
         matching.map((target) =>
-            spawnTargetLinters(target, filePath, trigger, output, statusBar, publish)
+            spawnTargetLinters(
+                target,
+                filePath,
+                trigger,
+                output,
+                statusBar,
+                publish,
+                shouldContinue
+            )
         )
     )
         .then(() => {
@@ -1117,9 +1192,10 @@ export async function runRunnableLinters(
         return 0;
     }
 
-    killFileProcesses(filePath);
+    const runId = startFileRun(filePath);
+    const shouldContinue = (): boolean => isActiveFileRun(filePath, runId);
     const uri = vscode.Uri.file(filePath);
-    const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics);
+    const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics, runId);
     let lintersRun = 0;
     const lintersByTarget = new Map<ResolvedTargetConfig, RunnableLinter[]>();
 
@@ -1139,9 +1215,10 @@ export async function runRunnableLinters(
                     target.name,
                     target.preCommands,
                     filePath,
-                    output
+                    output,
+                    shouldContinue
                 );
-                if (!shouldRunTargetLinters) {
+                if (!shouldRunTargetLinters || !shouldContinue()) {
                     return;
                 }
 
@@ -1153,7 +1230,8 @@ export async function runRunnableLinters(
                             filePath,
                             output,
                             statusBar,
-                            'manual'
+                            'manual',
+                            shouldContinue
                         );
                         publish(linterDiagnostics);
                     })
