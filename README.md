@@ -40,7 +40,6 @@ file's VS Code language id via `languages`. `filePatterns` is optional and furth
 | `preCommands`         | `CommandConfig[]`                  | no       | Commands executed once before target linters.                                                                  |
 | `linters`             | `TargetLinterConfig[]`             | no       | Linter commands for the target.                                                                                |
 | `fixers`              | `FixerConfig[]`                    | no       | Auto-fixer commands. By default they run via `LintRunner: Run Fixers`; `run: "onSave"` also runs them on save. |
-| `showDiagnosticCodes` | `boolean`                          | no       | Default value for target linters.                                                                              |
 
 `filePatterns` use the same path matching rules as before: the extension checks the file name, workspace-relative path,
 and full path.
@@ -57,7 +56,6 @@ and full path.
 | `run`                 | `"onOpen" \| "onSave" \| "manual"` | no       | Overrides target `run`. `onOpen` also runs on save.                                        |
 | `preCommands`         | `CommandConfig[]`                  | no       | Commands before the main linter.                                                           |
 | `fixCommand`          | `FixerConfig`                      | no       | Legacy per-linter auto-fixer. Prefer target-level `fixers` for new configs.                |
-| `showDiagnosticCodes` | `boolean`                          | no       | Overrides target `showDiagnosticCodes`.                                                    |
 
 `lintRunner.linters` with the old linter-first format is still supported for compatibility. Legacy entries also use
 required `languages`, while `filePatterns` remains optional as an extra filter.

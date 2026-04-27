@@ -747,8 +747,7 @@ associations, so adjust them if your editor reports a different language.
       "parser": {
         "flags": "gm",
         "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<severity>warning|error) - (?<message>.+)$"
-      },
-      "showDiagnosticCodes": false
+      }
     },
     {
       "args": ["${file}", "text", "~/.config/phpmd/phpmd.xml"],
@@ -757,8 +756,7 @@ associations, so adjust them if your editor reports a different language.
       "parser": {
         "flags": "gm",
         "pattern": "^.+?:(?<line>\\d+)\\s+(?<code>\\S+)\\s+(?<message>.+)$"
-      },
-      "showDiagnosticCodes": false
+      }
     },
     {
       "args": [
