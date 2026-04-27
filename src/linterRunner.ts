@@ -55,7 +55,6 @@ export interface TargetLinterConfig {
     enabled?: boolean;
     preCommands?: CommandConfig[];
     fixCommand?: FixerConfig;
-    showDiagnosticCodes?: boolean;
 }
 
 export interface LinterConfig extends TargetLinterConfig {
@@ -72,7 +71,6 @@ export interface TargetConfig {
     preCommands?: CommandConfig[];
     linters?: TargetLinterConfig[];
     fixers?: FixerConfig[];
-    showDiagnosticCodes?: boolean;
 }
 
 export interface ResolvedTargetConfig {
@@ -254,13 +252,11 @@ function matchesTarget(filePath: string, target: ResolvedTargetConfig): boolean 
 
 function normalizeTargetConfig(target: TargetConfig): ResolvedTargetConfig {
     const targetRun = target.run ?? 'onSave';
-    const targetShowDiagnosticCodes = target.showDiagnosticCodes;
     const linters = (target.linters ?? []).map((linter) => ({
         ...linter,
         filePatterns: target.filePatterns ?? [],
         languages: target.languages ?? [],
         run: linter.run ?? targetRun,
-        showDiagnosticCodes: linter.showDiagnosticCodes ?? targetShowDiagnosticCodes,
     }));
 
     return {
@@ -620,12 +616,6 @@ export function parseLinterOutput(
               ? result.stderr
               : `${result.stdout}\n${result.stderr}`;
     const diagnostics = parseRegexOutput(text, cfg, linter.name);
-
-    if (linter.showDiagnosticCodes === false) {
-        for (const diagnostic of diagnostics) {
-            diagnostic.code = undefined;
-        }
-    }
 
     return diagnostics;
 }

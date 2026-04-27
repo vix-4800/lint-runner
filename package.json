@@ -307,10 +307,6 @@
                         "manual"
                       ],
                       "description": "Override target run mode for this linter. 'onOpen' runs when a file opens and again on save."
-                    },
-                    "showDiagnosticCodes": {
-                      "type": "boolean",
-                      "markdownDescription": "Override target diagnostic code visibility for this linter."
                     }
                   }
                 }
@@ -358,11 +354,6 @@
                     }
                   }
                 }
-              },
-              "showDiagnosticCodes": {
-                "type": "boolean",
-                "default": true,
-                "markdownDescription": "Default diagnostic code visibility for linters in this target."
               }
             }
           }
@@ -539,17 +530,12 @@
               },
               "run": {
                 "type": "string",
+                "description": "'onOpen' runs when a file opens and again on save; 'onSave' runs on save; 'manual' only runs via the command.",
                 "enum": [
                   "onSave",
                   "onOpen",
                   "manual"
-                ],
-                "description": "'onOpen' runs when a file opens and again on save; 'onSave' runs on save; 'manual' only runs via the command."
-              },
-              "showDiagnosticCodes": {
-                "type": "boolean",
-                "default": true,
-                "markdownDescription": "Show diagnostic rule codes in Problems, e.g. `phpcs(PSR2.Files.EndFileNewline.NoneFound)`. Set to `false` to show only the linter source, e.g. `phpcs`."
+                ]
               }
             }
           }

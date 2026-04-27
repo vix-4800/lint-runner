@@ -117,7 +117,6 @@ suite('Linter Runner', () => {
                     name: 'PHP',
                     filePatterns: ['*.php'],
                     run: 'manual',
-                    showDiagnosticCodes: false,
                     preCommands: [{ name: 'php -l', command: 'php', args: ['-l', '${file}'] }],
                     linters: [
                         {
@@ -132,7 +131,6 @@ suite('Linter Runner', () => {
                             args: ['${file}'],
                             parser: TEST_REGEX_PARSER,
                             run: 'onSave',
-                            showDiagnosticCodes: true,
                         },
                     ],
                     fixers: [
@@ -146,9 +144,7 @@ suite('Linter Runner', () => {
         assert.strictEqual(targets.length, 1);
         assert.strictEqual(targets[0].linters.length, 2);
         assert.strictEqual(targets[0].linters[0].run, 'manual');
-        assert.strictEqual(targets[0].linters[0].showDiagnosticCodes, false);
         assert.strictEqual(targets[0].linters[1].run, 'onSave');
-        assert.strictEqual(targets[0].linters[1].showDiagnosticCodes, true);
         assert.strictEqual(targets[0].preCommands.length, 1);
         assert.strictEqual(targets[0].fixers.length, 1);
         assert.strictEqual(targets[0].fixers[0].run, 'onSave');
