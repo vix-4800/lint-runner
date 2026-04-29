@@ -6,6 +6,8 @@ import * as vscode from 'vscode';
 import {
     collectNewVisibleFileNames,
     collectVisibleDiffDocumentUrisByColumn,
+    computeContentHash,
+    isContentChanged,
 } from '../extension.js';
 
 suite('Extension Test Suite', () => {
@@ -126,5 +128,73 @@ suite('Extension Test Suite', () => {
             ),
             [fileUri.fsPath]
         );
+    });
+
+    test('computeContentHash returns consistent hashes for the same input', () => {
+        const text = 'const x = 1;';
+        assert.strictEqual(computeContentHash(text), computeContentHash(text));
+    });
+
+    test('computeContentHash returns different hashes for different content', () => {
+        assert.notStrictEqual(computeContentHash('abc'), computeContentHash('def'));
+        assert.notStrictEqual(computeContentHash(''), computeContentHash(' '));
+    });
+
+    test('isContentChanged returns true on first save (no previous hash)', () => {
+        const hashMap = new Map<string, string>();
+        const fileKey = 'file:///tmp/test.ts';
+        const hash = computeContentHash('const x = 1;');
+
+        assert.strictEqual(isContentChanged(fileKey, hash, hashMap), true);
+    });
+
+    test('isContentChanged returns false when content has not changed', () => {
+        const hashMap = new Map<string, string>();
+        const fileKey = 'file:///tmp/test.ts';
+        const hash = computeContentHash('const x = 1;');
+
+        isContentChanged(fileKey, hash, hashMap); // first save
+        assert.strictEqual(isContentChanged(fileKey, hash, hashMap), false);
+    });
+
+    test('isContentChanged returns true when content has changed', () => {
+        const hashMap = new Map<string, string>();
+        const fileKey = 'file:///tmp/test.ts';
+        const hash1 = computeContentHash('const x = 1;');
+        const hash2 = computeContentHash('const x = 2;');
+
+        isContentChanged(fileKey, hash1, hashMap); // first save
+        assert.strictEqual(isContentChanged(fileKey, hash2, hashMap), true);
+    });
+
+    test('isContentChanged updates stored hash after each call', () => {
+        const hashMap = new Map<string, string>();
+        const fileKey = 'file:///tmp/test.ts';
+        const hash1 = computeContentHash('version one');
+        const hash2 = computeContentHash('version two');
+        const hash3 = computeContentHash('version one');
+
+        isContentChanged(fileKey, hash1, hashMap);
+        isContentChanged(fileKey, hash2, hashMap);
+
+        // Reverting to original content counts as a change
+        assert.strictEqual(isContentChanged(fileKey, hash3, hashMap), true);
+
+        // Same content again — no change
+        assert.strictEqual(isContentChanged(fileKey, hash3, hashMap), false);
+    });
+
+    test('isContentChanged tracks each file key independently', () => {
+        const hashMap = new Map<string, string>();
+        const key1 = 'file:///tmp/file1.ts';
+        const key2 = 'file:///tmp/file2.ts';
+        const hash = computeContentHash('same content');
+
+        isContentChanged(key1, hash, hashMap);
+        // key2 has never been saved — must be treated as changed
+        assert.strictEqual(isContentChanged(key2, hash, hashMap), true);
+
+        // key1 unchanged
+        assert.strictEqual(isContentChanged(key1, hash, hashMap), false);
     });
 });

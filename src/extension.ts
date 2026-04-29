@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
@@ -14,6 +15,22 @@ import {
 let untrustedWorkspaceWarningShown = false;
 const skipFixersOnSave = new Set<string>();
 const saveDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const lastSavedContentHashes = new Map<string, string>();
+
+export function computeContentHash(text: string): string {
+    return crypto.createHash('sha256').update(text).digest('hex');
+}
+
+/**
+ * Checks whether the document content has changed since the last save.
+ * Updates the stored hash for the given key and returns true if the content
+ * is new or different from the previously stored hash.
+ */
+export function isContentChanged(fileKey: string, newHash: string, hashMap: Map<string, string>): boolean {
+    const prevHash = hashMap.get(fileKey);
+    hashMap.set(fileKey, newHash);
+    return prevHash !== newHash;
+}
 
 type OnOpenDocument = Pick<vscode.TextDocument, 'fileName' | 'isUntitled' | 'uri'>;
 type OnOpenEditor = {
@@ -379,6 +396,11 @@ export function activate(context: vscode.ExtensionContext): void {
             // the save() call and the finally block runs right after it resolves.
             const skipFixer = skipFixersOnSave.delete(doc.fileName);
 
+            const hash = computeContentHash(doc.getText());
+            if (!isContentChanged(documentKey(doc), hash, lastSavedContentHashes)) {
+                return;
+            }
+
             const existingTimer = saveDebounceTimers.get(doc.fileName);
             if (existingTimer !== undefined) {
                 clearTimeout(existingTimer);
@@ -408,6 +430,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.workspace.onDidCloseTextDocument((doc) => {
             seenOnOpenDocumentUris.delete(documentKey(doc));
+            lastSavedContentHashes.delete(documentKey(doc));
             diagnostics.delete(doc.uri);
             updateActionsStatusBar(actionsStatusBar);
         })
