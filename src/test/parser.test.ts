@@ -7,12 +7,15 @@ import {
     buildCommandEnv,
     collectRunnableFixers,
     matchesIgnorePatterns,
+    mergeTargetOverrides,
     normalizeDiagnosticRanges,
     parseLinterOutput,
     resolveConfiguredTargets,
     shouldRunLinter,
+    type TargetOverride,
     type LinterConfig,
     type RegexParserConfig,
+    type TargetConfig,
 } from '../linterRunner.js';
 
 const TEST_REGEX_PARSER: RegexParserConfig = {
@@ -1306,5 +1309,183 @@ suite('Regex Utility Parser Configs', () => {
         assert.strictEqual(diags[0].range.start.line, 2);
         assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
         assert.strictEqual(diags[0].code, 'missingType.return');
+    });
+});
+
+suite('mergeTargetOverrides', () => {
+    const BASE_PARSER: RegexParserConfig = {
+        pattern: String.raw`(?<line>\d+):(?<message>.+)`,
+    };
+
+    test('empty overrides returns global targets unchanged', () => {
+        const global = [
+            {
+                name: 'PHP',
+                languages: ['php'],
+                linters: [{ name: 'phpstan', command: 'phpstan', args: ['${file}'], parser: BASE_PARSER }],
+            },
+        ];
+        const result = mergeTargetOverrides(global, []);
+        assert.deepStrictEqual(result, global);
+    });
+
+    test('patches top-level target fields by name', () => {
+        const global = [
+            { name: 'PHP', languages: ['php'], run: 'onSave' as const, linters: [] },
+        ];
+        const patches: TargetOverride[] = [{ name: 'PHP', run: 'manual' }];
+        const result = mergeTargetOverrides(global, patches);
+        assert.strictEqual(result.length, 1);
+        assert.strictEqual(result[0].run, 'manual');
+        assert.deepStrictEqual(result[0].languages, ['php']);
+    });
+
+    test('patches linter args by name, leaving other linter fields intact', () => {
+        const global = [
+            {
+                name: 'PHP',
+                languages: ['php'],
+                linters: [
+                    { name: 'phpstan', command: 'phpstan', args: ['analyse', '${file}'], parser: BASE_PARSER },
+                ],
+            },
+        ];
+        const patches: TargetOverride[] = [
+            {
+                name: 'PHP',
+                linters: [
+                    { name: 'phpstan', args: ['analyse', '--configuration', 'phpstan.neon', '${file}'] },
+                ],
+            },
+        ];
+        const result = mergeTargetOverrides(global, patches);
+        assert.strictEqual(result.length, 1);
+        const linters = result[0].linters ?? [];
+        assert.strictEqual(linters.length, 1);
+        assert.deepStrictEqual(linters[0].args, ['analyse', '--configuration', 'phpstan.neon', '${file}']);
+        assert.strictEqual(linters[0].command, 'phpstan');
+        assert.deepStrictEqual(linters[0].parser, BASE_PARSER);
+    });
+
+    test('appends new linter to existing target when name does not match', () => {
+        const global = [
+            {
+                name: 'PHP',
+                languages: ['php'],
+                linters: [
+                    { name: 'phpstan', command: 'phpstan', args: ['${file}'], parser: BASE_PARSER },
+                ],
+            },
+        ];
+        const newLinter = { name: 'phpcs', command: 'phpcs', args: ['${file}'], parser: BASE_PARSER };
+        const patches: TargetOverride[] = [
+            { name: 'PHP', linters: [newLinter] },
+        ];
+        const result = mergeTargetOverrides(global, patches);
+        const linters = result[0].linters ?? [];
+        assert.strictEqual(linters.length, 2);
+        assert.strictEqual(linters[1].name, 'phpcs');
+    });
+
+    test('adds a completely new target when no global target matches', () => {
+        const global = [
+            { name: 'PHP', languages: ['php'], linters: [] },
+        ];
+        const patches: TargetOverride[] = [
+            {
+                name: 'JS',
+                languages: ['javascript'],
+                linters: [{ name: 'eslint', command: 'eslint', args: ['${file}'], parser: BASE_PARSER }],
+            },
+        ];
+        const result = mergeTargetOverrides(global, patches);
+        assert.strictEqual(result.length, 2);
+        assert.strictEqual(result[1].name, 'JS');
+        assert.deepStrictEqual(result[1].languages, ['javascript']);
+    });
+
+    test('patches one linter in a multi-linter target leaving others intact', () => {
+        const global = [
+            {
+                name: 'PHP',
+                languages: ['php'],
+                linters: [
+                    { name: 'phpstan', command: 'phpstan', args: ['analyse', '${file}'], parser: BASE_PARSER },
+                    { name: 'phpcs', command: 'phpcs', args: ['${file}'], parser: BASE_PARSER, run: 'onSave' as const },
+                ],
+            },
+        ];
+        const patches: TargetOverride[] = [
+            { name: 'PHP', linters: [{ name: 'phpstan', args: ['analyse', '--no-progress', '${file}'] }] },
+        ];
+        const result = mergeTargetOverrides(global, patches);
+        const linters = result[0].linters ?? [];
+        assert.strictEqual(linters.length, 2);
+        assert.deepStrictEqual(linters[0].args, ['analyse', '--no-progress', '${file}']);
+        assert.strictEqual(linters[1].name, 'phpcs');
+        assert.strictEqual(linters[1].run, 'onSave');
+    });
+
+    test('targets not matching any patch remain unchanged', () => {
+        const global = [
+            { name: 'PHP', languages: ['php'], run: 'onSave' as const, linters: [] },
+            { name: 'JS', languages: ['javascript'], run: 'manual' as const, linters: [] },
+        ];
+        const patches: TargetOverride[] = [{ name: 'PHP', run: 'manual' }];
+        const result = mergeTargetOverrides(global, patches);
+        assert.strictEqual(result.length, 2);
+        assert.strictEqual(result[0].run, 'manual');
+        assert.strictEqual(result[1].run, 'manual');
+        assert.deepStrictEqual(result[1].languages, ['javascript']);
+    });
+
+    test('duplicate new-target patches with same name merge rather than duplicate', () => {
+        const global: TargetConfig[] = [];
+        const patches: TargetOverride[] = [
+            { name: 'NEW', languages: ['typescript'], run: 'onSave' },
+            { name: 'NEW', run: 'manual' },
+        ];
+        const result = mergeTargetOverrides(global, patches);
+        assert.strictEqual(result.length, 1);
+        assert.strictEqual(result[0].name, 'NEW');
+        assert.strictEqual(result[0].run, 'manual');
+    });
+
+    test('new target without languages is skipped', () => {
+        const global: TargetConfig[] = [];
+        const patches: TargetOverride[] = [{ name: 'GHOST' }];
+        const result = mergeTargetOverrides(global, patches);
+        assert.strictEqual(result.length, 0);
+    });
+
+    test('duplicate new-linter patches with same name merge rather than duplicate', () => {
+        const global = [
+            { name: 'PHP', languages: ['php'], linters: [] },
+        ];
+        const patches: TargetOverride[] = [
+            {
+                name: 'PHP',
+                linters: [
+                    { name: 'phpcs', command: 'phpcs', args: ['${file}'], parser: BASE_PARSER },
+                    { name: 'phpcs', args: ['--standard=PSR2', '${file}'] },
+                ],
+            },
+        ];
+        const result = mergeTargetOverrides(global, patches);
+        const linters = result[0].linters ?? [];
+        assert.strictEqual(linters.length, 1);
+        assert.deepStrictEqual(linters[0].args, ['--standard=PSR2', '${file}']);
+    });
+
+    test('new linter without required fields is skipped', () => {
+        const global = [
+            { name: 'PHP', languages: ['php'], linters: [] },
+        ];
+        const patches: TargetOverride[] = [
+            { name: 'PHP', linters: [{ name: 'phpcs' }] },
+        ];
+        const result = mergeTargetOverrides(global, patches);
+        const linters = result[0].linters ?? [];
+        assert.strictEqual(linters.length, 0);
     });
 });
