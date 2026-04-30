@@ -75,7 +75,7 @@ export interface TargetConfig {
     showDiagnosticCodes?: boolean;
 }
 
-export interface FolderLinterPatch {
+export interface LinterOverride {
     name: string;
     command?: string;
     args?: string[];
@@ -87,13 +87,13 @@ export interface FolderLinterPatch {
     showDiagnosticCodes?: boolean;
 }
 
-export interface FolderTargetPatch {
+export interface TargetOverride {
     name: string;
     filePatterns?: string[];
     languages?: string[];
     run?: RunMode;
     preCommands?: CommandConfig[];
-    linters?: FolderLinterPatch[];
+    linters?: LinterOverride[];
     fixers?: FixerConfig[];
     showDiagnosticCodes?: boolean;
 }
@@ -316,7 +316,7 @@ export function resolveConfiguredTargets(
 
 function mergeLinters(
     globalLinters: TargetLinterConfig[],
-    patches: FolderLinterPatch[]
+    patches: LinterOverride[]
 ): TargetLinterConfig[] {
     const result: TargetLinterConfig[] = globalLinters.map((l) => ({ ...l }));
 
@@ -335,17 +335,17 @@ function mergeLinters(
     return result;
 }
 
-export function mergeFolderTargets(
+export function mergeTargetOverrides(
     globalTargets: TargetConfig[],
-    folderPatches: FolderTargetPatch[]
+    overrides: TargetOverride[]
 ): TargetConfig[] {
-    if (folderPatches.length === 0) {
+    if (overrides.length === 0) {
         return globalTargets;
     }
 
     const result: TargetConfig[] = globalTargets.map((t) => ({ ...t }));
 
-    for (const patch of folderPatches) {
+    for (const patch of overrides) {
         const idx = result.findIndex((t) => t.name === patch.name);
         if (idx >= 0) {
             const existing = result[idx];
@@ -374,8 +374,8 @@ function getConfiguredTargets(filePath: string): ResolvedTargetConfig[] {
         'lintRunner',
         vscode.Uri.file(filePath)
     );
-    const folderPatches = folderConfig.get<FolderTargetPatch[]>('folderTargets') ?? [];
-    const mergedTargets = mergeFolderTargets(targets, folderPatches);
+    const overrides = folderConfig.get<TargetOverride[]>('targetOverrides') ?? [];
+    const mergedTargets = mergeTargetOverrides(targets, overrides);
 
     return resolveConfiguredTargets(mergedTargets, legacyLinters);
 }

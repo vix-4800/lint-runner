@@ -7,12 +7,12 @@ import {
     buildCommandEnv,
     collectRunnableFixers,
     matchesIgnorePatterns,
-    mergeFolderTargets,
+    mergeTargetOverrides,
     normalizeDiagnosticRanges,
     parseLinterOutput,
     resolveConfiguredTargets,
     shouldRunLinter,
-    type FolderTargetPatch,
+    type TargetOverride,
     type LinterConfig,
     type RegexParserConfig,
     type TargetConfig,
@@ -1316,12 +1316,12 @@ suite('Regex Utility Parser Configs', () => {
     });
 });
 
-suite('mergeFolderTargets', () => {
+suite('mergeTargetOverrides', () => {
     const BASE_PARSER: RegexParserConfig = {
         pattern: String.raw`(?<line>\d+):(?<message>.+)`,
     };
 
-    test('empty folderTargets returns global targets unchanged', () => {
+    test('empty overrides returns global targets unchanged', () => {
         const global = [
             {
                 name: 'PHP',
@@ -1329,7 +1329,7 @@ suite('mergeFolderTargets', () => {
                 linters: [{ name: 'phpstan', command: 'phpstan', args: ['${file}'], parser: BASE_PARSER }],
             },
         ];
-        const result = mergeFolderTargets(global, []);
+        const result = mergeTargetOverrides(global, []);
         assert.deepStrictEqual(result, global);
     });
 
@@ -1337,8 +1337,8 @@ suite('mergeFolderTargets', () => {
         const global = [
             { name: 'PHP', languages: ['php'], run: 'onSave' as const, linters: [] },
         ];
-        const patches: FolderTargetPatch[] = [{ name: 'PHP', run: 'manual' }];
-        const result = mergeFolderTargets(global, patches);
+        const patches: TargetOverride[] = [{ name: 'PHP', run: 'manual' }];
+        const result = mergeTargetOverrides(global, patches);
         assert.strictEqual(result.length, 1);
         assert.strictEqual(result[0].run, 'manual');
         assert.deepStrictEqual(result[0].languages, ['php']);
@@ -1354,7 +1354,7 @@ suite('mergeFolderTargets', () => {
                 ],
             },
         ];
-        const patches: FolderTargetPatch[] = [
+        const patches: TargetOverride[] = [
             {
                 name: 'PHP',
                 linters: [
@@ -1362,7 +1362,7 @@ suite('mergeFolderTargets', () => {
                 ],
             },
         ];
-        const result = mergeFolderTargets(global, patches);
+        const result = mergeTargetOverrides(global, patches);
         assert.strictEqual(result.length, 1);
         const linters = result[0].linters ?? [];
         assert.strictEqual(linters.length, 1);
@@ -1382,10 +1382,10 @@ suite('mergeFolderTargets', () => {
             },
         ];
         const newLinter = { name: 'phpcs', command: 'phpcs', args: ['${file}'], parser: BASE_PARSER };
-        const patches: FolderTargetPatch[] = [
+        const patches: TargetOverride[] = [
             { name: 'PHP', linters: [newLinter] },
         ];
-        const result = mergeFolderTargets(global, patches);
+        const result = mergeTargetOverrides(global, patches);
         const linters = result[0].linters ?? [];
         assert.strictEqual(linters.length, 2);
         assert.strictEqual(linters[1].name, 'phpcs');
@@ -1395,14 +1395,14 @@ suite('mergeFolderTargets', () => {
         const global = [
             { name: 'PHP', languages: ['php'], linters: [] },
         ];
-        const patches: FolderTargetPatch[] = [
+        const patches: TargetOverride[] = [
             {
                 name: 'JS',
                 languages: ['javascript'],
                 linters: [{ name: 'eslint', command: 'eslint', args: ['${file}'], parser: BASE_PARSER }],
             },
         ];
-        const result = mergeFolderTargets(global, patches);
+        const result = mergeTargetOverrides(global, patches);
         assert.strictEqual(result.length, 2);
         assert.strictEqual(result[1].name, 'JS');
         assert.deepStrictEqual(result[1].languages, ['javascript']);
@@ -1419,10 +1419,10 @@ suite('mergeFolderTargets', () => {
                 ],
             },
         ];
-        const patches: FolderTargetPatch[] = [
+        const patches: TargetOverride[] = [
             { name: 'PHP', linters: [{ name: 'phpstan', args: ['analyse', '--no-progress', '${file}'] }] },
         ];
-        const result = mergeFolderTargets(global, patches);
+        const result = mergeTargetOverrides(global, patches);
         const linters = result[0].linters ?? [];
         assert.strictEqual(linters.length, 2);
         assert.deepStrictEqual(linters[0].args, ['analyse', '--no-progress', '${file}']);
@@ -1435,8 +1435,8 @@ suite('mergeFolderTargets', () => {
             { name: 'PHP', languages: ['php'], run: 'onSave' as const, linters: [] },
             { name: 'JS', languages: ['javascript'], run: 'manual' as const, linters: [] },
         ];
-        const patches: FolderTargetPatch[] = [{ name: 'PHP', run: 'manual' }];
-        const result = mergeFolderTargets(global, patches);
+        const patches: TargetOverride[] = [{ name: 'PHP', run: 'manual' }];
+        const result = mergeTargetOverrides(global, patches);
         assert.strictEqual(result.length, 2);
         assert.strictEqual(result[0].run, 'manual');
         assert.strictEqual(result[1].run, 'manual');
@@ -1445,11 +1445,11 @@ suite('mergeFolderTargets', () => {
 
     test('duplicate new-target patches with same name merge rather than duplicate', () => {
         const global: TargetConfig[] = [];
-        const patches: FolderTargetPatch[] = [
+        const patches: TargetOverride[] = [
             { name: 'NEW', languages: ['typescript'], run: 'onSave' },
             { name: 'NEW', run: 'manual' },
         ];
-        const result = mergeFolderTargets(global, patches);
+        const result = mergeTargetOverrides(global, patches);
         assert.strictEqual(result.length, 1);
         assert.strictEqual(result[0].name, 'NEW');
         assert.strictEqual(result[0].run, 'manual');
@@ -1457,8 +1457,8 @@ suite('mergeFolderTargets', () => {
 
     test('new target without languages is skipped', () => {
         const global: TargetConfig[] = [];
-        const patches: FolderTargetPatch[] = [{ name: 'GHOST' }];
-        const result = mergeFolderTargets(global, patches);
+        const patches: TargetOverride[] = [{ name: 'GHOST' }];
+        const result = mergeTargetOverrides(global, patches);
         assert.strictEqual(result.length, 0);
     });
 
@@ -1466,7 +1466,7 @@ suite('mergeFolderTargets', () => {
         const global = [
             { name: 'PHP', languages: ['php'], linters: [] },
         ];
-        const patches: FolderTargetPatch[] = [
+        const patches: TargetOverride[] = [
             {
                 name: 'PHP',
                 linters: [
@@ -1475,7 +1475,7 @@ suite('mergeFolderTargets', () => {
                 ],
             },
         ];
-        const result = mergeFolderTargets(global, patches);
+        const result = mergeTargetOverrides(global, patches);
         const linters = result[0].linters ?? [];
         assert.strictEqual(linters.length, 1);
         assert.deepStrictEqual(linters[0].args, ['--standard=PSR2', '${file}']);
@@ -1485,10 +1485,10 @@ suite('mergeFolderTargets', () => {
         const global = [
             { name: 'PHP', languages: ['php'], linters: [] },
         ];
-        const patches: FolderTargetPatch[] = [
+        const patches: TargetOverride[] = [
             { name: 'PHP', linters: [{ name: 'phpcs' }] },
         ];
-        const result = mergeFolderTargets(global, patches);
+        const result = mergeTargetOverrides(global, patches);
         const linters = result[0].linters ?? [];
         assert.strictEqual(linters.length, 0);
     });

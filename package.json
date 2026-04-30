@@ -368,11 +368,11 @@
             }
           }
         },
-        "lintRunner.folderTargets": {
+        "lintRunner.targetOverrides": {
           "type": "array",
           "default": [],
           "scope": "resource",
-          "markdownDescription": "Per-folder target patches. Each entry is matched to a global target in `lintRunner.targets` by `name` and merged into it — only the fields you specify are overridden. Linters inside an entry are merged by `name` as well: a linter patch with a matching name overrides individual fields of the global linter, while a linter with a new name is appended. If no global target with the given `name` exists, the entry is treated as a new target (requires `languages`).",
+          "markdownDescription": "Resource-scoped target overrides. Each entry is matched to a global target in `lintRunner.targets` by `name` and merged into it — only the fields you specify are overridden. Linters inside an entry are merged by `name` as well: a linter override with a matching name overrides individual fields of the global linter, while a linter with a new name is appended. If no global target with the given `name` exists, the entry is treated as a new target (requires `languages`).",
           "items": {
             "type": "object",
             "required": [
