@@ -10,6 +10,39 @@ const runningLinters = new Map<string, number>();
 const activeRunIds = new Map<string, number>();
 let nextRunId = 0;
 
+// Per-linter diagnostics store: file URI string -> linter name -> diagnostics.
+// Allows multiple linters' results to coexist without overwriting each other.
+const fileLinterDiagnostics = new Map<string, Map<string, vscode.Diagnostic[]>>();
+
+function getOrCreateLinterMap(uriString: string): Map<string, vscode.Diagnostic[]> {
+    let map = fileLinterDiagnostics.get(uriString);
+    if (map === undefined) {
+        map = new Map();
+        fileLinterDiagnostics.set(uriString, map);
+    }
+    return map;
+}
+
+function republishMergedDiagnostics(
+    uri: vscode.Uri,
+    linterMap: Map<string, vscode.Diagnostic[]>,
+    diagnostics: vscode.DiagnosticCollection
+): void {
+    const merged: vscode.Diagnostic[] = [];
+    for (const diags of linterMap.values()) {
+        merged.push(...diags);
+    }
+    if (merged.length === 0) {
+        diagnostics.delete(uri);
+    } else {
+        diagnostics.set(uri, merged);
+    }
+}
+
+export function clearFileLinterDiagnostics(uriString: string): void {
+    fileLinterDiagnostics.delete(uriString);
+}
+
 const activeFileProcesses = new Map<string, Set<cp.ChildProcess>>();
 
 function registerProcess(filePath: string, proc: cp.ChildProcess): void {
@@ -95,7 +128,7 @@ const SHELL_PATH_PREFIX = 'LINT_RUNNER_PATH=';
 
 type RunMode = 'manual' | 'onSave' | 'onOpen';
 type FixerRunMode = Extract<RunMode, 'manual' | 'onSave'>;
-type DiagnosticsHandler = (diagnostics: vscode.Diagnostic[]) => void;
+type DiagnosticsHandler = (linterName: string, diagnostics: vscode.Diagnostic[]) => void;
 let commandEnvPromise: Promise<NodeJS.ProcessEnv> | undefined;
 
 export interface CommandConfig {
@@ -940,7 +973,7 @@ async function spawnTargetLinters(
                 trigger,
                 shouldContinue
             );
-            onLinterDiagnostics(linterDiagnostics);
+            onLinterDiagnostics(linter.name, linterDiagnostics);
             return linterDiagnostics;
         })
     );
@@ -1148,24 +1181,32 @@ function createDiagnosticsRun(
     filePath: string,
     uri: vscode.Uri,
     diagnostics: vscode.DiagnosticCollection,
-    runId: number
+    runId: number,
+    linterNames: string[]
 ): {
     publish: DiagnosticsHandler;
     finish: () => void;
     abort: () => void;
 } {
-    diagnostics.delete(uri);
-    const accumulated: vscode.Diagnostic[] = [];
+    // Only clear results for the linters that are about to re-run so that
+    // diagnostics produced by other linters (e.g. phpcs from a previous save)
+    // remain visible while this run (e.g. a manual phpstan) executes.
+    const uriString = uri.toString();
+    const linterMap = getOrCreateLinterMap(uriString);
+    for (const name of linterNames) {
+        linterMap.delete(name);
+    }
+    republishMergedDiagnostics(uri, linterMap, diagnostics);
 
     const isActive = (): boolean => isActiveFileRun(filePath, runId);
 
     return {
-        publish(diags) {
-            if (!isActive() || diags.length === 0) {
+        publish(linterName, diags) {
+            if (!isActive()) {
                 return;
             }
-            accumulated.push(...diags);
-            diagnostics.set(uri, accumulated);
+            linterMap.set(linterName, diags);
+            republishMergedDiagnostics(uri, linterMap, diagnostics);
         },
         finish() {
             finishFileRun(filePath, runId);
@@ -1211,11 +1252,22 @@ export async function runLinters(
 
     const targets = getConfiguredTargets(filePath);
     const uri = vscode.Uri.file(filePath);
-    const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics, runId);
 
     const matching = targets.filter((target) => matchesTarget(filePath, target));
     if (matching.length === 0) {
-        finish();
+        finishFileRun(filePath, runId);
+        return;
+    }
+
+    const linterNames = [...new Set(matching.flatMap((target) =>
+        target.linters
+            .filter((linter) => shouldRunLinter(linter, trigger))
+            .map((linter) => linter.name)
+    ))];
+    const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics, runId, linterNames);
+
+    if (!shouldContinue()) {
+        abort();
         return;
     }
 
@@ -1276,7 +1328,8 @@ export async function runRunnableLinters(
     const runId = startFileRun(filePath);
     const shouldContinue = (): boolean => isActiveFileRun(filePath, runId);
     const uri = vscode.Uri.file(filePath);
-    const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics, runId);
+    const linterNames = [...new Set(linters.map((r) => r.linter.name))];
+    const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics, runId, linterNames);
     let lintersRun = 0;
     const lintersByTarget = new Map<ResolvedTargetConfig, RunnableLinter[]>();
 
@@ -1314,7 +1367,7 @@ export async function runRunnableLinters(
                             'manual',
                             shouldContinue
                         );
-                        publish(linterDiagnostics);
+                        publish(runnable.linter.name, linterDiagnostics);
                     })
                 );
             })

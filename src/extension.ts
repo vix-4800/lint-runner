@@ -9,6 +9,7 @@ import {
     runRunnableLinters,
     resetCommandEnv,
     clearDiagnosticsCache,
+    clearFileLinterDiagnostics,
     type RunnableFixer,
 } from './linterRunner.js';
 
@@ -432,6 +433,7 @@ export function activate(context: vscode.ExtensionContext): void {
             seenOnOpenDocumentUris.delete(documentKey(doc));
             lastSavedContentHashes.delete(documentKey(doc));
             diagnostics.delete(doc.uri);
+            clearFileLinterDiagnostics(doc.uri.toString());
             updateActionsStatusBar(actionsStatusBar);
         })
     );
