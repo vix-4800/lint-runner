@@ -590,7 +590,7 @@ export function shouldProcessLinterFile(fileSize: number, maxFileSize?: number):
     return maxFileSize === undefined || fileSize <= maxFileSize;
 }
 
-function needsFileStat(linter: LinterConfig, trigger: RunMode): boolean {
+function shouldStatFile(linter: LinterConfig, trigger: RunMode): boolean {
     return linter.maxFileSize !== undefined || trigger !== 'manual';
 }
 
@@ -889,7 +889,7 @@ async function spawnLinter(
     }
 
     let fileStat: fs.Stats | undefined;
-    if (needsFileStat(linter, trigger)) {
+    if (shouldStatFile(linter, trigger)) {
         try {
             fileStat = await fs.promises.stat(filePath);
         } catch (err) {
