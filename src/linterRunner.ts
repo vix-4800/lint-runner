@@ -425,7 +425,7 @@ export function resolveConfiguredTargets(
 function cloneCommandConfig(command: CommandConfig): CommandConfig {
     return {
         ...command,
-        args: [...command.args],
+        args: [...(command.args ?? [])],
     };
 }
 
@@ -441,7 +441,7 @@ function cloneLinterConfig(linter: TargetLinterConfig): TargetLinterConfig {
 function cloneFixerConfig(fixer: FixerConfig): FixerConfig {
     return {
         ...fixer,
-        args: [...fixer.args],
+        args: [...(fixer.args ?? [])],
     };
 }
 
