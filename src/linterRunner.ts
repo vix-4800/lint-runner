@@ -180,6 +180,7 @@ export interface TargetConfig {
 }
 
 export interface LinterPatch {
+    // Partial linter fields merged by name across configuration scopes.
     name: string;
     command?: string;
     args?: string[];
@@ -192,6 +193,7 @@ export interface LinterPatch {
 }
 
 export interface FixerPatch {
+    // Partial fixer fields merged by name when a fixer has an explicit name.
     name?: string;
     command?: string;
     args?: string[];
@@ -200,6 +202,7 @@ export interface FixerPatch {
 }
 
 export interface TargetPatch {
+    // Partial target fields merged by target name across configuration scopes.
     name: string;
     filePatterns?: string[];
     languages?: string[];
