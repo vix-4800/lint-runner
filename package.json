@@ -286,7 +286,7 @@
                   "properties": {
                     "name": {
                       "type": "string",
-                      "description": "Optional display name shown in the LintRunner output. When set, it is also used as the fixer identifier for merging across scopes."
+                      "description": "Optional display name shown in the LintRunner output. When set, it is also used as the fixer identifier for merging across scopes; fixers without a name are always treated as separate entries."
                     },
                     "enabled": {
                       "type": "boolean",

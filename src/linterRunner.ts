@@ -181,6 +181,7 @@ export interface TargetConfig {
 
 export interface LinterPatch {
     // Partial linter fields merged by name across configuration scopes.
+    // A new linter is added only when command, args, and parser.pattern are present.
     name: string;
     command?: string;
     args?: string[];
@@ -194,6 +195,7 @@ export interface LinterPatch {
 
 export interface FixerPatch {
     // Partial fixer fields merged by name when a fixer has an explicit name.
+    // Unnamed fixers are never merged and are always treated as separate entries.
     name?: string;
     command?: string;
     args?: string[];
