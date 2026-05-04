@@ -28,7 +28,9 @@ Real-world target examples: [docs/examples.md](docs/examples.md).
 
 ## Target Config
 
-`lintRunner.targets` groups a shared file set and commands that should run for those files. A target must match the
+`lintRunner.targets` groups a shared file set and commands that should run for those files. The setting is resource-scoped:
+user, workspace, and folder values are merged by target `name`. If a lower-scope target has the same `name`, only the
+fields you specify there are replaced; omitted fields are inherited from the higher scope. A target must match the
 file's VS Code language id via `languages`. `filePatterns` is optional and further narrows the match.
 
 | Field                 | Type                               | Required | Description                                                                                                    |
@@ -43,6 +45,9 @@ file's VS Code language id via `languages`. `filePatterns` is optional and furth
 
 `filePatterns` use the same path matching rules as before: the extension checks the file name, workspace-relative path,
 and full path.
+
+Targets must have unique `name` values within the merged configuration. Linters and fixers inside a target are also
+matched by `name`, so names must be unique there as well.
 
 ### Target Linter Config
 
@@ -61,6 +66,9 @@ and full path.
 required `languages`, while `filePatterns` remains optional as an extra filter. Legacy linter entries also support
 `maxFileSize`.
 
+When a folder-level target reuses a linter `name`, the linter is merged into the higher-scope one by name. You can
+override only `args`, only `run`, only `parser`, or any other linter fields without repeating the rest of the config.
+
 ## Pre-Commands
 
 `preCommands` run sequentially before the main linter. If one command exits with a non-zero exit code, the main linter
@@ -78,6 +86,7 @@ does not run.
 
 | Field     | Type                   | Required | Description                                                         |
 | --------- | ---------------------- | -------- | ------------------------------------------------------------------- |
+| `name`    | `string`               | yes      | Fixer name shown in LintRunner output and used as the merge identifier. |
 | `enabled` | `boolean`              | no       | Enables or disables this fixer. Defaults to `true`.                 |
 | `run`     | `"manual" \| "onSave"` | no       | Defaults to `manual`. `onSave` runs the fixer on save and manually. |
 

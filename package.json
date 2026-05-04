@@ -79,13 +79,12 @@
         "lintRunner.targets": {
           "type": "array",
           "default": [],
-          "scope": "window",
-          "markdownDescription": "Target-first configurations. Put shared file patterns and shared pre-commands on a target, then list linters and fixers for that file set.",
+          "scope": "resource",
+          "markdownDescription": "Target-first configurations merged by `name` across user, workspace, and folder settings. Folder-level entries can override only selected target, linter, or fixer fields while inheriting the rest from higher scopes.",
           "items": {
             "type": "object",
             "required": [
-              "name",
-              "languages"
+              "name"
             ],
             "additionalProperties": false,
             "properties": {
@@ -105,7 +104,7 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Required. VS Code language identifiers this target applies to (e.g. `[\"php\", \"javascript\"]`). The file's language ID must match. Use `filePatterns` for additional narrowing."
+                "description": "VS Code language identifiers this target applies to (e.g. `[\"php\", \"javascript\"]`). Required when defining a new target. The file's language ID must match. Use `filePatterns` for additional narrowing."
               },
               "run": {
                 "type": "string",
@@ -150,14 +149,11 @@
               "linters": {
                 "type": "array",
                 "default": [],
-                "description": "Linter commands to run for matching files.",
+                "description": "Linter commands to run for matching files. Linter names must be unique within a target and are used as merge identifiers across scopes.",
                 "items": {
                   "type": "object",
                   "required": [
-                    "name",
-                    "command",
-                    "args",
-                    "parser"
+                    "name"
                   ],
                   "additionalProperties": false,
                   "properties": {
@@ -172,14 +168,14 @@
                     },
                     "command": {
                       "type": "string",
-                      "description": "Executable to invoke. Must be on PATH or an absolute path. Supports ~ and command variables."
+                      "description": "Executable to invoke. Must be on PATH or an absolute path. Supports ~ and command variables. Required when defining a new linter."
                     },
                     "args": {
                       "type": "array",
                       "items": {
                         "type": "string"
                       },
-                      "description": "Arguments passed to the command. Supports command variables."
+                      "description": "Arguments passed to the command. Supports command variables. Required when defining a new linter."
                     },
                     "preCommands": {
                       "type": "array",
@@ -213,11 +209,8 @@
                     },
                     "parser": {
                       "type": "object",
-                      "required": [
-                        "pattern"
-                      ],
                       "additionalProperties": false,
-                      "description": "Regex parser: extract diagnostics using named capture groups in the pattern.",
+                      "description": "Regex parser: extract diagnostics using named capture groups in the pattern. Required when defining a new linter.",
                       "properties": {
                         "pattern": {
                           "type": "string",
@@ -286,10 +279,11 @@
               "fixers": {
                 "type": "array",
                 "default": [],
-                "markdownDescription": "Commands to run when `LintRunner: Run Fixers` is invoked for files matching this target. Set `run` to `onSave` to also run on save.",
+                "markdownDescription": "Commands to run when `LintRunner: Run Fixers` is invoked for files matching this target. Fixer names must be unique within a target and are used as merge identifiers across scopes. Set `run` to `onSave` to also run on save.",
                 "items": {
                   "type": "object",
                   "required": [
+                    "name",
                     "command",
                     "args"
                   ],
@@ -297,7 +291,7 @@
                   "properties": {
                     "name": {
                       "type": "string",
-                      "description": "Optional display name shown in the LintRunner output."
+                      "description": "Display name shown in the LintRunner output and used as the fixer identifier for merging."
                     },
                     "enabled": {
                       "type": "boolean",
@@ -326,261 +320,6 @@
                     }
                   }
                 }
-              }
-            }
-          }
-        },
-        "lintRunner.targetOverrides": {
-          "type": "array",
-          "default": [],
-          "scope": "resource",
-          "markdownDescription": "Resource-scoped target overrides. Each entry is matched to a global target in `lintRunner.targets` by `name` and merged into it — only the fields you specify are overridden. Linters inside an entry are merged by `name` as well: a linter override with a matching name overrides individual fields of the global linter, while a linter with a new name is appended. If no global target with the given `name` exists, the entry is treated as a new target (requires `languages`).",
-          "items": {
-            "type": "object",
-            "required": [
-              "name"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "name": {
-                "type": "string",
-                "description": "Name of the global target to patch, or a new target name if no match exists."
-              },
-              "filePatterns": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "Replaces the target's filePatterns when specified."
-              },
-              "languages": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "Replaces the target's languages when specified. Required when adding a new target."
-              },
-              "run": {
-                "type": "string",
-                "enum": [
-                  "onSave",
-                  "onOpen",
-                  "manual"
-                ],
-                "description": "Replaces the target's default run mode when specified."
-              },
-              "preCommands": {
-                "type": "array",
-                "default": [],
-                "markdownDescription": "Replaces the target's preCommands when specified.",
-                "items": {
-                  "type": "object",
-                  "required": [
-                    "command",
-                    "args"
-                  ],
-                  "additionalProperties": false,
-                  "properties": {
-                    "name": {
-                      "type": "string",
-                      "description": "Optional display name shown in the LintRunner output."
-                    },
-                    "command": {
-                      "type": "string",
-                      "description": "Executable to invoke before target linters. Must be on PATH or an absolute path. Supports ~ and command variables."
-                    },
-                    "args": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Arguments passed to the pre-command. Supports command variables."
-                    }
-                  }
-                }
-              },
-              "linters": {
-                "type": "array",
-                "default": [],
-                "description": "Linter patches merged into the target's linters by name. A linter patch with a matching name overrides individual fields; a linter with a new name is appended.",
-                "items": {
-                  "type": "object",
-                  "required": [
-                    "name"
-                  ],
-                  "additionalProperties": false,
-                  "properties": {
-                    "name": {
-                      "type": "string",
-                      "description": "Name of the linter to patch, or a new linter name if no match exists."
-                    },
-                    "enabled": {
-                      "type": "boolean",
-                      "description": "Replaces the linter's enabled flag when specified."
-                    },
-                    "command": {
-                      "type": "string",
-                      "description": "Replaces the linter's command when specified. Must be on PATH or an absolute path. Supports ~ and command variables."
-                    },
-                    "args": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Replaces the linter's args when specified. Supports command variables."
-                    },
-                    "preCommands": {
-                      "type": "array",
-                      "default": [],
-                      "markdownDescription": "Replaces the linter's preCommands when specified.",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "command",
-                          "args"
-                        ],
-                        "additionalProperties": false,
-                        "properties": {
-                          "name": {
-                            "type": "string",
-                            "description": "Optional display name shown in the LintRunner output."
-                          },
-                          "command": {
-                            "type": "string",
-                            "description": "Executable to invoke before this linter. Must be on PATH or an absolute path. Supports ~ and command variables."
-                          },
-                          "args": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "description": "Arguments passed to the pre-command. Supports command variables."
-                          }
-                        }
-                      }
-                    },
-                    "parser": {
-                      "type": "object",
-                      "required": [
-                        "pattern"
-                      ],
-                      "additionalProperties": false,
-                      "description": "Replaces the linter's parser when specified.",
-                      "properties": {
-                        "pattern": {
-                          "type": "string",
-                          "description": "JavaScript regular expression. Named capture groups: `line` and `message` are required; `col`, `severity` (error/warning/info), and `code` are optional."
-                        },
-                        "flags": {
-                          "type": "string",
-                          "default": "g",
-                          "description": "JavaScript regex flags (e.g. \"gm\"). The 'g' flag is added automatically."
-                        },
-                        "output": {
-                          "type": "string",
-                          "enum": [
-                            "stdout",
-                            "stderr",
-                            "both"
-                          ],
-                          "default": "both",
-                          "description": "Which output stream(s) to parse. Defaults to 'both'."
-                        },
-                        "defaultSeverity": {
-                          "type": "string",
-                          "enum": [
-                            "error",
-                            "warning",
-                            "info",
-                            "information"
-                          ],
-                          "default": "warning",
-                          "description": "Severity to use when the regex pattern does not capture a severity group."
-                        },
-                        "messageFormat": {
-                          "type": "string",
-                          "enum": [
-                            "plain",
-                            "json"
-                          ],
-                          "default": "plain",
-                          "description": "How to decode the captured message group. Use 'json' when matching inside JSON string values."
-                        }
-                      }
-                    },
-                    "run": {
-                      "type": "string",
-                      "enum": [
-                        "onSave",
-                        "onOpen",
-                        "manual"
-                      ],
-                      "description": "Replaces the linter's run mode when specified."
-                    },
-                    "showDiagnosticCodes": {
-                      "type": "boolean",
-                      "markdownDescription": "Replaces the linter's diagnostic code visibility when specified."
-                    },
-                    "timeout": {
-                      "type": "number",
-                      "minimum": 1,
-                      "description": "Replaces the linter's timeout (in milliseconds) when specified."
-                    },
-                    "maxFileSize": {
-                      "type": "number",
-                      "minimum": 1,
-                      "description": "Replaces the linter's maximum file size (in bytes) when specified."
-                    }
-                  }
-                }
-              },
-              "fixers": {
-                "type": "array",
-                "default": [],
-                "markdownDescription": "Replaces the target's fixers when specified.",
-                "items": {
-                  "type": "object",
-                  "required": [
-                    "command",
-                    "args"
-                  ],
-                  "additionalProperties": false,
-                  "properties": {
-                    "name": {
-                      "type": "string",
-                      "description": "Optional display name shown in the LintRunner output."
-                    },
-                    "enabled": {
-                      "type": "boolean",
-                      "default": true,
-                      "description": "Whether this fixer is enabled."
-                    },
-                    "command": {
-                      "type": "string",
-                      "description": "Executable to invoke for auto-fixing. Must be on PATH or an absolute path. Supports ~ and command variables."
-                    },
-                    "args": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Arguments passed to the fix command. Supports command variables."
-                    },
-                    "run": {
-                      "type": "string",
-                      "default": "manual",
-                      "enum": [
-                        "manual",
-                        "onSave"
-                      ],
-                      "description": "'manual' runs only via the command; 'onSave' also runs when a matching file is saved."
-                    }
-                  }
-                }
-              },
-              "showDiagnosticCodes": {
-                "type": "boolean",
-                "markdownDescription": "Replaces the target's diagnostic code visibility when specified."
               }
             }
           }
