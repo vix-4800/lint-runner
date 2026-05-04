@@ -11,6 +11,9 @@ import {
     isContentChanged,
 } from '../extension.js';
 
+const CANCELLED_TIMER_DELAY_MS = 100;
+const TIMER_VERIFICATION_DELAY_MS = 15;
+
 suite('Extension Test Suite', () => {
     vscode.window.showInformationMessage('Start all tests.');
 
@@ -207,7 +210,7 @@ suite('Extension Test Suite', () => {
         let timerTriggered = false;
         const timer = setTimeout(() => {
             timerTriggered = true;
-        }, 100);
+        }, CANCELLED_TIMER_DELAY_MS);
         timers.set(fileUri.fsPath, timer);
 
         const deletedUris: vscode.Uri[] = [];
@@ -224,7 +227,7 @@ suite('Extension Test Suite', () => {
             (uriString) => { clearedDiagnostics.push(uriString); }
         );
 
-        await new Promise((resolve) => setTimeout(resolve, 15));
+        await new Promise((resolve) => setTimeout(resolve, TIMER_VERIFICATION_DELAY_MS));
 
         assert.strictEqual(timerTriggered, false);
         assert.strictEqual(timers.has(fileUri.fsPath), false);
