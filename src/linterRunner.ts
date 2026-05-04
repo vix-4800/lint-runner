@@ -153,6 +153,7 @@ export interface TargetLinterConfig {
     enabled?: boolean;
     preCommands?: CommandConfig[];
     timeout?: number;
+    maxFileSize?: number;
 }
 
 export interface LinterConfig extends TargetLinterConfig {
@@ -181,6 +182,7 @@ export interface LinterOverride {
     preCommands?: CommandConfig[];
     showDiagnosticCodes?: boolean;
     timeout?: number;
+    maxFileSize?: number;
 }
 
 export interface TargetOverride {
@@ -584,6 +586,14 @@ export function shouldRunLinter(linter: LinterConfig, trigger: RunMode): boolean
     );
 }
 
+export function shouldProcessLinterFile(fileSize: number, maxFileSize?: number): boolean {
+    return maxFileSize === undefined || fileSize <= maxFileSize;
+}
+
+function shouldStatFile(linter: LinterConfig, trigger: RunMode): boolean {
+    return linter.maxFileSize !== undefined || trigger !== 'manual';
+}
+
 interface CommandTemplateValues {
     file: string;
     workspaceFolder: string;
@@ -878,17 +888,32 @@ async function spawnLinter(
         return [];
     }
 
+    let fileStat: fs.Stats | undefined;
+    if (shouldStatFile(linter, trigger)) {
+        try {
+            fileStat = await fs.promises.stat(filePath);
+        } catch (err) {
+            output.appendLine(`[${linter.name}] stat failed: ${String(err)}`);
+            // If stat fails, proceed to run the linter normally.
+        }
+    }
+
+    if (
+        fileStat !== undefined &&
+        !shouldProcessLinterFile(fileStat.size, linter.maxFileSize)
+    ) {
+        output.appendLine(
+            `[${linter.name}] skipped: file size ${fileStat.size} bytes exceeds maxFileSize ${linter.maxFileSize} bytes`
+        );
+        return [];
+    }
+
     if (trigger !== 'manual') {
         const key = linterCacheKey(filePath, linter.name);
         const cached = linterDiagnosticsCache.get(key);
-        if (cached !== undefined) {
-            try {
-                const stat = await fs.promises.stat(filePath);
-                if (stat.mtimeMs === cached.mtime && stat.size === cached.size) {
-                    return cached.diagnostics;
-                }
-            } catch {
-                // If stat fails proceed to run the linter normally
+        if (cached !== undefined && fileStat !== undefined) {
+            if (fileStat.mtimeMs === cached.mtime && fileStat.size === cached.size) {
+                return cached.diagnostics;
             }
         }
     }
@@ -915,7 +940,7 @@ async function spawnLinter(
         logCommandResult(linter.name, result, output, diags.length);
 
         try {
-            const stat = await fs.promises.stat(filePath);
+            const stat = fileStat ?? await fs.promises.stat(filePath);
             linterDiagnosticsCache.set(linterCacheKey(filePath, linter.name), {
                 mtime: stat.mtimeMs,
                 size: stat.size,
