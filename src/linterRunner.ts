@@ -591,6 +591,10 @@ export function mergeConfiguredTargets(
     baseTargets: TargetConfig[],
     patches: TargetPatch[]
 ): TargetConfig[] {
+    if (patches.length === 0) {
+        return baseTargets;
+    }
+
     const result: TargetConfig[] = [];
 
     for (const target of baseTargets) {
