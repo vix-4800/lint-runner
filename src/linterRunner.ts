@@ -591,7 +591,7 @@ export function mergeConfiguredTargets(
     baseTargets: TargetConfig[],
     patches: TargetPatch[]
 ): TargetConfig[] {
-    if (patches.length === 0) {
+    if (patches.length === 0 && new Set(baseTargets.map((target) => target.name)).size === baseTargets.length) {
         return baseTargets;
     }
 
