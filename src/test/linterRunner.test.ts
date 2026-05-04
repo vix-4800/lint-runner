@@ -30,10 +30,28 @@ suite('Linter Runner Test Suite', () => {
 
         const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-cancel-'));
         const filePath = path.join(tmpDir, 'test.ts');
+        const scriptPath = path.join(tmpDir, 'slow-linter.js');
         const startedMarkerPath = path.join(tmpDir, 'started.txt');
         const terminatedMarkerPath = path.join(tmpDir, 'terminated.txt');
         const completedMarkerPath = path.join(tmpDir, 'completed.txt');
         await fs.writeFile(filePath, 'const value = 1;\n');
+        await fs.writeFile(
+            scriptPath,
+            [
+                "const fs = require('node:fs');",
+                "const [, , startedMarkerPath, terminatedMarkerPath, completedMarkerPath] = process.argv;",
+                "fs.writeFileSync(startedMarkerPath, 'started');",
+                "process.on('SIGTERM', () => {",
+                "    fs.writeFileSync(terminatedMarkerPath, 'terminated');",
+                '    process.exit(0);',
+                '});',
+                'setTimeout(() => {',
+                "    fs.writeFileSync(completedMarkerPath, 'completed');",
+                '    process.exit(0);',
+                '}, 10000);',
+                '',
+            ].join('\n')
+        );
 
         const diagnostics = vscode.languages.createDiagnosticCollection('lintRunner-cancel-test');
         const output = vscode.window.createOutputChannel('LintRunner Cancel Test');
@@ -56,8 +74,10 @@ suite('Linter Runner Test Suite', () => {
                 name: 'slow-linter',
                 command: process.execPath,
                 args: [
-                    '-e',
-                    `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(startedMarkerPath)}, 'started'); process.on('SIGTERM', () => { fs.writeFileSync(${JSON.stringify(terminatedMarkerPath)}, 'terminated'); process.exit(0); }); setTimeout(() => { fs.writeFileSync(${JSON.stringify(completedMarkerPath)}, 'completed'); process.exit(0); }, 10000);`,
+                    scriptPath,
+                    startedMarkerPath,
+                    terminatedMarkerPath,
+                    completedMarkerPath,
                 ],
                 parser: {
                     pattern: '(?<line>\\d+):(?<message>.+)',
