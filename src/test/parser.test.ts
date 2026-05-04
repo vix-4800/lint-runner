@@ -7,13 +7,13 @@ import {
     buildCommandEnv,
     collectRunnableFixers,
     matchesIgnorePatterns,
-    mergeTargetOverrides,
+    mergeConfiguredTargets,
     normalizeDiagnosticRanges,
     parseLinterOutput,
     resolveConfiguredTargets,
     shouldProcessLinterFile,
     shouldRunLinter,
-    type TargetOverride,
+    type TargetPatch,
     type LinterConfig,
     type RegexParserConfig,
     type TargetConfig,
@@ -1328,7 +1328,7 @@ suite('Regex Utility Parser Configs', () => {
     });
 });
 
-suite('mergeTargetOverrides', () => {
+suite('mergeConfiguredTargets', () => {
     const BASE_PARSER: RegexParserConfig = {
         pattern: String.raw`(?<line>\d+):(?<message>.+)`,
     };
@@ -1341,7 +1341,7 @@ suite('mergeTargetOverrides', () => {
                 linters: [{ name: 'phpstan', command: 'phpstan', args: ['${file}'], parser: BASE_PARSER }],
             },
         ];
-        const result = mergeTargetOverrides(global, []);
+        const result = mergeConfiguredTargets(global, []);
         assert.deepStrictEqual(result, global);
     });
 
@@ -1349,8 +1349,8 @@ suite('mergeTargetOverrides', () => {
         const global = [
             { name: 'PHP', languages: ['php'], run: 'onSave' as const, linters: [] },
         ];
-        const patches: TargetOverride[] = [{ name: 'PHP', run: 'manual' }];
-        const result = mergeTargetOverrides(global, patches);
+        const patches: TargetPatch[] = [{ name: 'PHP', run: 'manual' }];
+        const result = mergeConfiguredTargets(global, patches);
         assert.strictEqual(result.length, 1);
         assert.strictEqual(result[0].run, 'manual');
         assert.deepStrictEqual(result[0].languages, ['php']);
@@ -1366,7 +1366,7 @@ suite('mergeTargetOverrides', () => {
                 ],
             },
         ];
-        const patches: TargetOverride[] = [
+        const patches: TargetPatch[] = [
             {
                 name: 'PHP',
                 linters: [
@@ -1374,7 +1374,7 @@ suite('mergeTargetOverrides', () => {
                 ],
             },
         ];
-        const result = mergeTargetOverrides(global, patches);
+        const result = mergeConfiguredTargets(global, patches);
         assert.strictEqual(result.length, 1);
         const linters = result[0].linters ?? [];
         assert.strictEqual(linters.length, 1);
@@ -1393,7 +1393,7 @@ suite('mergeTargetOverrides', () => {
                 ],
             },
         ];
-        const patches: TargetOverride[] = [
+        const patches: TargetPatch[] = [
             {
                 name: 'PHP',
                 linters: [
@@ -1401,7 +1401,7 @@ suite('mergeTargetOverrides', () => {
                 ],
             },
         ];
-        const result = mergeTargetOverrides(global, patches);
+        const result = mergeConfiguredTargets(global, patches);
         const linters = result[0].linters ?? [];
         assert.strictEqual(linters[0].maxFileSize, 2048);
     });
@@ -1417,10 +1417,10 @@ suite('mergeTargetOverrides', () => {
             },
         ];
         const newLinter = { name: 'phpcs', command: 'phpcs', args: ['${file}'], parser: BASE_PARSER };
-        const patches: TargetOverride[] = [
+        const patches: TargetPatch[] = [
             { name: 'PHP', linters: [newLinter] },
         ];
-        const result = mergeTargetOverrides(global, patches);
+        const result = mergeConfiguredTargets(global, patches);
         const linters = result[0].linters ?? [];
         assert.strictEqual(linters.length, 2);
         assert.strictEqual(linters[1].name, 'phpcs');
@@ -1430,14 +1430,14 @@ suite('mergeTargetOverrides', () => {
         const global = [
             { name: 'PHP', languages: ['php'], linters: [] },
         ];
-        const patches: TargetOverride[] = [
+        const patches: TargetPatch[] = [
             {
                 name: 'JS',
                 languages: ['javascript'],
                 linters: [{ name: 'eslint', command: 'eslint', args: ['${file}'], parser: BASE_PARSER }],
             },
         ];
-        const result = mergeTargetOverrides(global, patches);
+        const result = mergeConfiguredTargets(global, patches);
         assert.strictEqual(result.length, 2);
         assert.strictEqual(result[1].name, 'JS');
         assert.deepStrictEqual(result[1].languages, ['javascript']);
@@ -1454,10 +1454,10 @@ suite('mergeTargetOverrides', () => {
                 ],
             },
         ];
-        const patches: TargetOverride[] = [
+        const patches: TargetPatch[] = [
             { name: 'PHP', linters: [{ name: 'phpstan', args: ['analyse', '--no-progress', '${file}'] }] },
         ];
-        const result = mergeTargetOverrides(global, patches);
+        const result = mergeConfiguredTargets(global, patches);
         const linters = result[0].linters ?? [];
         assert.strictEqual(linters.length, 2);
         assert.deepStrictEqual(linters[0].args, ['analyse', '--no-progress', '${file}']);
@@ -1470,8 +1470,8 @@ suite('mergeTargetOverrides', () => {
             { name: 'PHP', languages: ['php'], run: 'onSave' as const, linters: [] },
             { name: 'JS', languages: ['javascript'], run: 'manual' as const, linters: [] },
         ];
-        const patches: TargetOverride[] = [{ name: 'PHP', run: 'manual' }];
-        const result = mergeTargetOverrides(global, patches);
+        const patches: TargetPatch[] = [{ name: 'PHP', run: 'manual' }];
+        const result = mergeConfiguredTargets(global, patches);
         assert.strictEqual(result.length, 2);
         assert.strictEqual(result[0].run, 'manual');
         assert.strictEqual(result[1].run, 'manual');
@@ -1480,11 +1480,11 @@ suite('mergeTargetOverrides', () => {
 
     test('duplicate new-target patches with same name merge rather than duplicate', () => {
         const global: TargetConfig[] = [];
-        const patches: TargetOverride[] = [
+        const patches: TargetPatch[] = [
             { name: 'NEW', languages: ['typescript'], run: 'onSave' },
             { name: 'NEW', run: 'manual' },
         ];
-        const result = mergeTargetOverrides(global, patches);
+        const result = mergeConfiguredTargets(global, patches);
         assert.strictEqual(result.length, 1);
         assert.strictEqual(result[0].name, 'NEW');
         assert.strictEqual(result[0].run, 'manual');
@@ -1492,8 +1492,8 @@ suite('mergeTargetOverrides', () => {
 
     test('new target without languages is skipped', () => {
         const global: TargetConfig[] = [];
-        const patches: TargetOverride[] = [{ name: 'GHOST' }];
-        const result = mergeTargetOverrides(global, patches);
+        const patches: TargetPatch[] = [{ name: 'GHOST' }];
+        const result = mergeConfiguredTargets(global, patches);
         assert.strictEqual(result.length, 0);
     });
 
@@ -1501,7 +1501,7 @@ suite('mergeTargetOverrides', () => {
         const global = [
             { name: 'PHP', languages: ['php'], linters: [] },
         ];
-        const patches: TargetOverride[] = [
+        const patches: TargetPatch[] = [
             {
                 name: 'PHP',
                 linters: [
@@ -1510,7 +1510,7 @@ suite('mergeTargetOverrides', () => {
                 ],
             },
         ];
-        const result = mergeTargetOverrides(global, patches);
+        const result = mergeConfiguredTargets(global, patches);
         const linters = result[0].linters ?? [];
         assert.strictEqual(linters.length, 1);
         assert.deepStrictEqual(linters[0].args, ['--standard=PSR2', '${file}']);
@@ -1520,11 +1520,91 @@ suite('mergeTargetOverrides', () => {
         const global = [
             { name: 'PHP', languages: ['php'], linters: [] },
         ];
-        const patches: TargetOverride[] = [
+        const patches: TargetPatch[] = [
             { name: 'PHP', linters: [{ name: 'phpcs' }] },
         ];
-        const result = mergeTargetOverrides(global, patches);
+        const result = mergeConfiguredTargets(global, patches);
         const linters = result[0].linters ?? [];
         assert.strictEqual(linters.length, 0);
+    });
+
+    test('patches fixer args by name, leaving other fixer fields intact', () => {
+        const global = [
+            {
+                name: 'PHP',
+                languages: ['php'],
+                fixers: [
+                    { name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix', '${file}'], run: 'manual' as const },
+                ],
+            },
+        ];
+        const patches: TargetPatch[] = [
+            {
+                name: 'PHP',
+                fixers: [
+                    { name: 'php-cs-fixer', args: ['fix', '--config=.php-cs-fixer.php', '${file}'] },
+                ],
+            },
+        ];
+        const result = mergeConfiguredTargets(global, patches);
+        const fixers = result[0].fixers ?? [];
+        assert.strictEqual(fixers.length, 1);
+        assert.deepStrictEqual(fixers[0].args, ['fix', '--config=.php-cs-fixer.php', '${file}']);
+        assert.strictEqual(fixers[0].command, 'php-cs-fixer');
+        assert.strictEqual(fixers[0].run, 'manual');
+    });
+
+    test('duplicate fixer names merge rather than duplicate', () => {
+        const global = [
+            { name: 'PHP', languages: ['php'], fixers: [] },
+        ];
+        const patches: TargetPatch[] = [
+            {
+                name: 'PHP',
+                fixers: [
+                    { name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix', '${file}'] },
+                    { name: 'php-cs-fixer', args: ['fix', '--dry-run', '${file}'] },
+                ],
+            },
+        ];
+        const result = mergeConfiguredTargets(global, patches);
+        const fixers = result[0].fixers ?? [];
+        assert.strictEqual(fixers.length, 1);
+        assert.deepStrictEqual(fixers[0].args, ['fix', '--dry-run', '${file}']);
+    });
+
+    test('duplicate target names in the same source merge rather than duplicate', () => {
+        const global: TargetConfig[] = [
+            { name: 'PHP', languages: ['php'], run: 'onSave', linters: [] },
+            { name: 'PHP', languages: ['php'], run: 'manual', fixers: [{ name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix', '${file}'] }] },
+        ];
+        const result = mergeConfiguredTargets(global, []);
+        assert.strictEqual(result.length, 1);
+        assert.strictEqual(result[0].run, 'manual');
+        assert.strictEqual(result[0].fixers?.[0].name, 'php-cs-fixer');
+    });
+
+    test('patch keeps existing linters while adding fixers from another scope', () => {
+        const global: TargetConfig[] = [
+            {
+                name: 'PHP',
+                languages: ['php'],
+                linters: [
+                    { name: 'phpstan', command: 'phpstan', args: ['analyse', '${file}'], parser: BASE_PARSER },
+                ],
+            },
+        ];
+        const patches: TargetPatch[] = [
+            {
+                name: 'PHP',
+                fixers: [
+                    { name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix', '${file}'] },
+                ],
+            },
+        ];
+        const result = mergeConfiguredTargets(global, patches);
+        assert.strictEqual(result.length, 1);
+        assert.strictEqual(result[0].linters?.[0].name, 'phpstan');
+        assert.strictEqual(result[0].fixers?.[0].name, 'php-cs-fixer');
     });
 });

@@ -143,6 +143,8 @@ export interface CommandConfig {
 }
 
 export interface FixerConfig extends CommandConfig {
+    // When present, name is both the display label and the cross-scope merge key.
+    name?: string;
     run?: FixerRunMode;
     enabled?: boolean;
 }
@@ -177,7 +179,9 @@ export interface TargetConfig {
     fixers?: FixerConfig[];
 }
 
-export interface LinterOverride {
+export interface LinterPatch {
+    // Partial linter fields merged by name across configuration scopes.
+    // A new linter is added only when command, args, and parser.pattern are present.
     name: string;
     command?: string;
     args?: string[];
@@ -185,20 +189,29 @@ export interface LinterOverride {
     run?: RunMode;
     enabled?: boolean;
     preCommands?: CommandConfig[];
-    showDiagnosticCodes?: boolean;
     timeout?: number;
     maxFileSize?: number;
 }
 
-export interface TargetOverride {
+export interface FixerPatch {
+    // Partial fixer fields merged by name when a fixer has an explicit name.
+    // Unnamed fixers are never merged and are always treated as separate entries.
+    name?: string;
+    command?: string;
+    args?: string[];
+    run?: FixerRunMode;
+    enabled?: boolean;
+}
+
+export interface TargetPatch {
+    // Partial target fields merged by target name across configuration scopes.
     name: string;
     filePatterns?: string[];
     languages?: string[];
     run?: RunMode;
     preCommands?: CommandConfig[];
-    linters?: LinterOverride[];
-    fixers?: FixerConfig[];
-    showDiagnosticCodes?: boolean;
+    linters?: LinterPatch[];
+    fixers?: FixerPatch[];
 }
 
 export interface ResolvedTargetConfig {
@@ -414,70 +427,211 @@ export function resolveConfiguredTargets(
     return [...targets.map(normalizeTargetConfig), ...legacyLinters.map(legacyLinterToTarget)];
 }
 
-function mergeLinters(
-    globalLinters: TargetLinterConfig[],
-    patches: LinterOverride[]
-): TargetLinterConfig[] {
-    const result: TargetLinterConfig[] = globalLinters.map((l) => ({ ...l }));
+function cloneCommandConfig(command: CommandConfig): CommandConfig {
+    return {
+        ...command,
+        args: [...(command.args ?? [])],
+    };
+}
 
+function cloneLinterConfig(linter: TargetLinterConfig): TargetLinterConfig {
+    return {
+        ...linter,
+        args: [...linter.args],
+        parser: { ...linter.parser },
+        preCommands: linter.preCommands?.map(cloneCommandConfig),
+    };
+}
+
+function cloneFixerConfig(fixer: FixerConfig): FixerConfig {
+    return {
+        ...fixer,
+        args: [...(fixer.args ?? [])],
+    };
+}
+
+function isCompleteLinterConfig(linter: LinterPatch): linter is TargetLinterConfig {
+    return (
+        linter.parser !== undefined &&
+        typeof linter.parser === 'object' &&
+        linter.command !== undefined &&
+        Array.isArray(linter.args) &&
+        typeof linter.parser.pattern === 'string'
+    );
+}
+
+function isCompleteFixerConfig(fixer: FixerPatch): fixer is FixerConfig {
+    return fixer.command !== undefined && Array.isArray(fixer.args);
+}
+
+function isCompleteTargetConfig(target: TargetPatch): target is TargetConfig {
+    return target.languages !== undefined && target.languages.length > 0;
+}
+
+function applyLinterPatch(result: TargetLinterConfig[], patch: LinterPatch): void {
+    const idx = result.findIndex((linter) => linter.name === patch.name);
+    if (idx >= 0) {
+        result[idx] = {
+            ...result[idx],
+            ...patch,
+            args: patch.args !== undefined ? [...patch.args] : result[idx].args,
+            parser:
+                patch.parser !== undefined
+                    ? { ...result[idx].parser, ...patch.parser }
+                    : result[idx].parser,
+            preCommands:
+                patch.preCommands !== undefined
+                    ? patch.preCommands.map(cloneCommandConfig)
+                    : result[idx].preCommands,
+        };
+        return;
+    }
+
+    if (!isCompleteLinterConfig(patch)) {
+        return;
+    }
+
+    result.push(cloneLinterConfig(patch));
+}
+
+function mergeLinters(
+    baseLinters: TargetLinterConfig[],
+    patches: LinterPatch[]
+): TargetLinterConfig[] {
+    const result: TargetLinterConfig[] = [];
+
+    for (const linter of baseLinters) {
+        applyLinterPatch(result, linter);
+    }
     for (const patch of patches) {
-        const idx = result.findIndex((l) => l.name === patch.name);
-        if (idx >= 0) {
-            result[idx] = { ...result[idx], ...patch };
-        } else {
-            if (patch.command === undefined || patch.args === undefined || patch.parser === undefined) {
-                continue;
-            }
-            result.push(patch as TargetLinterConfig);
-        }
+        applyLinterPatch(result, patch);
     }
 
     return result;
 }
 
-export function mergeTargetOverrides(
-    globalTargets: TargetConfig[],
-    overrides: TargetOverride[]
-): TargetConfig[] {
-    if (overrides.length === 0) {
-        return globalTargets;
+function applyFixerPatch(result: FixerConfig[], patch: FixerPatch): void {
+    const idx =
+        patch.name === undefined
+            ? -1
+            : result.findIndex((fixer) => fixer.name === patch.name);
+    if (idx >= 0) {
+        result[idx] = {
+            ...result[idx],
+            ...patch,
+            args: patch.args !== undefined ? [...patch.args] : result[idx].args,
+        };
+        return;
     }
 
-    const result: TargetConfig[] = globalTargets.map((t) => ({ ...t }));
+    if (!isCompleteFixerConfig(patch)) {
+        return;
+    }
 
-    for (const patch of overrides) {
-        const idx = result.findIndex((t) => t.name === patch.name);
-        if (idx >= 0) {
-            const existing = result[idx];
-            const { linters: patchLinters, ...restPatch } = patch;
-            const mergedLinters =
-                patchLinters !== undefined
-                    ? mergeLinters(existing.linters ?? [], patchLinters)
-                    : existing.linters;
-            result[idx] = { ...existing, ...restPatch, linters: mergedLinters };
-        } else {
-            if (patch.languages === undefined || patch.languages.length === 0) {
-                continue;
-            }
-            result.push(patch as TargetConfig);
-        }
+    result.push(cloneFixerConfig(patch));
+}
+
+function mergeFixers(
+    baseFixers: FixerConfig[],
+    patches: FixerPatch[]
+): FixerConfig[] {
+    const result: FixerConfig[] = [];
+
+    for (const fixer of baseFixers) {
+        applyFixerPatch(result, fixer);
+    }
+    for (const patch of patches) {
+        applyFixerPatch(result, patch);
     }
 
     return result;
+}
+
+function applyTargetPatch(result: TargetConfig[], patch: TargetPatch): void {
+    const idx = result.findIndex((target) => target.name === patch.name);
+    if (idx >= 0) {
+        const existing = result[idx];
+        result[idx] = {
+            ...existing,
+            ...patch,
+            filePatterns:
+                patch.filePatterns !== undefined ? [...patch.filePatterns] : existing.filePatterns,
+            languages: patch.languages !== undefined ? [...patch.languages] : existing.languages,
+            preCommands:
+                patch.preCommands !== undefined
+                    ? patch.preCommands.map(cloneCommandConfig)
+                    : existing.preCommands,
+            linters:
+                patch.linters !== undefined
+                    ? mergeLinters(existing.linters ?? [], patch.linters)
+                    : existing.linters,
+            fixers:
+                patch.fixers !== undefined
+                    ? mergeFixers(existing.fixers ?? [], patch.fixers)
+                    : existing.fixers,
+        };
+        return;
+    }
+
+    if (!isCompleteTargetConfig(patch)) {
+        return;
+    }
+
+    result.push({
+        ...patch,
+        filePatterns: patch.filePatterns !== undefined ? [...patch.filePatterns] : undefined,
+        languages: patch.languages !== undefined ? [...patch.languages] : undefined,
+        preCommands: patch.preCommands?.map(cloneCommandConfig),
+        linters: patch.linters !== undefined ? mergeLinters([], patch.linters) : undefined,
+        fixers: patch.fixers !== undefined ? mergeFixers([], patch.fixers) : undefined,
+    });
+}
+
+export function mergeConfiguredTargets(
+    baseTargets: TargetConfig[],
+    patches: TargetPatch[]
+): TargetConfig[] {
+    if (patches.length === 0 && hasUniqueTargetNames(baseTargets)) {
+        return baseTargets;
+    }
+
+    const result: TargetConfig[] = [];
+
+    for (const target of baseTargets) {
+        applyTargetPatch(result, target);
+    }
+    for (const patch of patches) {
+        applyTargetPatch(result, patch);
+    }
+
+    return result;
+}
+
+function hasUniqueTargetNames(targets: readonly { name: string }[]): boolean {
+    return new Set(targets.map((target) => target.name)).size === targets.length;
+}
+
+function getScopedTargets(filePath: string): TargetConfig[] {
+    const config = vscode.workspace.getConfiguration('lintRunner', vscode.Uri.file(filePath));
+    const inspectedTargets = config.inspect<TargetPatch[]>('targets');
+    const mergedGlobalTargets = mergeConfiguredTargets([], inspectedTargets?.globalValue ?? []);
+    const mergedWorkspaceTargets = mergeConfiguredTargets(
+        mergedGlobalTargets,
+        inspectedTargets?.workspaceValue ?? []
+    );
+
+    return mergeConfiguredTargets(
+        mergedWorkspaceTargets,
+        inspectedTargets?.workspaceFolderValue ?? []
+    );
 }
 
 function getConfiguredTargets(filePath: string): ResolvedTargetConfig[] {
     const config = vscode.workspace.getConfiguration('lintRunner');
-    const targets = config.get<TargetConfig[]>('targets') ?? [];
+    const targets = getScopedTargets(filePath);
     const legacyLinters = config.get<LinterConfig[]>('linters') ?? [];
-    const folderConfig = vscode.workspace.getConfiguration(
-        'lintRunner',
-        vscode.Uri.file(filePath)
-    );
-    const overrides = folderConfig.get<TargetOverride[]>('targetOverrides') ?? [];
-    const mergedTargets = mergeTargetOverrides(targets, overrides);
 
-    return resolveConfiguredTargets(mergedTargets, legacyLinters);
+    return resolveConfiguredTargets(targets, legacyLinters);
 }
 
 function expandHome(value: string): string {
