@@ -102,6 +102,9 @@ suite('Linter Runner Test Suite', () => {
                     }, 3_000);
                 }),
             ]);
+            assert.strictEqual(diagnostics.get(vscode.Uri.file(filePath))?.length ?? 0, 0);
+            await fs.access(terminatedMarkerPath);
+            await assert.rejects(fs.access(completedMarkerPath));
         } finally {
             cancelFileRun(filePath);
             diagnostics.dispose();
@@ -109,9 +112,5 @@ suite('Linter Runner Test Suite', () => {
             statusBar.dispose();
             await fs.rm(tmpDir, { recursive: true, force: true });
         }
-
-        assert.strictEqual(diagnostics.get(vscode.Uri.file(filePath))?.length ?? 0, 0);
-        await fs.access(terminatedMarkerPath);
-        await assert.rejects(fs.access(completedMarkerPath));
     });
 });
