@@ -31,6 +31,8 @@ suite('Linter Runner Test Suite', () => {
         const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-cancel-'));
         const filePath = path.join(tmpDir, 'test.ts');
         const startedMarkerPath = path.join(tmpDir, 'started.txt');
+        const terminatedMarkerPath = path.join(tmpDir, 'terminated.txt');
+        const completedMarkerPath = path.join(tmpDir, 'completed.txt');
         await fs.writeFile(filePath, 'const value = 1;\n');
 
         const diagnostics = vscode.languages.createDiagnosticCollection('lintRunner-cancel-test');
@@ -55,7 +57,7 @@ suite('Linter Runner Test Suite', () => {
                 command: process.execPath,
                 args: [
                     '-e',
-                    `require('node:fs').writeFileSync(${JSON.stringify(startedMarkerPath)}, 'started'); setTimeout(() => {}, 10000);`,
+                    `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(startedMarkerPath)}, 'started'); process.on('SIGTERM', () => { fs.writeFileSync(${JSON.stringify(terminatedMarkerPath)}, 'terminated'); process.exit(0); }); setTimeout(() => { fs.writeFileSync(${JSON.stringify(completedMarkerPath)}, 'completed'); process.exit(0); }, 10000);`,
                 ],
                 parser: {
                     pattern: '(?<line>\\d+):(?<message>.+)',
@@ -87,5 +89,7 @@ suite('Linter Runner Test Suite', () => {
         }
 
         assert.strictEqual(diagnostics.get(vscode.Uri.file(filePath))?.length ?? 0, 0);
+        await fs.access(terminatedMarkerPath);
+        await assert.rejects(fs.access(completedMarkerPath));
     });
 });

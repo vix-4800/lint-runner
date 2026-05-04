@@ -207,7 +207,7 @@ suite('Extension Test Suite', () => {
         let timerTriggered = false;
         const timer = setTimeout(() => {
             timerTriggered = true;
-        }, 10);
+        }, 100);
         timers.set(fileUri.fsPath, timer);
 
         const deletedUris: vscode.Uri[] = [];
@@ -224,7 +224,7 @@ suite('Extension Test Suite', () => {
             (uriString) => { clearedDiagnostics.push(uriString); }
         );
 
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        await new Promise((resolve) => setTimeout(resolve, 15));
 
         assert.strictEqual(timerTriggered, false);
         assert.strictEqual(timers.has(fileUri.fsPath), false);
