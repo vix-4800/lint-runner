@@ -10,6 +10,8 @@ import {
     type RunnableLinter,
 } from '../linterRunner.js';
 
+const SLOW_LINTER_TIMEOUT_MS = 10_000;
+
 async function waitForFile(filePath: string, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -39,7 +41,7 @@ suite('Linter Runner Test Suite', () => {
             scriptPath,
             [
                 "const fs = require('node:fs');",
-                "const [, , startedMarkerPath, terminatedMarkerPath, completedMarkerPath] = process.argv;",
+                'const [startedMarkerPath, terminatedMarkerPath, completedMarkerPath] = process.argv.slice(2);',
                 "fs.writeFileSync(startedMarkerPath, 'started');",
                 "process.on('SIGTERM', () => {",
                 "    fs.writeFileSync(terminatedMarkerPath, 'terminated');",
@@ -48,7 +50,7 @@ suite('Linter Runner Test Suite', () => {
                 'setTimeout(() => {',
                 "    fs.writeFileSync(completedMarkerPath, 'completed');",
                 '    process.exit(0);',
-                '}, 10000);',
+                `}, ${SLOW_LINTER_TIMEOUT_MS});`,
                 '',
             ].join('\n')
         );
