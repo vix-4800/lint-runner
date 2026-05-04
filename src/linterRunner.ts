@@ -591,7 +591,7 @@ export function mergeConfiguredTargets(
     baseTargets: TargetConfig[],
     patches: TargetPatch[]
 ): TargetConfig[] {
-    if (patches.length === 0 && new Set(baseTargets.map((target) => target.name)).size === baseTargets.length) {
+    if (patches.length === 0 && hasUniqueTargetNames(baseTargets)) {
         return baseTargets;
     }
 
@@ -605,6 +605,10 @@ export function mergeConfiguredTargets(
     }
 
     return result;
+}
+
+function hasUniqueTargetNames(targets: readonly { name: string }[]): boolean {
+    return new Set(targets.map((target) => target.name)).size === targets.length;
 }
 
 function getScopedTargets(filePath: string): TargetConfig[] {
