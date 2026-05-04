@@ -590,6 +590,10 @@ export function shouldProcessLinterFile(fileSize: number, maxFileSize?: number):
     return maxFileSize === undefined || fileSize <= maxFileSize;
 }
 
+function needsFileStat(linter: LinterConfig, trigger: RunMode): boolean {
+    return linter.maxFileSize !== undefined || trigger !== 'manual';
+}
+
 interface CommandTemplateValues {
     file: string;
     workspaceFolder: string;
@@ -885,7 +889,7 @@ async function spawnLinter(
     }
 
     let fileStat: fs.Stats | undefined;
-    if (linter.maxFileSize !== undefined || trigger !== 'manual') {
+    if (needsFileStat(linter, trigger)) {
         try {
             fileStat = await fs.promises.stat(filePath);
         } catch (err) {
