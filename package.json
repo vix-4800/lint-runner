@@ -80,7 +80,7 @@
           "type": "array",
           "default": [],
           "scope": "resource",
-          "markdownDescription": "Target-first configurations merged by `name` across user, workspace, and folder settings. Folder-level entries can override only selected target, linter, or fixer fields while inheriting the rest from higher scopes.",
+          "markdownDescription": "Target-first configurations merged by `name` across user, workspace, and folder settings. Folder-level entries can override only selected target, linter, or fixer fields while inheriting the rest from higher scopes. New targets still need `languages`; partial entries are only valid when they match an existing target name from a higher scope.",
           "items": {
             "type": "object",
             "required": [
@@ -279,17 +279,14 @@
               "fixers": {
                 "type": "array",
                 "default": [],
-                "markdownDescription": "Commands to run when `LintRunner: Run Fixers` is invoked for files matching this target. Fixer names must be unique within a target and are used as merge identifiers across scopes. Set `run` to `onSave` to also run on save.",
+                "markdownDescription": "Commands to run when `LintRunner: Run Fixers` is invoked for files matching this target. Named fixers are merged by `name` across scopes, so use unique names for fixers you want to override from folder settings. Set `run` to `onSave` to also run on save.",
                 "items": {
                   "type": "object",
-                  "required": [
-                    "name"
-                  ],
                   "additionalProperties": false,
                   "properties": {
                     "name": {
                       "type": "string",
-                      "description": "Display name shown in the LintRunner output and used as the fixer identifier for merging."
+                      "description": "Optional display name shown in the LintRunner output. When set, it is also used as the fixer identifier for merging across scopes."
                     },
                     "enabled": {
                       "type": "boolean",

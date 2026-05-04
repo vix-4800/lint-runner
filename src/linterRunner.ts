@@ -143,7 +143,7 @@ export interface CommandConfig {
 }
 
 export interface FixerConfig extends CommandConfig {
-    name: string;
+    name?: string;
     run?: FixerRunMode;
     enabled?: boolean;
 }
@@ -191,7 +191,7 @@ export interface LinterPatch {
 }
 
 export interface FixerPatch {
-    name: string;
+    name?: string;
     command?: string;
     args?: string[];
     run?: FixerRunMode;
@@ -503,7 +503,10 @@ function mergeLinters(
 }
 
 function applyFixerPatch(result: FixerConfig[], patch: FixerPatch): void {
-    const idx = result.findIndex((fixer) => fixer.name === patch.name);
+    const idx =
+        patch.name === undefined
+            ? -1
+            : result.findIndex((fixer) => fixer.name === patch.name);
     if (idx >= 0) {
         result[idx] = {
             ...result[idx],

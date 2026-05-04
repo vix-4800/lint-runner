@@ -46,8 +46,9 @@ file's VS Code language id via `languages`. `filePatterns` is optional and furth
 `filePatterns` use the same path matching rules as before: the extension checks the file name, workspace-relative path,
 and full path.
 
-Targets must have unique `name` values within the merged configuration. Linters and fixers inside a target are also
-matched by `name`, so names must be unique there as well.
+Targets must have unique `name` values within the merged configuration. Linters inside a target are matched by `name`,
+so linter names must be unique there as well. Fixers are also merged by `name` when a `name` is provided, so give any
+fixer you want to override from a lower scope a unique `name`.
 
 ### Target Linter Config
 
@@ -68,6 +69,7 @@ required `languages`, while `filePatterns` remains optional as an extra filter. 
 
 When a folder-level target reuses a linter `name`, the linter is merged into the higher-scope one by name. You can
 override only `args`, only `run`, only `parser`, or any other linter fields without repeating the rest of the config.
+Named fixers behave the same way.
 
 ## Pre-Commands
 
@@ -86,7 +88,7 @@ does not run.
 
 | Field     | Type                   | Required | Description                                                         |
 | --------- | ---------------------- | -------- | ------------------------------------------------------------------- |
-| `name`    | `string`               | yes      | Fixer name shown in LintRunner output and used as the merge identifier. |
+| `name`    | `string`               | no       | Optional fixer name shown in LintRunner output. Set it when you want the fixer to be merged by name across scopes. |
 | `enabled` | `boolean`              | no       | Enables or disables this fixer. Defaults to `true`.                 |
 | `run`     | `"manual" \| "onSave"` | no       | Defaults to `manual`. `onSave` runs the fixer on save and manually. |
 
