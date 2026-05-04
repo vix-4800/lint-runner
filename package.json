@@ -3,7 +3,7 @@
   "displayName": "LintRunner",
   "description": "Run external CLI linters and show diagnostics in the editor.",
   "icon": "icon.png",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "publisher": "vix",
   "repository": {
     "type": "git",
