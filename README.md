@@ -55,9 +55,11 @@ and full path.
 | `parser`              | `RegexParserConfig`                | yes      | Regex parser config.                                                                       |
 | `run`                 | `"onOpen" \| "onSave" \| "manual"` | no       | Overrides target `run`. `onOpen` also runs on save.                                        |
 | `preCommands`         | `CommandConfig[]`                  | no       | Commands before the main linter.                                                           |
+| `maxFileSize`         | `number`                           | no       | Maximum file size in bytes for this linter. Larger files are skipped.                      |
 
 `lintRunner.linters` with the old linter-first format is still supported for compatibility. Legacy entries also use
-required `languages`, while `filePatterns` remains optional as an extra filter.
+required `languages`, while `filePatterns` remains optional as an extra filter. Legacy linter entries also support
+`maxFileSize`.
 
 ## Pre-Commands
 

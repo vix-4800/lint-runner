@@ -11,6 +11,7 @@ import {
     normalizeDiagnosticRanges,
     parseLinterOutput,
     resolveConfiguredTargets,
+    shouldProcessLinterFile,
     shouldRunLinter,
     type TargetOverride,
     type LinterConfig,
@@ -176,6 +177,29 @@ suite('Linter Runner', () => {
         assert.strictEqual(targets[0].linters[0].run, 'onOpen');
     });
 
+    test('keeps linter maxFileSize in resolved target configs', () => {
+        const targets = resolveConfiguredTargets(
+            [
+                {
+                    name: 'Markdown',
+                    languages: ['markdown'],
+                    linters: [
+                        {
+                            name: 'markdownlint',
+                            command: 'markdownlint',
+                            args: ['${file}'],
+                            parser: TEST_REGEX_PARSER,
+                            maxFileSize: 4096,
+                        },
+                    ],
+                },
+            ],
+            []
+        );
+
+        assert.strictEqual(targets[0].linters[0].maxFileSize, 4096);
+    });
+
     test('runs onOpen linters again on save', () => {
         const linter: LinterConfig = {
             name: 'markdownlint',
@@ -217,6 +241,15 @@ suite('Linter Runner', () => {
 
         assert.strictEqual(shouldRunLinter(linter, 'manual'), false);
         assert.strictEqual(shouldRunLinter(linter, 'onSave'), false);
+    });
+
+    test('shouldProcessLinterFile allows files when no maxFileSize is set', () => {
+        assert.strictEqual(shouldProcessLinterFile(10_000), true);
+    });
+
+    test('shouldProcessLinterFile enforces maxFileSize inclusively', () => {
+        assert.strictEqual(shouldProcessLinterFile(1024, 1024), true);
+        assert.strictEqual(shouldProcessLinterFile(1025, 1024), false);
     });
 
     test('keeps legacy linter-first configs working as targets', () => {
@@ -1347,6 +1380,29 @@ suite('mergeTargetOverrides', () => {
         assert.deepStrictEqual(linters[0].args, ['analyse', '--configuration', 'phpstan.neon', '${file}']);
         assert.strictEqual(linters[0].command, 'phpstan');
         assert.deepStrictEqual(linters[0].parser, BASE_PARSER);
+    });
+
+    test('patches linter maxFileSize by name', () => {
+        const global = [
+            {
+                name: 'PHP',
+                languages: ['php'],
+                linters: [
+                    { name: 'phpstan', command: 'phpstan', args: ['${file}'], parser: BASE_PARSER, maxFileSize: 1024 },
+                ],
+            },
+        ];
+        const patches: TargetOverride[] = [
+            {
+                name: 'PHP',
+                linters: [
+                    { name: 'phpstan', maxFileSize: 2048 },
+                ],
+            },
+        ];
+        const result = mergeTargetOverrides(global, patches);
+        const linters = result[0].linters ?? [];
+        assert.strictEqual(linters[0].maxFileSize, 2048);
     });
 
     test('appends new linter to existing target when name does not match', () => {

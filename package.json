@@ -274,6 +274,11 @@
                       "default": 30000,
                       "minimum": 1,
                       "description": "Timeout in milliseconds for this linter. Overrides the default 30000ms timeout. The linter process is killed if it does not finish within this time."
+                    },
+                    "maxFileSize": {
+                      "type": "number",
+                      "minimum": 1,
+                      "description": "Maximum file size in bytes that this linter will process. Files larger than this limit are skipped. If omitted, there is no size limit."
                     }
                   }
                 }
@@ -520,6 +525,11 @@
                       "type": "number",
                       "minimum": 1,
                       "description": "Replaces the linter's timeout (in milliseconds) when specified."
+                    },
+                    "maxFileSize": {
+                      "type": "number",
+                      "minimum": 1,
+                      "description": "Replaces the linter's maximum file size (in bytes) when specified."
                     }
                   }
                 }
@@ -714,15 +724,20 @@
                   "manual"
                 ]
               },
-              "timeout": {
-                "type": "number",
-                "default": 30000,
-                "minimum": 1,
-                "description": "Timeout in milliseconds for this linter. Overrides the default 30000ms timeout. The linter process is killed if it does not finish within this time."
+               "timeout": {
+                 "type": "number",
+                 "default": 30000,
+                 "minimum": 1,
+                 "description": "Timeout in milliseconds for this linter. Overrides the default 30000ms timeout. The linter process is killed if it does not finish within this time."
+                },
+                "maxFileSize": {
+                  "type": "number",
+                  "minimum": 1,
+                  "description": "Maximum file size in bytes that this linter will process. Files larger than this limit are skipped. If omitted, there is no size limit."
+                }
               }
             }
           }
-        }
       }
     }
   },
