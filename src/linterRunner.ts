@@ -888,7 +888,8 @@ async function spawnLinter(
     if (linter.maxFileSize !== undefined || trigger !== 'manual') {
         try {
             fileStat = await fs.promises.stat(filePath);
-        } catch {
+        } catch (err) {
+            output.appendLine(`[${linter.name}] stat failed: ${String(err)}`);
             // If stat fails, proceed to run the linter normally.
         }
     }

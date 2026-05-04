@@ -248,6 +248,7 @@ suite('Linter Runner', () => {
     });
 
     test('shouldProcessLinterFile enforces maxFileSize inclusively', () => {
+        assert.strictEqual(shouldProcessLinterFile(512, 1024), true);
         assert.strictEqual(shouldProcessLinterFile(1024, 1024), true);
         assert.strictEqual(shouldProcessLinterFile(1025, 1024), false);
     });
