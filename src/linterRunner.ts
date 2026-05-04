@@ -446,14 +446,16 @@ function cloneFixerConfig(fixer: FixerConfig): FixerConfig {
 
 function isCompleteLinterConfig(linter: LinterPatch): linter is TargetLinterConfig {
     return (
+        linter.parser !== undefined &&
+        typeof linter.parser === 'object' &&
         linter.command !== undefined &&
-        linter.args !== undefined &&
-        linter.parser?.pattern !== undefined
+        Array.isArray(linter.args) &&
+        typeof linter.parser.pattern === 'string'
     );
 }
 
 function isCompleteFixerConfig(fixer: FixerPatch): fixer is FixerConfig {
-    return fixer.command !== undefined && fixer.args !== undefined;
+    return fixer.command !== undefined && Array.isArray(fixer.args);
 }
 
 function isCompleteTargetConfig(target: TargetPatch): target is TargetConfig {

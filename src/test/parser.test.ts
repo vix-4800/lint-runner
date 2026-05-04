@@ -1583,4 +1583,28 @@ suite('mergeConfiguredTargets', () => {
         assert.strictEqual(result[0].run, 'manual');
         assert.strictEqual(result[0].fixers?.[0].name, 'php-cs-fixer');
     });
+
+    test('patch keeps existing linters while adding fixers from another scope', () => {
+        const global: TargetConfig[] = [
+            {
+                name: 'PHP',
+                languages: ['php'],
+                linters: [
+                    { name: 'phpstan', command: 'phpstan', args: ['analyse', '${file}'], parser: BASE_PARSER },
+                ],
+            },
+        ];
+        const patches: TargetPatch[] = [
+            {
+                name: 'PHP',
+                fixers: [
+                    { name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix', '${file}'] },
+                ],
+            },
+        ];
+        const result = mergeConfiguredTargets(global, patches);
+        assert.strictEqual(result.length, 1);
+        assert.strictEqual(result[0].linters?.[0].name, 'phpstan');
+        assert.strictEqual(result[0].fixers?.[0].name, 'php-cs-fixer');
+    });
 });
