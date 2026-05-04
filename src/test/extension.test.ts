@@ -7,8 +7,12 @@ import {
     collectNewVisibleFileNames,
     collectVisibleDiffDocumentUrisByColumn,
     computeContentHash,
+    handleClosedDocument,
     isContentChanged,
 } from '../extension.js';
+
+const CANCELLED_TIMER_DELAY_MS = 100;
+const TIMER_VERIFICATION_DELAY_MS = 15;
 
 suite('Extension Test Suite', () => {
     vscode.window.showInformationMessage('Start all tests.');
@@ -196,5 +200,41 @@ suite('Extension Test Suite', () => {
 
         // key1 unchanged
         assert.strictEqual(isContentChanged(key1, hash, hashMap), false);
+    });
+
+    test('handleClosedDocument cancels active runs and clears pending save state', async () => {
+        const fileUri = vscode.Uri.file('/tmp/closed-file.ts');
+        const seenDocumentUris = new Set<string>([fileUri.toString()]);
+        const hashMap = new Map<string, string>([[fileUri.toString(), computeContentHash('const x = 1;')]]);
+        const timers = new Map<string, ReturnType<typeof setTimeout>>();
+        let timerTriggered = false;
+        const timer = setTimeout(() => {
+            timerTriggered = true;
+        }, CANCELLED_TIMER_DELAY_MS);
+        timers.set(fileUri.fsPath, timer);
+
+        const deletedUris: vscode.Uri[] = [];
+        const cancelledFiles: string[] = [];
+        const clearedDiagnostics: string[] = [];
+
+        handleClosedDocument(
+            { fileName: fileUri.fsPath, uri: fileUri },
+            seenDocumentUris,
+            hashMap,
+            { delete: (uri) => { deletedUris.push(uri); } },
+            timers,
+            (filePath) => { cancelledFiles.push(filePath); },
+            (uriString) => { clearedDiagnostics.push(uriString); }
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, TIMER_VERIFICATION_DELAY_MS));
+
+        assert.strictEqual(timerTriggered, false);
+        assert.strictEqual(timers.has(fileUri.fsPath), false);
+        assert.strictEqual(seenDocumentUris.has(fileUri.toString()), false);
+        assert.strictEqual(hashMap.has(fileUri.toString()), false);
+        assert.deepStrictEqual(deletedUris, [fileUri]);
+        assert.deepStrictEqual(cancelledFiles, [fileUri.fsPath]);
+        assert.deepStrictEqual(clearedDiagnostics, [fileUri.toString()]);
     });
 });
