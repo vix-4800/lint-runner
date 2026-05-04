@@ -66,7 +66,7 @@ Run `npm run lint` and `npm run compile` after changes. Run `npm test` when beha
 - Command templating supports placeholders like `${file}` and `${workspaceFolder}`.
 - File pattern matching checks file name, workspace-relative path, and full path.
 - `onOpen` linters should also run on save (current behavior).
-- Fixers can be target-level (`fixers`) or legacy per-linter (`fixCommand`).
+- Fixers can be target-level (`fixers`).
 
 ## Definition of Done
 

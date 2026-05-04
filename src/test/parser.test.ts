@@ -228,12 +228,6 @@ suite('Linter Runner', () => {
                 args: ['${file}'],
                 parser: TEST_REGEX_PARSER,
                 run: 'onSave',
-                fixCommand: {
-                    name: 'eslint --fix',
-                    command: 'eslint',
-                    args: ['--fix', '${file}'],
-                    run: 'onSave',
-                },
             },
         ]);
 
@@ -241,7 +235,6 @@ suite('Linter Runner', () => {
         assert.strictEqual(targets[0].name, 'ESLint');
         assert.deepStrictEqual(targets[0].filePatterns, ['*.ts']);
         assert.strictEqual(targets[0].linters[0].name, 'ESLint');
-        assert.strictEqual(targets[0].linters[0].fixCommand?.run, 'onSave');
     });
 
     test('collects runnable fixers for matching targets', async () => {
@@ -274,23 +267,12 @@ suite('Linter Runner', () => {
                             command: 'eslint',
                             args: ['${file}'],
                             parser: TEST_REGEX_PARSER,
-                            fixCommand: {
-                                name: 'eslint legacy --fix',
-                                command: 'eslint',
-                                args: ['--fix', '${file}'],
-                            },
                         },
                         {
                             name: 'Disabled ESLint',
                             command: 'eslint',
                             args: ['${file}'],
                             parser: TEST_REGEX_PARSER,
-                            fixCommand: {
-                                name: 'disabled legacy --fix',
-                                command: 'eslint',
-                                args: ['--fix', '${file}'],
-                                enabled: false,
-                            },
                         },
                     ],
                 },
@@ -301,11 +283,11 @@ suite('Linter Runner', () => {
         const manualFixers = collectRunnableFixers(targets, tsFilePath, 'manual');
         assert.deepStrictEqual(
             manualFixers.map((fixer) => fixer.label),
-            ['prettier', 'eslint --fix', 'eslint legacy --fix']
+            ['prettier', 'eslint --fix']
         );
         assert.deepStrictEqual(
             manualFixers.map((fixer) => fixer.description),
-            ['TypeScript', 'TypeScript', 'TypeScript / ESLint']
+            ['TypeScript', 'TypeScript']
         );
 
         const onSaveFixers = collectRunnableFixers(targets, tsFilePath, 'onSave');

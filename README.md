@@ -55,7 +55,6 @@ and full path.
 | `parser`              | `RegexParserConfig`                | yes      | Regex parser config.                                                                       |
 | `run`                 | `"onOpen" \| "onSave" \| "manual"` | no       | Overrides target `run`. `onOpen` also runs on save.                                        |
 | `preCommands`         | `CommandConfig[]`                  | no       | Commands before the main linter.                                                           |
-| `fixCommand`          | `FixerConfig`                      | no       | Legacy per-linter auto-fixer. Prefer target-level `fixers` for new configs.                |
 
 `lintRunner.linters` with the old linter-first format is still supported for compatibility. Legacy entries also use
 required `languages`, while `filePatterns` remains optional as an extra filter.
@@ -85,7 +84,7 @@ Other fields are the same as `CommandConfig`.
 ## Command Variables
 
 LintRunner substitutes variables in `command`, `args`, `preCommands[*].command`, `preCommands[*].args`,
-`fixers[*].command`, `fixers[*].args`, `fixCommand.command`, and `fixCommand.args`.
+`fixers[*].command`, and `fixers[*].args`.
 
 | Variable                     | Value                                                                                     |
 | ---------------------------- | ----------------------------------------------------------------------------------------- |
@@ -129,7 +128,7 @@ run.
 
 ## Fix Commands
 
-`fixCommand` and `fixers` run via `LintRunner: Run Fixers`. If a fixer command has `run: "onSave"`, it also runs when a
+`fixers` run via `LintRunner: Run Fixers`. If a fixer command has `run: "onSave"`, it also runs when a
 matching file is saved. Commands run sequentially for all matching configs. After fixers finish, the extension runs
 linters to update Problems.
 
