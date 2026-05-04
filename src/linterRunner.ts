@@ -108,6 +108,11 @@ function finishFileRun(filePath: string, runId: number): void {
     }
 }
 
+export function cancelFileRun(filePath: string): void {
+    activeRunIds.delete(filePath);
+    killFileProcesses(filePath);
+}
+
 interface LinterCacheEntry {
     mtime: number;
     size: number;

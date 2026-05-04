@@ -2,6 +2,7 @@ import * as crypto from 'crypto';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
+    cancelFileRun,
     getRunnableFixers,
     getRunnableLinters,
     runFixers,
@@ -54,6 +55,36 @@ interface ActionQuickPickItem extends vscode.QuickPickItem {
 
 function documentKey(document: Pick<vscode.TextDocument, 'uri'>): string {
     return document.uri.toString();
+}
+
+export function clearPendingSaveDebounce(
+    fileName: string,
+    timers: Map<string, ReturnType<typeof setTimeout>> = saveDebounceTimers
+): void {
+    const existingTimer = timers.get(fileName);
+    if (existingTimer === undefined) {
+        return;
+    }
+
+    clearTimeout(existingTimer);
+    timers.delete(fileName);
+}
+
+export function handleClosedDocument(
+    document: Pick<vscode.TextDocument, 'fileName' | 'uri'>,
+    seenDocumentUris: Set<string>,
+    savedContentHashes: Map<string, string>,
+    diagnostics: Pick<vscode.DiagnosticCollection, 'delete'>,
+    timers: Map<string, ReturnType<typeof setTimeout>> = saveDebounceTimers,
+    onCancelFileRun: (filePath: string) => void = cancelFileRun,
+    onClearFileDiagnostics: (uriString: string) => void = clearFileLinterDiagnostics
+): void {
+    seenDocumentUris.delete(documentKey(document));
+    savedContentHashes.delete(documentKey(document));
+    clearPendingSaveDebounce(document.fileName, timers);
+    onCancelFileRun(document.fileName);
+    diagnostics.delete(document.uri);
+    onClearFileDiagnostics(document.uri.toString());
 }
 
 function isUserOpenDocument(document: OnOpenDocument): boolean {
@@ -430,10 +461,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(
         vscode.workspace.onDidCloseTextDocument((doc) => {
-            seenOnOpenDocumentUris.delete(documentKey(doc));
-            lastSavedContentHashes.delete(documentKey(doc));
-            diagnostics.delete(doc.uri);
-            clearFileLinterDiagnostics(doc.uri.toString());
+            handleClosedDocument(doc, seenOnOpenDocumentUris, lastSavedContentHashes, diagnostics);
             updateActionsStatusBar(actionsStatusBar);
         })
     );
