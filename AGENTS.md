@@ -57,7 +57,7 @@ Run `npm run lint` and `npm run compile` after changes. Run `npm test` when beha
 
 - Prefer minimal, local changes.
 - Do not rename public configuration keys in `package.json` without migration notes.
-- Preserve backward compatibility for legacy `lintRunner.linters` config.
+- Use `lintRunner.targets` for configuration.
 - Keep workspace trust restrictions intact: no command execution in untrusted workspaces.
 - Avoid adding dependencies unless necessary.
 
