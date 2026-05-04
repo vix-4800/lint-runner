@@ -889,7 +889,7 @@ async function spawnLinter(
         try {
             fileStat = await fs.promises.stat(filePath);
         } catch {
-            // If stat fails proceed to run the linter normally.
+            // If stat fails, proceed to run the linter normally.
         }
     }
 
