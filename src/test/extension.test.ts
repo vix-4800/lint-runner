@@ -4,9 +4,11 @@ import * as assert from 'assert';
 // as well as import your extension to test it
 import * as vscode from 'vscode';
 import {
+    collectClosedFileTabUris,
     collectNewVisibleFileNames,
     collectVisibleDiffDocumentUrisByColumn,
     computeContentHash,
+    handleClosedFileUri,
     handleClosedDocument,
     isContentChanged,
 } from '../extension.js';
@@ -134,6 +136,22 @@ suite('Extension Test Suite', () => {
         );
     });
 
+    test('collects closed file tab URIs', () => {
+        const fileUri = vscode.Uri.file('/tmp/lint-runner-closed.ts');
+        const untitledUri = vscode.Uri.parse('untitled:lint-runner-closed.ts');
+        const diffOriginalUri = vscode.Uri.file('/tmp/lint-runner-original.ts');
+        const diffModifiedUri = vscode.Uri.file('/tmp/lint-runner-modified.ts');
+
+        assert.deepStrictEqual(
+            collectClosedFileTabUris([
+                { input: new vscode.TabInputText(fileUri) },
+                { input: new vscode.TabInputText(untitledUri) },
+                { input: new vscode.TabInputTextDiff(diffOriginalUri, diffModifiedUri) },
+            ]),
+            [fileUri]
+        );
+    });
+
     test('computeContentHash returns consistent hashes for the same input', () => {
         const text = 'const x = 1;';
         assert.strictEqual(computeContentHash(text), computeContentHash(text));
@@ -219,6 +237,43 @@ suite('Extension Test Suite', () => {
 
         handleClosedDocument(
             { fileName: fileUri.fsPath, uri: fileUri },
+            seenDocumentUris,
+            hashMap,
+            { delete: (uri) => { deletedUris.push(uri); } },
+            timers,
+            (filePath) => { cancelledFiles.push(filePath); },
+            (uriString) => { clearedDiagnostics.push(uriString); }
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, TIMER_VERIFICATION_DELAY_MS));
+
+        assert.strictEqual(timerTriggered, false);
+        assert.strictEqual(timers.has(fileUri.fsPath), false);
+        assert.strictEqual(seenDocumentUris.has(fileUri.toString()), false);
+        assert.strictEqual(hashMap.has(fileUri.toString()), false);
+        assert.deepStrictEqual(deletedUris, [fileUri]);
+        assert.deepStrictEqual(cancelledFiles, [fileUri.fsPath]);
+        assert.deepStrictEqual(clearedDiagnostics, [fileUri.toString()]);
+    });
+
+    test('handleClosedFileUri cancels active runs and clears pending save state', async () => {
+        const fileUri = vscode.Uri.file('/tmp/closed-tab-file.ts');
+        const seenDocumentUris = new Set<string>([fileUri.toString()]);
+        const hashMap = new Map<string, string>([[fileUri.toString(), computeContentHash('const x = 1;')]]);
+        const timers = new Map<string, ReturnType<typeof setTimeout>>();
+        let timerTriggered = false;
+        const timer = setTimeout(() => {
+            timerTriggered = true;
+        }, CANCELLED_TIMER_DELAY_MS);
+        timers.set(fileUri.fsPath, timer);
+
+        const deletedUris: vscode.Uri[] = [];
+        const cancelledFiles: string[] = [];
+        const clearedDiagnostics: string[] = [];
+
+        handleClosedFileUri(
+            fileUri,
+            fileUri.fsPath,
             seenDocumentUris,
             hashMap,
             { delete: (uri) => { deletedUris.push(uri); } },

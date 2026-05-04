@@ -79,12 +79,35 @@ export function handleClosedDocument(
     onCancelFileRun: (filePath: string) => void = cancelFileRun,
     onClearFileDiagnostics: (uriString: string) => void = clearFileLinterDiagnostics
 ): void {
-    seenDocumentUris.delete(documentKey(document));
-    savedContentHashes.delete(documentKey(document));
-    clearPendingSaveDebounce(document.fileName, timers);
-    onCancelFileRun(document.fileName);
-    diagnostics.delete(document.uri);
-    onClearFileDiagnostics(document.uri.toString());
+    handleClosedFileUri(
+        document.uri,
+        document.fileName,
+        seenDocumentUris,
+        savedContentHashes,
+        diagnostics,
+        timers,
+        onCancelFileRun,
+        onClearFileDiagnostics
+    );
+}
+
+export function handleClosedFileUri(
+    uri: vscode.Uri,
+    fileName: string,
+    seenDocumentUris: Set<string>,
+    savedContentHashes: Map<string, string>,
+    diagnostics: Pick<vscode.DiagnosticCollection, 'delete'>,
+    timers: Map<string, ReturnType<typeof setTimeout>> = saveDebounceTimers,
+    onCancelFileRun: (filePath: string) => void = cancelFileRun,
+    onClearFileDiagnostics: (uriString: string) => void = clearFileLinterDiagnostics
+): void {
+    const key = uri.toString();
+    seenDocumentUris.delete(key);
+    savedContentHashes.delete(key);
+    clearPendingSaveDebounce(fileName, timers);
+    onCancelFileRun(fileName);
+    diagnostics.delete(uri);
+    onClearFileDiagnostics(key);
 }
 
 function isUserOpenDocument(document: OnOpenDocument): boolean {
@@ -178,6 +201,19 @@ export function collectNewVisibleFileNames(
     }
 
     return fileNames;
+}
+
+export function collectClosedFileTabUris(tabs: readonly OnOpenTab[]): vscode.Uri[] {
+    const uris: vscode.Uri[] = [];
+
+    for (const tab of tabs) {
+        const input = tab.input;
+        if (input instanceof vscode.TabInputText && input.uri.scheme === 'file') {
+            uris.push(input.uri);
+        }
+    }
+
+    return uris;
 }
 
 function canRunWorkspaceCommands(showRepeatedWarning: boolean): boolean {
@@ -462,6 +498,21 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.workspace.onDidCloseTextDocument((doc) => {
             handleClosedDocument(doc, seenOnOpenDocumentUris, lastSavedContentHashes, diagnostics);
+            updateActionsStatusBar(actionsStatusBar);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.window.tabGroups.onDidChangeTabs((event) => {
+            for (const uri of collectClosedFileTabUris(event.closed)) {
+                handleClosedFileUri(
+                    uri,
+                    uri.fsPath,
+                    seenOnOpenDocumentUris,
+                    lastSavedContentHashes,
+                    diagnostics
+                );
+            }
             updateActionsStatusBar(actionsStatusBar);
         })
     );
