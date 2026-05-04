@@ -283,9 +283,7 @@
                 "items": {
                   "type": "object",
                   "required": [
-                    "name",
-                    "command",
-                    "args"
+                    "name"
                   ],
                   "additionalProperties": false,
                   "properties": {
@@ -300,14 +298,14 @@
                     },
                     "command": {
                       "type": "string",
-                      "description": "Executable to invoke for auto-fixing. Must be on PATH or an absolute path. Supports ~ and command variables."
+                      "description": "Executable to invoke for auto-fixing. Must be on PATH or an absolute path. Supports ~ and command variables. Required when defining a new fixer."
                     },
                     "args": {
                       "type": "array",
                       "items": {
                         "type": "string"
                       },
-                      "description": "Arguments passed to the fix command. Supports command variables."
+                      "description": "Arguments passed to the fix command. Supports command variables. Required when defining a new fixer."
                     },
                     "run": {
                       "type": "string",
