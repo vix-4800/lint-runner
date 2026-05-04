@@ -409,22 +409,8 @@ function normalizeTargetConfig(target: TargetConfig): ResolvedTargetConfig {
     };
 }
 
-function legacyLinterToTarget(linter: LinterConfig): ResolvedTargetConfig {
-    return {
-        name: linter.name,
-        filePatterns: linter.filePatterns ?? [],
-        languages: linter.languages ?? [],
-        preCommands: [],
-        linters: [linter],
-        fixers: [],
-    };
-}
-
-export function resolveConfiguredTargets(
-    targets: TargetConfig[],
-    legacyLinters: LinterConfig[]
-): ResolvedTargetConfig[] {
-    return [...targets.map(normalizeTargetConfig), ...legacyLinters.map(legacyLinterToTarget)];
+export function resolveConfiguredTargets(targets: TargetConfig[]): ResolvedTargetConfig[] {
+    return targets.map(normalizeTargetConfig);
 }
 
 function cloneCommandConfig(command: CommandConfig): CommandConfig {
@@ -627,11 +613,8 @@ function getScopedTargets(filePath: string): TargetConfig[] {
 }
 
 function getConfiguredTargets(filePath: string): ResolvedTargetConfig[] {
-    const config = vscode.workspace.getConfiguration('lintRunner');
     const targets = getScopedTargets(filePath);
-    const legacyLinters = config.get<LinterConfig[]>('linters') ?? [];
-
-    return resolveConfiguredTargets(targets, legacyLinters);
+    return resolveConfiguredTargets(targets);
 }
 
 function expandHome(value: string): string {

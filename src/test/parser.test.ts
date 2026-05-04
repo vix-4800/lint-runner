@@ -115,35 +115,30 @@ suite('Linter Runner', () => {
     });
 
     test('resolves target-first configs with shared target settings', () => {
-        const targets = resolveConfiguredTargets(
-            [
-                {
-                    name: 'PHP',
-                    filePatterns: ['*.php'],
-                    run: 'manual',
-                    preCommands: [{ name: 'php -l', command: 'php', args: ['-l', '${file}'] }],
-                    linters: [
-                        {
-                            name: 'PHPStan',
-                            command: 'phpstan',
-                            args: ['analyse', '${file}'],
-                            parser: TEST_REGEX_PARSER,
-                        },
-                        {
-                            name: 'PHPCS',
-                            command: 'phpcs',
-                            args: ['${file}'],
-                            parser: TEST_REGEX_PARSER,
-                            run: 'onSave',
-                        },
-                    ],
-                    fixers: [
-                        { name: 'phpcbf', command: 'phpcbf', args: ['${file}'], run: 'onSave' },
-                    ],
-                },
-            ],
-            []
-        );
+        const targets = resolveConfiguredTargets([
+            {
+                name: 'PHP',
+                filePatterns: ['*.php'],
+                run: 'manual',
+                preCommands: [{ name: 'php -l', command: 'php', args: ['-l', '${file}'] }],
+                linters: [
+                    {
+                        name: 'PHPStan',
+                        command: 'phpstan',
+                        args: ['analyse', '${file}'],
+                        parser: TEST_REGEX_PARSER,
+                    },
+                    {
+                        name: 'PHPCS',
+                        command: 'phpcs',
+                        args: ['${file}'],
+                        parser: TEST_REGEX_PARSER,
+                        run: 'onSave',
+                    },
+                ],
+                fixers: [{ name: 'phpcbf', command: 'phpcbf', args: ['${file}'], run: 'onSave' }],
+            },
+        ]);
 
         assert.strictEqual(targets.length, 1);
         assert.strictEqual(targets[0].linters.length, 2);
@@ -155,47 +150,41 @@ suite('Linter Runner', () => {
     });
 
     test('resolves onOpen run mode', () => {
-        const targets = resolveConfiguredTargets(
-            [
-                {
-                    name: 'Markdown',
-                    filePatterns: ['*.md'],
-                    run: 'onOpen',
-                    linters: [
-                        {
-                            name: 'markdownlint',
-                            command: 'markdownlint',
-                            args: ['${file}'],
-                            parser: TEST_REGEX_PARSER,
-                        },
-                    ],
-                },
-            ],
-            []
-        );
+        const targets = resolveConfiguredTargets([
+            {
+                name: 'Markdown',
+                filePatterns: ['*.md'],
+                run: 'onOpen',
+                linters: [
+                    {
+                        name: 'markdownlint',
+                        command: 'markdownlint',
+                        args: ['${file}'],
+                        parser: TEST_REGEX_PARSER,
+                    },
+                ],
+            },
+        ]);
 
         assert.strictEqual(targets[0].linters[0].run, 'onOpen');
     });
 
     test('keeps linter maxFileSize in resolved target configs', () => {
-        const targets = resolveConfiguredTargets(
-            [
-                {
-                    name: 'Markdown',
-                    languages: ['markdown'],
-                    linters: [
-                        {
-                            name: 'markdownlint',
-                            command: 'markdownlint',
-                            args: ['${file}'],
-                            parser: TEST_REGEX_PARSER,
-                            maxFileSize: 4096,
-                        },
-                    ],
-                },
-            ],
-            []
-        );
+        const targets = resolveConfiguredTargets([
+            {
+                name: 'Markdown',
+                languages: ['markdown'],
+                linters: [
+                    {
+                        name: 'markdownlint',
+                        command: 'markdownlint',
+                        args: ['${file}'],
+                        parser: TEST_REGEX_PARSER,
+                        maxFileSize: 4096,
+                    },
+                ],
+            },
+        ]);
 
         assert.strictEqual(targets[0].linters[0].maxFileSize, 4096);
     });
@@ -253,66 +242,45 @@ suite('Linter Runner', () => {
         assert.strictEqual(shouldProcessLinterFile(1025, 1024), false);
     });
 
-    test('keeps legacy linter-first configs working as targets', () => {
-        const targets = resolveConfiguredTargets([], [
-            {
-                name: 'ESLint',
-                filePatterns: ['*.ts'],
-                command: 'eslint',
-                args: ['${file}'],
-                parser: TEST_REGEX_PARSER,
-                run: 'onSave',
-            },
-        ]);
-
-        assert.strictEqual(targets.length, 1);
-        assert.strictEqual(targets[0].name, 'ESLint');
-        assert.deepStrictEqual(targets[0].filePatterns, ['*.ts']);
-        assert.strictEqual(targets[0].linters[0].name, 'ESLint');
-    });
-
     test('collects runnable fixers for matching targets', async () => {
         const tsFilePath = path.resolve(__dirname, '../../lint-test/test.ts');
         await vscode.workspace.openTextDocument(tsFilePath);
 
-        const targets = resolveConfiguredTargets(
-            [
-                {
-                    name: 'TypeScript',
-                    languages: ['typescript'],
-                    fixers: [
-                        { name: 'prettier', command: 'prettier', args: ['--write', '${file}'] },
-                        {
-                            name: 'disabled prettier',
-                            command: 'prettier',
-                            args: ['--write', '${file}'],
-                            enabled: false,
-                        },
-                        {
-                            name: 'eslint --fix',
-                            command: 'eslint',
-                            args: ['--fix', '${file}'],
-                            run: 'onSave',
-                        },
-                    ],
-                    linters: [
-                        {
-                            name: 'ESLint',
-                            command: 'eslint',
-                            args: ['${file}'],
-                            parser: TEST_REGEX_PARSER,
-                        },
-                        {
-                            name: 'Disabled ESLint',
-                            command: 'eslint',
-                            args: ['${file}'],
-                            parser: TEST_REGEX_PARSER,
-                        },
-                    ],
-                },
-            ],
-            []
-        );
+        const targets = resolveConfiguredTargets([
+            {
+                name: 'TypeScript',
+                languages: ['typescript'],
+                fixers: [
+                    { name: 'prettier', command: 'prettier', args: ['--write', '${file}'] },
+                    {
+                        name: 'disabled prettier',
+                        command: 'prettier',
+                        args: ['--write', '${file}'],
+                        enabled: false,
+                    },
+                    {
+                        name: 'eslint --fix',
+                        command: 'eslint',
+                        args: ['--fix', '${file}'],
+                        run: 'onSave',
+                    },
+                ],
+                linters: [
+                    {
+                        name: 'ESLint',
+                        command: 'eslint',
+                        args: ['${file}'],
+                        parser: TEST_REGEX_PARSER,
+                    },
+                    {
+                        name: 'Disabled ESLint',
+                        command: 'eslint',
+                        args: ['${file}'],
+                        parser: TEST_REGEX_PARSER,
+                    },
+                ],
+            },
+        ]);
 
         const manualFixers = collectRunnableFixers(targets, tsFilePath, 'manual');
         assert.deepStrictEqual(
@@ -335,38 +303,35 @@ suite('Linter Runner', () => {
         const tsFilePath = path.resolve(__dirname, '../../lint-test/test.ts');
         await vscode.workspace.openTextDocument(tsFilePath);
 
-        const targets = resolveConfiguredTargets(
-            [
-                {
-                    name: 'TypeScript',
-                    languages: ['typescript'],
-                    run: 'onSave',
-                    linters: [
-                        {
-                            name: 'ESLint',
-                            command: 'eslint',
-                            args: ['${file}'],
-                            parser: TEST_REGEX_PARSER,
-                        },
-                        {
-                            name: 'manual only',
-                            command: 'biome',
-                            args: ['check', '${file}'],
-                            parser: TEST_REGEX_PARSER,
-                            run: 'manual',
-                        },
-                        {
-                            name: 'disabled',
-                            command: 'tsc',
-                            args: ['--noEmit', '${file}'],
-                            parser: TEST_REGEX_PARSER,
-                            enabled: false,
-                        },
-                    ],
-                },
-            ],
-            []
-        );
+        const targets = resolveConfiguredTargets([
+            {
+                name: 'TypeScript',
+                languages: ['typescript'],
+                run: 'onSave',
+                linters: [
+                    {
+                        name: 'ESLint',
+                        command: 'eslint',
+                        args: ['${file}'],
+                        parser: TEST_REGEX_PARSER,
+                    },
+                    {
+                        name: 'manual only',
+                        command: 'biome',
+                        args: ['check', '${file}'],
+                        parser: TEST_REGEX_PARSER,
+                        run: 'manual',
+                    },
+                    {
+                        name: 'disabled',
+                        command: 'tsc',
+                        args: ['--noEmit', '${file}'],
+                        parser: TEST_REGEX_PARSER,
+                        enabled: false,
+                    },
+                ],
+            },
+        ]);
 
         const manualLinters = collectRunnableLinters(targets, tsFilePath, 'manual');
         assert.deepStrictEqual(
@@ -465,23 +430,20 @@ suite('Linter Runner', () => {
         const tsFilePath = path.resolve(__dirname, '../../lint-test/test.ts');
         await vscode.workspace.openTextDocument(phpFilePath);
 
-        const targets = resolveConfiguredTargets(
-            [
-                {
-                    name: 'PHP',
-                    languages: ['php'],
-                    linters: [
-                        {
-                            name: 'PHPStan',
-                            command: 'phpstan',
-                            args: ['${file}'],
-                            parser: TEST_REGEX_PARSER,
-                        },
-                    ],
-                },
-            ],
-            []
-        );
+        const targets = resolveConfiguredTargets([
+            {
+                name: 'PHP',
+                languages: ['php'],
+                linters: [
+                    {
+                        name: 'PHPStan',
+                        command: 'phpstan',
+                        args: ['${file}'],
+                        parser: TEST_REGEX_PARSER,
+                    },
+                ],
+            },
+        ]);
 
         assert.strictEqual(
             collectRunnableLinters(targets, phpFilePath, 'manual').length,
@@ -499,24 +461,21 @@ suite('Linter Runner', () => {
         const phpFilePath = path.resolve(__dirname, '../../lint-test/test.php');
         await vscode.workspace.openTextDocument(phpFilePath);
 
-        const targets = resolveConfiguredTargets(
-            [
-                {
-                    name: 'PHP controllers only',
-                    languages: ['php'],
-                    filePatterns: ['*Controller*'],
-                    linters: [
-                        {
-                            name: 'test-linter',
-                            command: 'test',
-                            args: ['${file}'],
-                            parser: TEST_REGEX_PARSER,
-                        },
-                    ],
-                },
-            ],
-            []
-        );
+        const targets = resolveConfiguredTargets([
+            {
+                name: 'PHP controllers only',
+                languages: ['php'],
+                filePatterns: ['*Controller*'],
+                linters: [
+                    {
+                        name: 'test-linter',
+                        command: 'test',
+                        args: ['${file}'],
+                        parser: TEST_REGEX_PARSER,
+                    },
+                ],
+            },
+        ]);
 
         // Language matches but filePatterns does not → no match
         assert.strictEqual(
@@ -526,24 +485,21 @@ suite('Linter Runner', () => {
         );
 
         const phpControllerPath = path.resolve(__dirname, '../../lint-test/MyController.php');
-        const targetsMatchingAll = resolveConfiguredTargets(
-            [
-                {
-                    name: 'PHP with *.php pattern',
-                    languages: ['php'],
-                    filePatterns: ['*.php'],
-                    linters: [
-                        {
-                            name: 'PHPStan',
-                            command: 'phpstan',
-                            args: ['${file}'],
-                            parser: TEST_REGEX_PARSER,
-                        },
-                    ],
-                },
-            ],
-            []
-        );
+        const targetsMatchingAll = resolveConfiguredTargets([
+            {
+                name: 'PHP with *.php pattern',
+                languages: ['php'],
+                filePatterns: ['*.php'],
+                linters: [
+                    {
+                        name: 'PHPStan',
+                        command: 'phpstan',
+                        args: ['${file}'],
+                        parser: TEST_REGEX_PARSER,
+                    },
+                ],
+            },
+        ]);
 
         // Language matches AND filePatterns matches → match
         assert.strictEqual(

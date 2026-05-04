@@ -63,10 +63,6 @@ fixer you want to override from a lower scope a unique `name`.
 | `preCommands`         | `CommandConfig[]`                  | no       | Commands before the main linter.                                                           |
 | `maxFileSize`         | `number`                           | no       | Maximum file size in bytes for this linter. Larger files are skipped.                      |
 
-`lintRunner.linters` with the old linter-first format is still supported for compatibility. Legacy entries also use
-required `languages`, while `filePatterns` remains optional as an extra filter. Legacy linter entries also support
-`maxFileSize`.
-
 When a folder-level target reuses a linter `name`, the linter is merged into the higher-scope one by name. You can
 override only `args`, only `run`, only `parser`, or any other linter fields without repeating the rest of the config.
 Named fixers behave the same way.
