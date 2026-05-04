@@ -152,7 +152,6 @@ export interface TargetLinterConfig {
     run?: RunMode;
     enabled?: boolean;
     preCommands?: CommandConfig[];
-    fixCommand?: FixerConfig;
 }
 
 export interface LinterConfig extends TargetLinterConfig {
@@ -179,7 +178,6 @@ export interface LinterOverride {
     run?: RunMode;
     enabled?: boolean;
     preCommands?: CommandConfig[];
-    fixCommand?: FixerConfig;
     showDiagnosticCodes?: boolean;
 }
 
@@ -209,7 +207,6 @@ export interface RunnableFixer {
     detail: string;
     targetName: string;
     fixer: FixerConfig;
-    linter?: LinterConfig;
 }
 
 export interface RunnableLinter {
@@ -981,31 +978,6 @@ async function spawnTargetLinters(
     return diagnostics.flat();
 }
 
-async function runFixer(
-    linter: LinterConfig,
-    filePath: string,
-    output: vscode.OutputChannel,
-    statusBar: vscode.StatusBarItem
-): Promise<void> {
-    const fixCommand = linter.fixCommand;
-    if (fixCommand === undefined) {
-        return;
-    }
-
-    const fixCommandName = fixCommand.name ?? fixCommand.command;
-    const label = `${linter.name}:fix:${fixCommandName}`;
-    const statusName = `${linter.name}:fix`;
-    startLinterStatus(statusName, statusBar);
-    try {
-        const result = await runCommand(label, fixCommand, filePath, output);
-        logCommandResult(label, result, output);
-    } catch (err) {
-        output.appendLine(`[${label}] failed: ${String(err)}`);
-    } finally {
-        stopLinterStatus(statusName, statusBar);
-    }
-}
-
 function shouldRunFixer(fixer: FixerConfig, trigger: FixerRunMode): boolean {
     return fixer.enabled !== false && (trigger === 'manual' || fixer.run === trigger);
 }
@@ -1021,22 +993,6 @@ function targetFixerToRunnable(target: ResolvedTargetConfig, fixer: FixerConfig)
         detail: formatCommand(fixer.command, fixer.args),
         targetName: target.name,
         fixer,
-    };
-}
-
-function linterFixerToRunnable(target: ResolvedTargetConfig, linter: LinterConfig): RunnableFixer {
-    const fixCommand = linter.fixCommand;
-    if (fixCommand === undefined) {
-        throw new Error(`Linter '${linter.name}' has no fix command.`);
-    }
-
-    return {
-        label: getFixerName(fixCommand),
-        description: `${target.name} / ${linter.name}`,
-        detail: formatCommand(fixCommand.command, fixCommand.args),
-        targetName: target.name,
-        fixer: fixCommand,
-        linter,
     };
 }
 
@@ -1083,12 +1039,6 @@ export function collectRunnableFixers(
         for (const fixer of target.fixers) {
             if (shouldRunFixer(fixer, trigger)) {
                 fixers.push(targetFixerToRunnable(target, fixer));
-            }
-        }
-
-        for (const linter of target.linters) {
-            if (linter.fixCommand !== undefined && shouldRunFixer(linter.fixCommand, trigger)) {
-                fixers.push(linterFixerToRunnable(target, linter));
             }
         }
     }
@@ -1223,11 +1173,6 @@ async function runRunnableFixer(
     output: vscode.OutputChannel,
     statusBar: vscode.StatusBarItem
 ): Promise<void> {
-    if (fixer.linter !== undefined) {
-        await runFixer(fixer.linter, filePath, output, statusBar);
-        return;
-    }
-
     await runTargetFixer(fixer.targetName, fixer.fixer, filePath, output, statusBar);
 }
 

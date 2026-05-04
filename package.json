@@ -211,46 +211,6 @@
                         }
                       }
                     },
-                    "fixCommand": {
-                      "type": "object",
-                      "markdownDescription": "Legacy per-linter command to run when `LintRunner: Run Fixers` is invoked. Set `run` to `onSave` to also run on save. Prefer target-level `fixers` for new configs.",
-                      "required": [
-                        "command",
-                        "args"
-                      ],
-                      "additionalProperties": false,
-                      "properties": {
-                        "name": {
-                          "type": "string",
-                          "description": "Optional display name shown in the LintRunner output."
-                        },
-                        "enabled": {
-                          "type": "boolean",
-                          "default": true,
-                          "description": "Whether this fixer is enabled."
-                        },
-                        "command": {
-                          "type": "string",
-                          "description": "Executable to invoke for auto-fixing. Must be on PATH or an absolute path. Supports ~ and command variables."
-                        },
-                        "args": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "description": "Arguments passed to the fix command. Supports command variables."
-                        },
-                        "run": {
-                          "type": "string",
-                          "default": "manual",
-                          "enum": [
-                            "manual",
-                            "onSave"
-                          ],
-                          "description": "'manual' runs only via the command; 'onSave' also runs when a matching file is saved."
-                        }
-                      }
-                    },
                     "parser": {
                       "type": "object",
                       "required": [
@@ -488,46 +448,6 @@
                         }
                       }
                     },
-                    "fixCommand": {
-                      "type": "object",
-                      "markdownDescription": "Replaces the linter's fixCommand when specified.",
-                      "required": [
-                        "command",
-                        "args"
-                      ],
-                      "additionalProperties": false,
-                      "properties": {
-                        "name": {
-                          "type": "string",
-                          "description": "Optional display name shown in the LintRunner output."
-                        },
-                        "enabled": {
-                          "type": "boolean",
-                          "default": true,
-                          "description": "Whether this fixer is enabled."
-                        },
-                        "command": {
-                          "type": "string",
-                          "description": "Executable to invoke for auto-fixing. Must be on PATH or an absolute path. Supports ~ and command variables."
-                        },
-                        "args": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "description": "Arguments passed to the fix command. Supports command variables."
-                        },
-                        "run": {
-                          "type": "string",
-                          "default": "manual",
-                          "enum": [
-                            "manual",
-                            "onSave"
-                          ],
-                          "description": "'manual' runs only via the command; 'onSave' also runs when a matching file is saved."
-                        }
-                      }
-                    },
                     "parser": {
                       "type": "object",
                       "required": [
@@ -722,46 +642,6 @@
                       },
                       "description": "Arguments passed to the pre-command. Supports command variables."
                     }
-                  }
-                }
-              },
-              "fixCommand": {
-                "type": "object",
-                "markdownDescription": "Command to run when `LintRunner: Run Fixers` is invoked. Set `run` to `onSave` to also run on save. Use `${file}` for the file path.",
-                "required": [
-                  "command",
-                  "args"
-                ],
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "description": "Optional display name shown in the LintRunner output."
-                  },
-                  "enabled": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Whether this fixer is enabled."
-                  },
-                  "command": {
-                    "type": "string",
-                    "description": "Executable to invoke for auto-fixing. Must be on PATH or an absolute path. Supports ~ and command variables."
-                  },
-                  "args": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
-                    "description": "Arguments passed to the fix command. Supports command variables."
-                  },
-                  "run": {
-                    "type": "string",
-                    "default": "manual",
-                    "enum": [
-                      "manual",
-                      "onSave"
-                    ],
-                    "description": "'manual' runs only via the command; 'onSave' also runs when a matching file is saved."
                   }
                 }
               },
