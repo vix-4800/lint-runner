@@ -143,6 +143,7 @@ export interface CommandConfig {
 }
 
 export interface FixerConfig extends CommandConfig {
+    // When present, name is both the display label and the cross-scope merge key.
     name?: string;
     run?: FixerRunMode;
     enabled?: boolean;
@@ -489,12 +490,12 @@ function applyLinterPatch(result: TargetLinterConfig[], patch: LinterPatch): voi
 }
 
 function mergeLinters(
-    globalLinters: TargetLinterConfig[],
+    baseLinters: TargetLinterConfig[],
     patches: LinterPatch[]
 ): TargetLinterConfig[] {
     const result: TargetLinterConfig[] = [];
 
-    for (const linter of globalLinters) {
+    for (const linter of baseLinters) {
         applyLinterPatch(result, linter);
     }
     for (const patch of patches) {
@@ -526,12 +527,12 @@ function applyFixerPatch(result: FixerConfig[], patch: FixerPatch): void {
 }
 
 function mergeFixers(
-    globalFixers: FixerConfig[],
+    baseFixers: FixerConfig[],
     patches: FixerPatch[]
 ): FixerConfig[] {
     const result: FixerConfig[] = [];
 
-    for (const fixer of globalFixers) {
+    for (const fixer of baseFixers) {
         applyFixerPatch(result, fixer);
     }
     for (const patch of patches) {
@@ -582,12 +583,12 @@ function applyTargetPatch(result: TargetConfig[], patch: TargetPatch): void {
 }
 
 export function mergeConfiguredTargets(
-    globalTargets: TargetConfig[],
+    baseTargets: TargetConfig[],
     patches: TargetPatch[]
 ): TargetConfig[] {
     const result: TargetConfig[] = [];
 
-    for (const target of globalTargets) {
+    for (const target of baseTargets) {
         applyTargetPatch(result, target);
     }
     for (const patch of patches) {
