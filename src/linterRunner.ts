@@ -153,6 +153,7 @@ export interface TargetLinterConfig {
     enabled?: boolean;
     preCommands?: CommandConfig[];
     fixCommand?: FixerConfig;
+    timeout?: number;
 }
 
 export interface LinterConfig extends TargetLinterConfig {
@@ -181,6 +182,7 @@ export interface LinterOverride {
     preCommands?: CommandConfig[];
     fixCommand?: FixerConfig;
     showDiagnosticCodes?: boolean;
+    timeout?: number;
 }
 
 export interface TargetOverride {
@@ -686,7 +688,8 @@ async function runCommand(
     commandConfig: CommandConfig,
     filePath: string,
     output: vscode.OutputChannel,
-    shouldContinue: () => boolean = () => true
+    shouldContinue: () => boolean = () => true,
+    timeoutMs: number = TIMEOUT_MS
 ): Promise<CommandResult> {
     if (!vscode.workspace.isTrusted) {
         output.appendLine(`[${label}] skipped: workspace is not trusted`);
@@ -734,9 +737,9 @@ async function runCommand(
             done = true;
             unregisterProcess(filePath, proc);
             terminateProcessTree(proc);
-            output.appendLine(`[${label}] killed: timeout after ${TIMEOUT_MS}ms`);
+            output.appendLine(`[${label}] killed: timeout after ${timeoutMs}ms`);
             resolve({ code: null, stdout, stderr, error: 'timeout' });
-        }, TIMEOUT_MS);
+        }, timeoutMs);
 
         proc.stdout?.on('data', (chunk: Buffer) => {
             stdout += chunk.toString();
@@ -906,7 +909,7 @@ async function spawnLinter(
             return [];
         }
 
-        const result = await runCommand(linter.name, linter, filePath, output, shouldContinue);
+        const result = await runCommand(linter.name, linter, filePath, output, shouldContinue, linter.timeout ?? TIMEOUT_MS);
         if (!shouldContinue()) {
             return [];
         }

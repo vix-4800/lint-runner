@@ -308,6 +308,12 @@
                         "manual"
                       ],
                       "description": "Override target run mode for this linter. 'onOpen' runs when a file opens and again on save."
+                    },
+                    "timeout": {
+                      "type": "number",
+                      "default": 30000,
+                      "minimum": 1,
+                      "description": "Timeout in milliseconds for this linter. Overrides the default 30000ms timeout. The linter process is killed if it does not finish within this time."
                     }
                   }
                 }
@@ -589,6 +595,11 @@
                     "showDiagnosticCodes": {
                       "type": "boolean",
                       "markdownDescription": "Replaces the linter's diagnostic code visibility when specified."
+                    },
+                    "timeout": {
+                      "type": "number",
+                      "minimum": 1,
+                      "description": "Replaces the linter's timeout (in milliseconds) when specified."
                     }
                   }
                 }
@@ -822,6 +833,12 @@
                   "onOpen",
                   "manual"
                 ]
+              },
+              "timeout": {
+                "type": "number",
+                "default": 30000,
+                "minimum": 1,
+                "description": "Timeout in milliseconds for this linter. Overrides the default 30000ms timeout. The linter process is killed if it does not finish within this time."
               }
             }
           }
