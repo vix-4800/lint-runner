@@ -69,6 +69,12 @@
           "scope": "resource",
           "description": "Show one source code action per manual linter and manual fixer for matching files. Linters/fixers that already run on open or save are not listed."
         },
+        "lintRunner.enableCodeLens": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "description": "Show one CodeLens per manual linter and manual fixer at the top of matching files. Linters/fixers that already run on open or save are not listed."
+        },
         "lintRunner.ignorePatterns": {
           "type": "array",
           "default": [],

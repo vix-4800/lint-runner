@@ -9,6 +9,7 @@ import {
     collectVisibleDiffDocumentUrisByColumn,
     computeContentHash,
     createManualCodeActions,
+    createManualCodeLenses,
     getActionsStatusBarState,
     handleClosedFileUri,
     handleClosedDocument,
@@ -395,5 +396,32 @@ suite('Extension Test Suite', () => {
         ]);
         assert.deepStrictEqual(actions[0].command?.arguments, [uri, linter]);
         assert.deepStrictEqual(actions[1].command?.arguments, [uri, fixer]);
+    });
+
+    test('createManualCodeLenses creates separate code lenses for linters and fixers at the file start', () => {
+        const uri = vscode.Uri.file('/tmp/lint-runner-codelens.ts');
+        const linter = createTestRunnableLinter('eslint', 'frontend', 'manual');
+        const fixer = createTestRunnableFixer('prettier', 'frontend', 'manual');
+        const codeLenses = createManualCodeLenses(
+            uri,
+            [linter],
+            [fixer]
+        );
+
+        assert.strictEqual(codeLenses.length, 2);
+        assert.deepStrictEqual(codeLenses.map((codeLens) => codeLens.command?.title), [
+            'Lint: eslint (frontend)',
+            'Fix: prettier (frontend)',
+        ]);
+        assert.deepStrictEqual(codeLenses.map((codeLens) => codeLens.command?.command), [
+            'lintRunner.runManualLinterCodeAction',
+            'lintRunner.runManualFixerCodeAction',
+        ]);
+        assert.deepStrictEqual(codeLenses[0].command?.arguments, [uri, linter]);
+        assert.deepStrictEqual(codeLenses[1].command?.arguments, [uri, fixer]);
+        assert.strictEqual(codeLenses[0].range.start.line, 0);
+        assert.strictEqual(codeLenses[0].range.start.character, 0);
+        assert.strictEqual(codeLenses[1].range.start.line, 0);
+        assert.strictEqual(codeLenses[1].range.start.character, 0);
     });
 });

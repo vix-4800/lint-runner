@@ -346,6 +346,39 @@ export function createManualCodeActions(
     return actions;
 }
 
+export function createManualCodeLenses(
+    documentUri: vscode.Uri,
+    linters: readonly RunnableLinter[],
+    fixers: readonly RunnableFixer[]
+): vscode.CodeLens[] {
+    const range = new vscode.Range(0, 0, 0, 0);
+    const codeLenses: vscode.CodeLens[] = [];
+
+    for (const linter of linters) {
+        const title = `Lint: ${linter.label} (${linter.description})`;
+        codeLenses.push(
+            new vscode.CodeLens(range, {
+                title,
+                command: 'lintRunner.runManualLinterCodeAction',
+                arguments: [documentUri, linter],
+            })
+        );
+    }
+
+    for (const fixer of fixers) {
+        const title = `Fix: ${fixer.label} (${fixer.description})`;
+        codeLenses.push(
+            new vscode.CodeLens(range, {
+                title,
+                command: 'lintRunner.runManualFixerCodeAction',
+                arguments: [documentUri, fixer],
+            })
+        );
+    }
+
+    return codeLenses;
+}
+
 async function runManualFixersForEditor(
     editorOrUri: vscode.TextEditor | vscode.Uri,
     diagnostics: vscode.DiagnosticCollection,
@@ -484,16 +517,36 @@ export function activate(context: vscode.ExtensionContext): void {
     const runningStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
     runningStatusBar.name = 'LintRunner';
     const actionsStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    const codeLensRefreshEmitter = new vscode.EventEmitter<void>();
     actionsStatusBar.name = 'LintRunner Actions';
     actionsStatusBar.command = 'lintRunner.actions';
     updateActionsStatusBar(actionsStatusBar);
-    context.subscriptions.push(diagnostics, output, runningStatusBar, actionsStatusBar);
+    context.subscriptions.push(diagnostics, output, runningStatusBar, actionsStatusBar, codeLensRefreshEmitter);
 
     const seenOnOpenDocumentUris = new Set<string>();
     collectNewVisibleFileNames(
         vscode.window.visibleTextEditors,
         seenOnOpenDocumentUris,
         collectVisibleDiffDocumentUrisByColumn(vscode.window.tabGroups.all)
+    );
+
+    context.subscriptions.push(
+        vscode.languages.registerCodeLensProvider({ scheme: 'file' }, {
+            onDidChangeCodeLenses: codeLensRefreshEmitter.event,
+            provideCodeLenses(document) {
+                const config = vscode.workspace.getConfiguration('lintRunner', document.uri);
+                if (config.get<boolean>('enableCodeLens') !== true || !vscode.workspace.isTrusted) {
+                    return [];
+                }
+
+                const fileName = document.fileName;
+                return createManualCodeLenses(
+                    document.uri,
+                    getRunnableLinters(fileName, 'manual').filter(isManualCodeActionLinter),
+                    getRunnableFixers(fileName, 'manual').filter(isManualCodeActionFixer)
+                );
+            },
+        })
     );
 
     context.subscriptions.push(
@@ -626,6 +679,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 resetCommandEnv();
                 clearDiagnosticsCache();
                 updateActionsStatusBar(actionsStatusBar);
+                codeLensRefreshEmitter.fire();
             }
         })
     );
