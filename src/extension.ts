@@ -261,22 +261,33 @@ async function selectManualFixers(fileName: string): Promise<readonly RunnableFi
     return selectedItems.map((item) => item.fixer);
 }
 
-function buildActionsTooltip(): string {
-    const editor = getActiveFileEditor();
-    if (editor === undefined) {
-        return 'LintRunner: no active file';
+export function getActionsStatusBarState(
+    editor: Pick<vscode.TextEditor, 'document'> | undefined = getActiveFileEditor()
+): { text: string; tooltip: string } | undefined {
+    if (editor === undefined || !isUserOpenDocument(editor.document)) {
+        return undefined;
     }
 
     const fileName = editor.document.fileName;
     const linters = getRunnableLinters(fileName, 'manual');
     const fixers = getRunnableFixers(fileName, 'manual');
 
-    return `LintRunner: ${linters.length} linter(s), ${fixers.length} fixer(s) for ${editor.document.fileName}`;
+    return {
+        text: '$(wrench)',
+        tooltip:
+            `LintRunner: ${linters.length} linter(s), ${fixers.length} fixer(s) for ${editor.document.fileName}`,
+    };
 }
 
 function updateActionsStatusBar(statusBar: vscode.StatusBarItem): void {
-    statusBar.text = '$(wrench)';
-    statusBar.tooltip = buildActionsTooltip();
+    const state = getActionsStatusBarState();
+    if (state === undefined) {
+        statusBar.hide();
+        return;
+    }
+
+    statusBar.text = state.text;
+    statusBar.tooltip = state.tooltip;
     statusBar.show();
 }
 
@@ -378,7 +389,6 @@ async function openActionsMenu(
 ): Promise<void> {
     const editor = getActiveFileEditor();
     if (editor === undefined) {
-        vscode.window.showWarningMessage('LintRunner: No active file editor.');
         return;
     }
     if (!canRunWorkspaceCommands(true)) {
