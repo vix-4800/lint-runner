@@ -8,6 +8,7 @@ import {
     collectNewVisibleFileNames,
     collectVisibleDiffDocumentUrisByColumn,
     computeContentHash,
+    getActionsStatusBarState,
     handleClosedFileUri,
     handleClosedDocument,
     isContentChanged,
@@ -150,6 +151,25 @@ suite('Extension Test Suite', () => {
             ]),
             [fileUri]
         );
+    });
+
+    test('getActionsStatusBarState returns undefined without an active file editor', () => {
+        assert.strictEqual(getActionsStatusBarState(undefined), undefined);
+    });
+
+    test('getActionsStatusBarState returns status text and tooltip for file editors', () => {
+        const fileUri = vscode.Uri.file('/tmp/lint-runner-status.ts');
+
+        assert.deepStrictEqual(getActionsStatusBarState({
+            document: {
+                fileName: fileUri.fsPath,
+                isUntitled: false,
+                uri: fileUri,
+            } as Pick<vscode.TextDocument, 'fileName' | 'isUntitled' | 'uri'>,
+        } as Pick<vscode.TextEditor, 'document'>), {
+            text: '$(wrench)',
+            tooltip: `LintRunner: 0 linter(s), 0 fixer(s) for ${fileUri.fsPath}`,
+        });
     });
 
     test('computeContentHash returns consistent hashes for the same input', () => {
