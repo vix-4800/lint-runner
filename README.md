@@ -9,6 +9,7 @@ VS Code extension for running external CLI linters and reporting found issues in
 - run linters when a file is opened;
 - run linters when a file is saved;
 - run auto-fixers when a file is saved;
+- optionally show separate source code actions for manual linters and fixers;
 - clear diagnostics for the active file (or all files) via `LintRunner: Clear Diagnostics`;
 - match targets by VS Code language id, with optional glob-based narrowing;
 - select linters by file glob patterns;
@@ -134,6 +135,14 @@ keystroke.
 
 The default is `0` (no debounce). When multiple saves arrive within the debounce window, only the last one triggers a
 run.
+
+## Code Actions
+
+### `lintRunner.enableCodeActions`
+
+When enabled, LintRunner exposes one source code action per matching manual linter and manual fixer for the
+current file. Linters with `run: "onOpen"` or `run: "onSave"` and fixers with `run: "onSave"` are not listed
+there because they already run automatically.
 
 ## Fix Commands
 

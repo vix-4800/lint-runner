@@ -12,6 +12,7 @@ import {
     clearDiagnosticsCache,
     clearFileLinterDiagnostics,
     type RunnableFixer,
+    type RunnableLinter,
 } from './linterRunner.js';
 
 let untrustedWorkspaceWarningShown = false;
@@ -52,6 +53,10 @@ interface FixerQuickPickItem extends vscode.QuickPickItem {
 interface ActionQuickPickItem extends vscode.QuickPickItem {
     action?: () => Promise<void>;
 }
+
+const manualCodeActionKind = vscode.CodeActionKind.Source.append('lintRunner.manual');
+const manualLinterCodeActionKind = manualCodeActionKind.append('linter');
+const manualFixerCodeActionKind = manualCodeActionKind.append('fixer');
 
 function documentKey(document: Pick<vscode.TextDocument, 'uri'>): string {
     return document.uri.toString();
@@ -275,21 +280,77 @@ function updateActionsStatusBar(statusBar: vscode.StatusBarItem): void {
     statusBar.show();
 }
 
+function findVisibleFileEditor(uri: vscode.Uri): vscode.TextEditor | undefined {
+    return vscode.window.visibleTextEditors.find(
+        (editor) => editor.document.uri.toString() === uri.toString()
+    );
+}
+
+async function saveDocumentBeforeManualFixers(document: vscode.TextDocument): Promise<boolean> {
+    skipFixersOnSave.add(document.fileName);
+    try {
+        return await document.save();
+    } finally {
+        skipFixersOnSave.delete(document.fileName);
+    }
+}
+
+export function isManualCodeActionLinter(runnable: RunnableLinter): boolean {
+    return runnable.linter.run === 'manual';
+}
+
+export function isManualCodeActionFixer(runnable: RunnableFixer): boolean {
+    return runnable.fixer.run !== 'onSave';
+}
+
+export function createManualCodeActions(
+    documentUri: vscode.Uri,
+    linters: readonly RunnableLinter[],
+    fixers: readonly RunnableFixer[]
+): vscode.CodeAction[] {
+    const actions: vscode.CodeAction[] = [];
+
+    for (const linter of linters) {
+        const title = `Run linter: ${linter.label} (${linter.description})`;
+        const action = new vscode.CodeAction(title, manualLinterCodeActionKind);
+        action.command = {
+            title,
+            command: 'lintRunner.runManualLinterCodeAction',
+            arguments: [documentUri, linter],
+        };
+        actions.push(action);
+    }
+
+    for (const fixer of fixers) {
+        const title = `Run fixer: ${fixer.label} (${fixer.description})`;
+        const action = new vscode.CodeAction(title, manualFixerCodeActionKind);
+        action.command = {
+            title,
+            command: 'lintRunner.runManualFixerCodeAction',
+            arguments: [documentUri, fixer],
+        };
+        actions.push(action);
+    }
+
+    return actions;
+}
+
 async function runManualFixersForEditor(
-    editor: vscode.TextEditor,
+    editorOrUri: vscode.TextEditor | vscode.Uri,
     diagnostics: vscode.DiagnosticCollection,
     output: vscode.OutputChannel,
     statusBar: vscode.StatusBarItem,
     fixers?: readonly RunnableFixer[]
 ): Promise<void> {
-    const fileName = editor.document.fileName;
-    skipFixersOnSave.add(fileName);
-    let saved: boolean;
-    try {
-        saved = await editor.document.save();
-    } finally {
-        skipFixersOnSave.delete(fileName);
-    }
+    const documentUri = editorOrUri instanceof vscode.Uri ? editorOrUri : editorOrUri.document.uri;
+    const editor = findVisibleFileEditor(documentUri);
+    const document =
+        editor?.document ??
+        vscode.workspace.textDocuments.find((item) => item.uri.toString() === documentUri.toString()) ??
+        (await vscode.workspace.openTextDocument(documentUri));
+    const fileName = document.fileName;
+
+    const saved = await saveDocumentBeforeManualFixers(document);
     if (!saved) {
         vscode.window.showWarningMessage('LintRunner: File was not saved.');
         return;
@@ -421,6 +482,30 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.window.visibleTextEditors,
         seenOnOpenDocumentUris,
         collectVisibleDiffDocumentUrisByColumn(vscode.window.tabGroups.all)
+    );
+
+    context.subscriptions.push(
+        vscode.languages.registerCodeActionsProvider(
+            { scheme: 'file' },
+            {
+                provideCodeActions(document) {
+                    const config = vscode.workspace.getConfiguration('lintRunner', document.uri);
+                    if (config.get<boolean>('enableCodeActions') !== true || !vscode.workspace.isTrusted) {
+                        return [];
+                    }
+
+                    const fileName = document.fileName;
+                    return createManualCodeActions(
+                        document.uri,
+                        getRunnableLinters(fileName, 'manual').filter(isManualCodeActionLinter),
+                        getRunnableFixers(fileName, 'manual').filter(isManualCodeActionFixer)
+                    );
+                },
+            },
+            {
+                providedCodeActionKinds: [manualLinterCodeActionKind, manualFixerCodeActionKind],
+            }
+        )
     );
 
     context.subscriptions.push(
@@ -568,6 +653,39 @@ export function activate(context: vscode.ExtensionContext): void {
 
             await runManualFixersForEditor(editor, diagnostics, output, runningStatusBar);
         })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            'lintRunner.runManualLinterCodeAction',
+            async (uri: vscode.Uri, linter: RunnableLinter) => {
+                if (!canRunWorkspaceCommands(true)) {
+                    return;
+                }
+
+                await vscode.window.withProgress(
+                    {
+                        location: vscode.ProgressLocation.Notification,
+                        title: `LintRunner: Running ${linter.label}…`,
+                        cancellable: false,
+                    },
+                    () => runRunnableLinters(uri.fsPath, diagnostics, output, runningStatusBar, [linter])
+                );
+            }
+        )
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            'lintRunner.runManualFixerCodeAction',
+            async (uri: vscode.Uri, fixer: RunnableFixer) => {
+                if (!canRunWorkspaceCommands(true)) {
+                    return;
+                }
+
+                await runManualFixersForEditor(uri, diagnostics, output, runningStatusBar, [fixer]);
+            }
+        )
     );
 
     context.subscriptions.push(
