@@ -8,14 +8,65 @@ import {
     collectNewVisibleFileNames,
     collectVisibleDiffDocumentUrisByColumn,
     computeContentHash,
+    createManualCodeActions,
     getActionsStatusBarState,
     handleClosedFileUri,
     handleClosedDocument,
+    isManualCodeActionFixer,
+    isManualCodeActionLinter,
     isContentChanged,
 } from '../extension.js';
+import type { ResolvedTargetConfig, RunnableFixer, RunnableLinter } from '../linterRunner.js';
 
 const CANCELLED_TIMER_DELAY_MS = 100;
 const TIMER_VERIFICATION_DELAY_MS = 15;
+
+function createTestTarget(name: string): ResolvedTargetConfig {
+    return {
+        name,
+        filePatterns: [],
+        languages: ['typescript'],
+        preCommands: [],
+        linters: [],
+        fixers: [],
+    };
+}
+
+function createTestRunnableLinter(name: string, targetName: string, run: 'manual' | 'onSave' | 'onOpen'): RunnableLinter {
+    const target = createTestTarget(targetName);
+    return {
+        label: name,
+        description: targetName,
+        detail: `node ${name}`,
+        target,
+        linter: {
+            name,
+            command: 'node',
+            args: [name],
+            parser: {
+                pattern: '(?<line>\\d+):(?<message>.+)',
+            },
+            run,
+            filePatterns: [],
+            languages: target.languages,
+        },
+    };
+}
+
+function createTestRunnableFixer(name: string, targetName: string, run?: 'manual' | 'onSave'): RunnableFixer {
+    return {
+        label: name,
+        description: targetName,
+        detail: `node ${name}`,
+        targetName,
+        fixer: {
+            name,
+            command: 'node',
+            args: [name],
+            run,
+        },
+    };
+}
 
 suite('Extension Test Suite', () => {
     vscode.window.showInformationMessage('Start all tests.');
@@ -311,5 +362,38 @@ suite('Extension Test Suite', () => {
         assert.deepStrictEqual(deletedUris, [fileUri]);
         assert.deepStrictEqual(cancelledFiles, [fileUri.fsPath]);
         assert.deepStrictEqual(clearedDiagnostics, [fileUri.toString()]);
+    });
+
+    test('isManualCodeActionLinter and isManualCodeActionFixer correctly identify manual runnables', () => {
+        assert.strictEqual(isManualCodeActionLinter(createTestRunnableLinter('manual', 'target', 'manual')), true);
+        assert.strictEqual(isManualCodeActionLinter(createTestRunnableLinter('on-save', 'target', 'onSave')), false);
+        assert.strictEqual(isManualCodeActionLinter(createTestRunnableLinter('on-open', 'target', 'onOpen')), false);
+
+        assert.strictEqual(isManualCodeActionFixer(createTestRunnableFixer('manual', 'target', 'manual')), true);
+        assert.strictEqual(isManualCodeActionFixer(createTestRunnableFixer('default-manual', 'target')), true);
+        assert.strictEqual(isManualCodeActionFixer(createTestRunnableFixer('on-save', 'target', 'onSave')), false);
+    });
+
+    test('createManualCodeActions creates separate actions for linters and fixers', () => {
+        const uri = vscode.Uri.file('/tmp/lint-runner-actions.ts');
+        const linter = createTestRunnableLinter('eslint', 'frontend', 'manual');
+        const fixer = createTestRunnableFixer('prettier', 'frontend', 'manual');
+        const actions = createManualCodeActions(
+            uri,
+            [linter],
+            [fixer]
+        );
+
+        assert.strictEqual(actions.length, 2);
+        assert.deepStrictEqual(actions.map((action) => action.title), [
+            'Run linter: eslint (frontend)',
+            'Run fixer: prettier (frontend)',
+        ]);
+        assert.deepStrictEqual(actions.map((action) => action.command?.command), [
+            'lintRunner.runManualLinterCodeAction',
+            'lintRunner.runManualFixerCodeAction',
+        ]);
+        assert.deepStrictEqual(actions[0].command?.arguments, [uri, linter]);
+        assert.deepStrictEqual(actions[1].command?.arguments, [uri, fixer]);
     });
 });

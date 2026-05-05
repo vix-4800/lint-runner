@@ -63,6 +63,12 @@
           "minimum": 0,
           "description": "Delay in milliseconds before running linters and fixers after a file is saved. Useful when auto-save is enabled with a short interval. Set to 0 to disable debouncing."
         },
+        "lintRunner.enableCodeActions": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "description": "Show one source code action per manual linter and manual fixer for matching files. Linters/fixers that already run on open or save are not listed."
+        },
         "lintRunner.ignorePatterns": {
           "type": "array",
           "default": [],
