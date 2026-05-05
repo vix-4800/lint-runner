@@ -343,8 +343,13 @@ async function runManualFixersForEditor(
     fixers?: readonly RunnableFixer[]
 ): Promise<void> {
     const documentUri = editorOrUri instanceof vscode.Uri ? editorOrUri : editorOrUri.document.uri;
-    const editor = findVisibleFileEditor(documentUri);
-    const document = editor?.document ?? (await vscode.workspace.openTextDocument(documentUri));
+    const editor = editorOrUri instanceof vscode.Uri ? findVisibleFileEditor(documentUri) : editorOrUri;
+    if (editor === undefined) {
+        vscode.window.showWarningMessage('LintRunner: No visible file editor for fixer action.');
+        return;
+    }
+
+    const document = editor.document;
     const fileName = document.fileName;
 
     const saved = await saveDocumentBeforeManualFixers(document);

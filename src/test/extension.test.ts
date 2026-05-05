@@ -344,7 +344,7 @@ suite('Extension Test Suite', () => {
         assert.deepStrictEqual(clearedDiagnostics, [fileUri.toString()]);
     });
 
-    test('manual code action filters keep only manual linters and fixers', () => {
+    test('isManualCodeActionLinter and isManualCodeActionFixer correctly identify manual runnables', () => {
         assert.strictEqual(isManualCodeActionLinter(createTestRunnableLinter('manual', 'target', 'manual')), true);
         assert.strictEqual(isManualCodeActionLinter(createTestRunnableLinter('on-save', 'target', 'onSave')), false);
         assert.strictEqual(isManualCodeActionLinter(createTestRunnableLinter('on-open', 'target', 'onOpen')), false);
