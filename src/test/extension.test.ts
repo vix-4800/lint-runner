@@ -356,10 +356,12 @@ suite('Extension Test Suite', () => {
 
     test('createManualCodeActions creates separate actions for linters and fixers', () => {
         const uri = vscode.Uri.file('/tmp/lint-runner-actions.ts');
+        const linter = createTestRunnableLinter('eslint', 'frontend', 'manual');
+        const fixer = createTestRunnableFixer('prettier', 'frontend', 'manual');
         const actions = createManualCodeActions(
             uri,
-            [createTestRunnableLinter('eslint', 'frontend', 'manual')],
-            [createTestRunnableFixer('prettier', 'frontend', 'manual')]
+            [linter],
+            [fixer]
         );
 
         assert.strictEqual(actions.length, 2);
@@ -371,9 +373,7 @@ suite('Extension Test Suite', () => {
             'lintRunner.runManualLinterCodeAction',
             'lintRunner.runManualFixerCodeAction',
         ]);
-        assert.deepStrictEqual(actions[0].command?.arguments, [
-            uri,
-            createTestRunnableLinter('eslint', 'frontend', 'manual'),
-        ]);
+        assert.deepStrictEqual(actions[0].command?.arguments, [uri, linter]);
+        assert.deepStrictEqual(actions[1].command?.arguments, [uri, fixer]);
     });
 });

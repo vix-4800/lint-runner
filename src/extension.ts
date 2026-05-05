@@ -344,10 +344,7 @@ async function runManualFixersForEditor(
 ): Promise<void> {
     const documentUri = editorOrUri instanceof vscode.Uri ? editorOrUri : editorOrUri.document.uri;
     const editor = findVisibleFileEditor(documentUri);
-    const document =
-        editor?.document ??
-        vscode.workspace.textDocuments.find((item) => item.uri.toString() === documentUri.toString()) ??
-        (await vscode.workspace.openTextDocument(documentUri));
+    const document = editor?.document ?? (await vscode.workspace.openTextDocument(documentUri));
     const fileName = document.fileName;
 
     const saved = await saveDocumentBeforeManualFixers(document);
