@@ -11,6 +11,7 @@ import {
     resetCommandEnv,
     clearDiagnosticsCache,
     clearFileLinterDiagnostics,
+    type RunnerOutput,
     type RunnableFixer,
     type RunnableLinter,
 } from './linterRunner.js';
@@ -45,6 +46,7 @@ type OnOpenTabGroup = {
     readonly activeTab: OnOpenTab | undefined;
     readonly viewColumn: vscode.ViewColumn;
 };
+type OutputChannelLike = Pick<vscode.OutputChannel, 'appendLine' | 'dispose'>;
 
 interface FixerQuickPickItem extends vscode.QuickPickItem {
     fixer: RunnableFixer;
@@ -57,6 +59,40 @@ interface ActionQuickPickItem extends vscode.QuickPickItem {
 const manualCodeActionKind = vscode.CodeActionKind.Source.append('lintRunner.manual');
 const manualLinterCodeActionKind = manualCodeActionKind.append('linter');
 const manualFixerCodeActionKind = manualCodeActionKind.append('fixer');
+
+export function isLoggingEnabled(
+    config: Pick<vscode.WorkspaceConfiguration, 'get'> = vscode.workspace.getConfiguration('lintRunner')
+): boolean {
+    return config.get<boolean>('enableLogging') !== false;
+}
+
+export class OutputChannelManager implements RunnerOutput, vscode.Disposable {
+    private output: OutputChannelLike | undefined;
+
+    constructor(
+        private readonly createOutputChannel: () => OutputChannelLike = () =>
+            vscode.window.createOutputChannel('LintRunner')
+    ) {}
+
+    appendLine(value: string): void {
+        this.output?.appendLine(value);
+    }
+
+    sync(enabled: boolean): void {
+        if (enabled) {
+            this.output ??= this.createOutputChannel();
+            return;
+        }
+
+        this.output?.dispose();
+        this.output = undefined;
+    }
+
+    dispose(): void {
+        this.output?.dispose();
+        this.output = undefined;
+    }
+}
 
 function documentKey(document: Pick<vscode.TextDocument, 'uri'>): string {
     return document.uri.toString();
@@ -382,7 +418,7 @@ export function createManualCodeLenses(
 async function runManualFixersForEditor(
     editorOrUri: vscode.TextEditor | vscode.Uri,
     diagnostics: vscode.DiagnosticCollection,
-    output: vscode.OutputChannel,
+    output: RunnerOutput,
     statusBar: vscode.StatusBarItem,
     fixers?: readonly RunnableFixer[]
 ): Promise<void> {
@@ -417,7 +453,7 @@ async function runManualFixersForEditor(
 
 async function openActionsMenu(
     diagnostics: vscode.DiagnosticCollection,
-    output: vscode.OutputChannel,
+    output: RunnerOutput,
     runningStatusBar: vscode.StatusBarItem
 ): Promise<void> {
     const editor = getActiveFileEditor();
@@ -513,7 +549,8 @@ async function openActionsMenu(
 
 export function activate(context: vscode.ExtensionContext): void {
     const diagnostics = vscode.languages.createDiagnosticCollection('lintRunner');
-    const output = vscode.window.createOutputChannel('LintRunner');
+    const output = new OutputChannelManager();
+    output.sync(isLoggingEnabled());
     const runningStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
     runningStatusBar.name = 'LintRunner';
     const actionsStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -678,6 +715,7 @@ export function activate(context: vscode.ExtensionContext): void {
             if (event.affectsConfiguration('lintRunner')) {
                 resetCommandEnv();
                 clearDiagnosticsCache();
+                output.sync(isLoggingEnabled());
                 updateActionsStatusBar(actionsStatusBar);
                 codeLensRefreshEmitter.fire();
             }

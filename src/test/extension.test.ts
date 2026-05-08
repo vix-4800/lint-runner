@@ -13,9 +13,11 @@ import {
     getActionsStatusBarState,
     handleClosedFileUri,
     handleClosedDocument,
+    isLoggingEnabled,
     isManualCodeActionFixer,
     isManualCodeActionLinter,
     isContentChanged,
+    OutputChannelManager,
 } from '../extension.js';
 import type { ResolvedTargetConfig, RunnableFixer, RunnableLinter } from '../linterRunner.js';
 
@@ -222,6 +224,55 @@ suite('Extension Test Suite', () => {
             text: '$(wrench)',
             tooltip: `LintRunner: 0 linter(s), 0 fixer(s) for ${fileUri.fsPath}`,
         });
+    });
+
+    test('isLoggingEnabled defaults to true and accepts false', () => {
+        const defaultConfig: Pick<vscode.WorkspaceConfiguration, 'get'> = {
+            get: () => undefined,
+        };
+        const disabledConfig: Pick<vscode.WorkspaceConfiguration, 'get'> = {
+            get: () => false,
+        };
+
+        assert.strictEqual(isLoggingEnabled(defaultConfig), true);
+        assert.strictEqual(isLoggingEnabled(disabledConfig), false);
+    });
+
+    test('OutputChannelManager creates, forwards, and disposes the output channel based on setting', () => {
+        const events: string[] = [];
+        const disposedChannels: string[] = [];
+        let createCount = 0;
+
+        const manager = new OutputChannelManager(() => {
+            createCount++;
+            const channelId = `channel-${createCount}`;
+            return {
+                appendLine(value: string) {
+                    events.push(`${channelId}:${value}`);
+                },
+                dispose() {
+                    disposedChannels.push(channelId);
+                },
+            };
+        });
+
+        manager.appendLine('ignored');
+        manager.sync(true);
+        manager.appendLine('first');
+        manager.sync(true);
+        manager.appendLine('second');
+        manager.sync(false);
+        manager.appendLine('ignored-after-disable');
+        manager.sync(true);
+        manager.appendLine('third');
+        manager.dispose();
+
+        assert.deepStrictEqual(events, [
+            'channel-1:first',
+            'channel-1:second',
+            'channel-2:third',
+        ]);
+        assert.deepStrictEqual(disposedChannels, ['channel-1', 'channel-2']);
     });
 
     test('computeContentHash returns consistent hashes for the same input', () => {

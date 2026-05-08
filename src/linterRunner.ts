@@ -246,6 +246,8 @@ export interface CommandResult {
     error?: string;
 }
 
+export type RunnerOutput = Pick<vscode.OutputChannel, 'appendLine'>;
+
 function globPatternToRegexBody(pattern: string): string {
     let result = '';
     for (let i = 0; i < pattern.length; i++) {
@@ -836,7 +838,7 @@ async function runCommand(
     label: string,
     commandConfig: CommandConfig,
     filePath: string,
-    output: vscode.OutputChannel,
+    output: RunnerOutput,
     shouldContinue: () => boolean = () => true,
     timeoutMs: number = TIMEOUT_MS
 ): Promise<CommandResult> {
@@ -922,7 +924,7 @@ async function runCommand(
 function logCommandResult(
     label: string,
     result: CommandResult,
-    output: vscode.OutputChannel,
+    output: RunnerOutput,
     parsedCount?: number
 ): void {
     const parsedSuffix = parsedCount === undefined ? '' : `, parsed ${parsedCount} diagnostic(s)`;
@@ -933,7 +935,7 @@ async function runPreCommands(
     ownerName: string,
     preCommands: CommandConfig[],
     filePath: string,
-    output: vscode.OutputChannel,
+    output: RunnerOutput,
     shouldContinue: () => boolean = () => true
 ): Promise<boolean> {
     for (const preCommand of preCommands) {
@@ -1021,7 +1023,7 @@ export async function normalizeDiagnosticRanges(
 async function spawnLinter(
     linter: LinterConfig,
     filePath: string,
-    output: vscode.OutputChannel,
+    output: RunnerOutput,
     statusBar: vscode.StatusBarItem,
     trigger: RunMode = 'manual',
     shouldContinue: () => boolean = () => true
@@ -1105,7 +1107,7 @@ async function spawnTargetLinters(
     target: ResolvedTargetConfig,
     filePath: string,
     trigger: RunMode,
-    output: vscode.OutputChannel,
+    output: RunnerOutput,
     statusBar: vscode.StatusBarItem,
     onLinterDiagnostics: DiagnosticsHandler,
     shouldContinue: () => boolean = () => true
@@ -1180,7 +1182,7 @@ async function runTargetFixer(
     targetName: string,
     fixer: FixerConfig,
     filePath: string,
-    output: vscode.OutputChannel,
+    output: RunnerOutput,
     statusBar: vscode.StatusBarItem
 ): Promise<void> {
     const fixerName = fixer.name ?? fixer.command;
@@ -1340,7 +1342,7 @@ function createDiagnosticsRun(
 async function runRunnableFixer(
     fixer: RunnableFixer,
     filePath: string,
-    output: vscode.OutputChannel,
+    output: RunnerOutput,
     statusBar: vscode.StatusBarItem
 ): Promise<void> {
     await runTargetFixer(fixer.targetName, fixer.fixer, filePath, output, statusBar);
@@ -1350,7 +1352,7 @@ export async function runLinters(
     filePath: string,
     trigger: RunMode,
     diagnostics: vscode.DiagnosticCollection,
-    output: vscode.OutputChannel,
+    output: RunnerOutput,
     statusBar: vscode.StatusBarItem
 ): Promise<void> {
     const runId = startFileRun(filePath);
@@ -1410,7 +1412,7 @@ export async function runLinters(
 
 export async function runFixers(
     filePath: string,
-    output: vscode.OutputChannel,
+    output: RunnerOutput,
     statusBar: vscode.StatusBarItem,
     trigger: FixerRunMode = 'manual',
     fixers: readonly RunnableFixer[] = getRunnableFixers(filePath, trigger)
@@ -1432,7 +1434,7 @@ export async function runFixers(
 export async function runRunnableLinters(
     filePath: string,
     diagnostics: vscode.DiagnosticCollection,
-    output: vscode.OutputChannel,
+    output: RunnerOutput,
     statusBar: vscode.StatusBarItem,
     linters: readonly RunnableLinter[]
 ): Promise<number> {
