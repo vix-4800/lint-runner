@@ -63,6 +63,11 @@
           "minimum": 0,
           "description": "Delay in milliseconds before running linters and fixers after a file is saved. Useful when auto-save is enabled with a short interval. Set to 0 to disable debouncing."
         },
+        "lintRunner.enableLogging": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable LintRunner output logging. When disabled, no log lines are written and the LintRunner tab is hidden from the Output panel."
+        },
         "lintRunner.enableCodeActions": {
           "type": "boolean",
           "default": false,

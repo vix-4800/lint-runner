@@ -137,6 +137,13 @@ keystroke.
 The default is `0` (no debounce). When multiple saves arrive within the debounce window, only the last one triggers a
 run.
 
+## Logging
+
+### `lintRunner.enableLogging`
+
+When `true` (default), LintRunner writes command lifecycle messages to the `LintRunner` output channel. Set it to
+`false` to fully disable those logs and hide the `LintRunner` entry from the Output panel.
+
 ## Code Actions
 
 ### `lintRunner.enableCodeActions`
