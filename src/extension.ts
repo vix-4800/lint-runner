@@ -137,7 +137,7 @@ export function clearPendingSaveDebounce(
     timers.delete(fileName);
 }
 
-function clearAllPendingSaveDebounces(
+export function clearAllPendingSaveDebounces(
     timers: Map<string, ReturnType<typeof setTimeout>> = saveDebounceTimers
 ): void {
     for (const timer of timers.values()) {

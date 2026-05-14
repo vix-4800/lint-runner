@@ -4,6 +4,7 @@ import * as assert from 'assert';
 // as well as import your extension to test it
 import * as vscode from 'vscode';
 import {
+    clearAllPendingSaveDebounces,
     collectClosedFileTabUris,
     collectNewVisibleFileNames,
     collectVisibleDiffDocumentUrisByColumn,
@@ -427,6 +428,24 @@ suite('Extension Test Suite', () => {
         assert.deepStrictEqual(deletedUris, [fileUri]);
         assert.deepStrictEqual(cancelledFiles, [fileUri.fsPath]);
         assert.deepStrictEqual(clearedDiagnostics, [fileUri.toString()]);
+    });
+
+    test('clearAllPendingSaveDebounces clears every pending timer', async () => {
+        const timers = new Map<string, ReturnType<typeof setTimeout>>();
+        let timerTriggered = false;
+
+        timers.set('first', setTimeout(() => {
+            timerTriggered = true;
+        }, CANCELLED_TIMER_DELAY_MS));
+        timers.set('second', setTimeout(() => {
+            timerTriggered = true;
+        }, CANCELLED_TIMER_DELAY_MS));
+
+        clearAllPendingSaveDebounces(timers);
+        await new Promise((resolve) => setTimeout(resolve, TIMER_VERIFICATION_DELAY_MS));
+
+        assert.strictEqual(timerTriggered, false);
+        assert.strictEqual(timers.size, 0);
     });
 
     test('isManualCodeActionLinter and isManualCodeActionFixer correctly identify manual runnables', () => {

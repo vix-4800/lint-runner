@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
+    cancelAllFileRuns,
     cancelFileRun,
     runRunnableLinters,
     type ResolvedTargetConfig,
@@ -107,6 +108,128 @@ suite('Linter Runner Test Suite', () => {
             await assert.rejects(fs.access(completedMarkerPath));
         } finally {
             cancelFileRun(filePath);
+            diagnostics.dispose();
+            output.dispose();
+            statusBar.dispose();
+            await fs.rm(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    test('cancelAllFileRuns stops active linter processes for all files', async function () {
+        this.timeout(10_000);
+
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-cancel-all-'));
+        const firstFilePath = path.join(tmpDir, 'first.ts');
+        const secondFilePath = path.join(tmpDir, 'second.ts');
+        const scriptPath = path.join(tmpDir, 'slow-linter.js');
+        const firstStartedMarkerPath = path.join(tmpDir, 'first-started.txt');
+        const firstTerminatedMarkerPath = path.join(tmpDir, 'first-terminated.txt');
+        const firstCompletedMarkerPath = path.join(tmpDir, 'first-completed.txt');
+        const secondStartedMarkerPath = path.join(tmpDir, 'second-started.txt');
+        const secondTerminatedMarkerPath = path.join(tmpDir, 'second-terminated.txt');
+        const secondCompletedMarkerPath = path.join(tmpDir, 'second-completed.txt');
+        await fs.writeFile(firstFilePath, 'const first = 1;\n');
+        await fs.writeFile(secondFilePath, 'const second = 2;\n');
+        await fs.writeFile(
+            scriptPath,
+            [
+                "const fs = require('node:fs');",
+                'const [startedMarkerPath, terminatedMarkerPath, completedMarkerPath] = process.argv.slice(2);',
+                "fs.writeFileSync(startedMarkerPath, 'started');",
+                "process.on('SIGTERM', () => {",
+                "    fs.writeFileSync(terminatedMarkerPath, 'terminated');",
+                '    process.exit(0);',
+                '});',
+                'setTimeout(() => {',
+                "    fs.writeFileSync(completedMarkerPath, 'completed');",
+                '    process.exit(0);',
+                `}, ${SLOW_LINTER_TIMEOUT_MS});`,
+                '',
+            ].join('\n')
+        );
+
+        const diagnostics = vscode.languages.createDiagnosticCollection('lintRunner-cancel-all-test');
+        const output = vscode.window.createOutputChannel('LintRunner Cancel All Test');
+        const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+
+        const target: ResolvedTargetConfig = {
+            name: 'cancel-all-test-target',
+            filePatterns: [],
+            languages: ['typescript'],
+            preCommands: [],
+            linters: [],
+            fixers: [],
+        };
+        const createRunnable = (
+            label: string,
+            startedMarkerPath: string,
+            terminatedMarkerPath: string,
+            completedMarkerPath: string
+        ): RunnableLinter => ({
+            label,
+            description: target.name,
+            detail: process.execPath,
+            target,
+            linter: {
+                name: label,
+                command: process.execPath,
+                args: [
+                    scriptPath,
+                    startedMarkerPath,
+                    terminatedMarkerPath,
+                    completedMarkerPath,
+                ],
+                parser: {
+                    pattern: '(?<line>\\d+):(?<message>.+)',
+                },
+                run: 'manual',
+            },
+        });
+
+        try {
+            const firstRunPromise = runRunnableLinters(firstFilePath, diagnostics, output, statusBar, [
+                createRunnable(
+                    'slow-linter-first',
+                    firstStartedMarkerPath,
+                    firstTerminatedMarkerPath,
+                    firstCompletedMarkerPath
+                ),
+            ]);
+            const secondRunPromise = runRunnableLinters(secondFilePath, diagnostics, output, statusBar, [
+                createRunnable(
+                    'slow-linter-second',
+                    secondStartedMarkerPath,
+                    secondTerminatedMarkerPath,
+                    secondCompletedMarkerPath
+                ),
+            ]);
+
+            await Promise.all([
+                waitForFile(firstStartedMarkerPath, 5_000),
+                waitForFile(secondStartedMarkerPath, 5_000),
+            ]);
+
+            cancelAllFileRuns();
+
+            await Promise.race([
+                Promise.all([firstRunPromise, secondRunPromise]),
+                new Promise<never>((_, reject) => {
+                    setTimeout(() => {
+                        reject(new Error('Timed out waiting for cancelled linter runs to finish'));
+                    }, 3_000);
+                }),
+            ]);
+
+            assert.strictEqual(diagnostics.get(vscode.Uri.file(firstFilePath))?.length ?? 0, 0);
+            assert.strictEqual(diagnostics.get(vscode.Uri.file(secondFilePath))?.length ?? 0, 0);
+            await Promise.all([
+                fs.access(firstTerminatedMarkerPath),
+                fs.access(secondTerminatedMarkerPath),
+            ]);
+            await assert.rejects(fs.access(firstCompletedMarkerPath));
+            await assert.rejects(fs.access(secondCompletedMarkerPath));
+        } finally {
+            cancelAllFileRuns();
             diagnostics.dispose();
             output.dispose();
             statusBar.dispose();
