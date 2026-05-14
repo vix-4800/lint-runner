@@ -9,6 +9,7 @@ import {
     matchesIgnorePatterns,
     mergeConfiguredTargets,
     normalizeDiagnosticRanges,
+    isLintRunnerEnabled,
     parseLinterOutput,
     resolveConfiguredTargets,
     shouldProcessLinterFile,
@@ -230,6 +231,18 @@ suite('Linter Runner', () => {
 
         assert.strictEqual(shouldRunLinter(linter, 'manual'), false);
         assert.strictEqual(shouldRunLinter(linter, 'onSave'), false);
+    });
+
+    test('isLintRunnerEnabled defaults to true and accepts false', () => {
+        const defaultConfig: Pick<vscode.WorkspaceConfiguration, 'get'> = {
+            get: () => undefined,
+        };
+        const disabledConfig: Pick<vscode.WorkspaceConfiguration, 'get'> = {
+            get: () => false,
+        };
+
+        assert.strictEqual(isLintRunnerEnabled(defaultConfig), true);
+        assert.strictEqual(isLintRunnerEnabled(disabledConfig), false);
     });
 
     test('shouldProcessLinterFile allows files when no maxFileSize is set', () => {

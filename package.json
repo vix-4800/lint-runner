@@ -54,12 +54,17 @@
         "title": "LintRunner: Open Actions Menu"
       }
     ],
-    "configuration": {
-      "title": "LintRunner",
-      "properties": {
-        "lintRunner.debounceMs": {
-          "type": "number",
-          "default": 0,
+      "configuration": {
+        "title": "LintRunner",
+        "properties": {
+          "lintRunner.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable or disable the LintRunner extension and all of its commands, automatic runs, code actions, and CodeLens entries."
+          },
+          "lintRunner.debounceMs": {
+            "type": "number",
+            "default": 0,
           "minimum": 0,
           "description": "Delay in milliseconds before running linters and fixers after a file is saved. Useful when auto-save is enabled with a short interval. Set to 0 to disable debouncing."
         },

@@ -113,6 +113,12 @@ export function cancelFileRun(filePath: string): void {
     killFileProcesses(filePath);
 }
 
+export function cancelAllFileRuns(): void {
+    for (const filePath of [...activeRunIds.keys()]) {
+        cancelFileRun(filePath);
+    }
+}
+
 interface LinterCacheEntry {
     mtime: number;
     size: number;
@@ -247,6 +253,18 @@ export interface CommandResult {
 }
 
 export type RunnerOutput = Pick<vscode.OutputChannel, 'appendLine'>;
+
+type WorkspaceConfigLike = Pick<vscode.WorkspaceConfiguration, 'get'>;
+
+export function isLintRunnerEnabled(
+    resourceOrConfig: vscode.Uri | WorkspaceConfigLike = vscode.workspace.getConfiguration('lintRunner')
+): boolean {
+    const config =
+        resourceOrConfig instanceof vscode.Uri
+            ? vscode.workspace.getConfiguration('lintRunner', resourceOrConfig)
+            : resourceOrConfig;
+    return config.get<boolean>('enabled') !== false;
+}
 
 function globPatternToRegexBody(pattern: string): string {
     let result = '';
@@ -615,6 +633,9 @@ function getScopedTargets(filePath: string): TargetConfig[] {
 }
 
 function getConfiguredTargets(filePath: string): ResolvedTargetConfig[] {
+    if (!isLintRunnerEnabled(vscode.Uri.file(filePath))) {
+        return [];
+    }
     const targets = getScopedTargets(filePath);
     return resolveConfiguredTargets(targets);
 }
@@ -1288,7 +1309,10 @@ async function checkGitIgnore(filePath: string): Promise<boolean> {
 }
 
 async function shouldSkipFile(filePath: string): Promise<boolean> {
-    const config = vscode.workspace.getConfiguration('lintRunner');
+    const config = vscode.workspace.getConfiguration('lintRunner', vscode.Uri.file(filePath));
+    if (!isLintRunnerEnabled(config)) {
+        return true;
+    }
     const ignorePatterns = config.get<string[]>('ignorePatterns') ?? [];
     if (matchesIgnorePatterns(filePath, ignorePatterns)) {
         return true;

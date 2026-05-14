@@ -2,9 +2,11 @@ import * as crypto from 'crypto';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
+    cancelAllFileRuns,
     cancelFileRun,
     getRunnableFixers,
     getRunnableLinters,
+    isLintRunnerEnabled,
     runFixers,
     runLinters,
     runRunnableLinters,
@@ -86,6 +88,10 @@ export function isLoggingEnabled(
     return config.get<boolean>('enableLogging') !== false;
 }
 
+function shouldEnableOutputChannel(): boolean {
+    return isLintRunnerEnabled() && isLoggingEnabled();
+}
+
 export class OutputChannelManager implements RunnerOutput, vscode.Disposable {
     private output: OutputChannelLike | undefined;
 
@@ -129,6 +135,15 @@ export function clearPendingSaveDebounce(
 
     clearTimeout(existingTimer);
     timers.delete(fileName);
+}
+
+export function clearAllPendingSaveDebounces(
+    timers: Map<string, ReturnType<typeof setTimeout>> = saveDebounceTimers
+): void {
+    for (const timer of timers.values()) {
+        clearTimeout(timer);
+    }
+    timers.clear();
 }
 
 export function handleClosedDocument(
@@ -278,6 +293,15 @@ export function collectClosedFileTabUris(tabs: readonly OnOpenTab[]): vscode.Uri
 }
 
 function canRunWorkspaceCommands(showRepeatedWarning: boolean): boolean {
+    if (!isLintRunnerEnabled()) {
+        if (showRepeatedWarning) {
+            vscode.window.showWarningMessage(
+                'LintRunner: Extension is disabled. Set lintRunner.enabled to true to run commands.'
+            );
+        }
+        return false;
+    }
+
     if (vscode.workspace.isTrusted) {
         return true;
     }
@@ -318,9 +342,10 @@ async function selectManualFixers(fileName: string): Promise<readonly RunnableFi
 }
 
 export function getActionsStatusBarState(
-    editor: Pick<vscode.TextEditor, 'document'> | undefined = getActiveFileEditor()
+    editor: Pick<vscode.TextEditor, 'document'> | undefined = getActiveFileEditor(),
+    isEnabled: (resource: vscode.Uri) => boolean = isLintRunnerEnabled
 ): { text: string; tooltip: string } | undefined {
-    if (editor === undefined || !isUserOpenDocument(editor.document)) {
+    if (editor === undefined || !isUserOpenDocument(editor.document) || !isEnabled(editor.document.uri)) {
         return undefined;
     }
 
@@ -576,7 +601,7 @@ async function openActionsMenu(
 export function activate(context: vscode.ExtensionContext): void {
     const diagnostics = vscode.languages.createDiagnosticCollection('lintRunner');
     const output = new OutputChannelManager();
-    output.sync(isLoggingEnabled());
+    output.sync(shouldEnableOutputChannel());
     const runningStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
     runningStatusBar.name = 'LintRunner';
     const actionsStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -598,7 +623,11 @@ export function activate(context: vscode.ExtensionContext): void {
             onDidChangeCodeLenses: codeLensRefreshEmitter.event,
             provideCodeLenses(document) {
                 const config = vscode.workspace.getConfiguration('lintRunner', document.uri);
-                if (config.get<boolean>('enableCodeLens') !== true || !vscode.workspace.isTrusted) {
+                if (
+                    !isLintRunnerEnabled(config) ||
+                    config.get<boolean>('enableCodeLens') !== true ||
+                    !vscode.workspace.isTrusted
+                ) {
                     return [];
                 }
 
@@ -618,7 +647,11 @@ export function activate(context: vscode.ExtensionContext): void {
             {
                 provideCodeActions(document) {
                     const config = vscode.workspace.getConfiguration('lintRunner', document.uri);
-                    if (config.get<boolean>('enableCodeActions') !== true || !vscode.workspace.isTrusted) {
+                    if (
+                        !isLintRunnerEnabled(config) ||
+                        config.get<boolean>('enableCodeActions') !== true ||
+                        !vscode.workspace.isTrusted
+                    ) {
                         return [];
                     }
 
@@ -658,10 +691,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const debounceTimerDisposable: vscode.Disposable = {
         dispose() {
-            for (const t of saveDebounceTimers.values()) {
-                clearTimeout(t);
-            }
-            saveDebounceTimers.clear();
+            clearAllPendingSaveDebounces();
         },
     };
 
@@ -688,7 +718,7 @@ export function activate(context: vscode.ExtensionContext): void {
             }
 
             const debounceMs =
-                vscode.workspace.getConfiguration('lintRunner').get<number>('debounceMs') ?? 0;
+                vscode.workspace.getConfiguration('lintRunner', doc.uri).get<number>('debounceMs') ?? 0;
 
             const doRun = async (): Promise<void> => {
                 saveDebounceTimers.delete(doc.fileName);
@@ -741,7 +771,11 @@ export function activate(context: vscode.ExtensionContext): void {
             if (event.affectsConfiguration('lintRunner')) {
                 resetCommandEnv();
                 clearDiagnosticsCache();
-                output.sync(isLoggingEnabled());
+                clearAllPendingSaveDebounces();
+                cancelAllFileRuns();
+                diagnostics.clear();
+                runningStatusBar.hide();
+                output.sync(shouldEnableOutputChannel());
                 updateActionsStatusBar(actionsStatusBar);
                 codeLensRefreshEmitter.fire();
             }
@@ -820,6 +854,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('lintRunner.clearDiagnostics', () => {
+            if (!canRunWorkspaceCommands(true)) {
+                return;
+            }
             const editor = getActiveFileEditor();
             if (editor !== undefined) {
                 diagnostics.delete(editor.document.uri);
