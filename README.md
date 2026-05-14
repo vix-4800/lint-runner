@@ -9,6 +9,7 @@ VS Code extension for running external CLI linters and reporting found issues in
 - run linters when a file is opened;
 - run linters when a file is saved;
 - run auto-fixers when a file is saved;
+- globally enable or disable the extension;
 - optionally show separate source code actions for manual linters and fixers;
 - optionally show separate top-of-file CodeLens entries for manual linters and fixers;
 - clear diagnostics for the active file (or all files) via `LintRunner: Clear Diagnostics`;
@@ -27,6 +28,14 @@ VS Code extension for running external CLI linters and reporting found issues in
 Configuration is stored in `settings.json`:
 
 Real-world target examples: [docs/examples.md](docs/examples.md).
+
+## Global Enable Switch
+
+### `lintRunner.enabled`
+
+Set `lintRunner.enabled` to `false` to disable the extension and all of its features. When disabled, LintRunner
+does not run linters or fixers automatically, manual commands are blocked, Code Actions and CodeLens entries are
+hidden, and related UI state is cleared.
 
 ## Target Config
 

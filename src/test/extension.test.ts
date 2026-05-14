@@ -227,6 +227,18 @@ suite('Extension Test Suite', () => {
         });
     });
 
+    test('getActionsStatusBarState returns undefined when the extension is disabled', () => {
+        const fileUri = vscode.Uri.file('/tmp/lint-runner-status-disabled.ts');
+
+        assert.strictEqual(getActionsStatusBarState({
+            document: {
+                fileName: fileUri.fsPath,
+                isUntitled: false,
+                uri: fileUri,
+            } as Pick<vscode.TextDocument, 'fileName' | 'isUntitled' | 'uri'>,
+        } as Pick<vscode.TextEditor, 'document'>, () => false), undefined);
+    });
+
     test('isLoggingEnabled defaults to true and accepts false', () => {
         const defaultConfig: Pick<vscode.WorkspaceConfiguration, 'get'> = {
             get: () => undefined,
