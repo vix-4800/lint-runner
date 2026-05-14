@@ -254,10 +254,10 @@ export interface CommandResult {
 
 export type RunnerOutput = Pick<vscode.OutputChannel, 'appendLine'>;
 
-type EnabledConfig = Pick<vscode.WorkspaceConfiguration, 'get'>;
+type WorkspaceConfigLike = Pick<vscode.WorkspaceConfiguration, 'get'>;
 
 export function isLintRunnerEnabled(
-    resourceOrConfig: vscode.Uri | EnabledConfig = vscode.workspace.getConfiguration('lintRunner')
+    resourceOrConfig: vscode.Uri | WorkspaceConfigLike = vscode.workspace.getConfiguration('lintRunner')
 ): boolean {
     const config =
         resourceOrConfig instanceof vscode.Uri

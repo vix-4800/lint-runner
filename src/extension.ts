@@ -296,7 +296,7 @@ function canRunWorkspaceCommands(showRepeatedWarning: boolean): boolean {
     if (!isLintRunnerEnabled()) {
         if (showRepeatedWarning) {
             vscode.window.showWarningMessage(
-                'LintRunner: Extension is disabled. Enable lintRunner.enabled to run commands.'
+                'LintRunner: Extension is disabled. Set lintRunner.enabled to true to run commands.'
             );
         }
         return false;
