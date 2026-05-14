@@ -18,6 +18,7 @@ import {
     isManualCodeActionLinter,
     isContentChanged,
     OutputChannelManager,
+    runManualFixersForEditor,
 } from '../extension.js';
 import type { ResolvedTargetConfig, RunnableFixer, RunnableLinter } from '../linterRunner.js';
 
@@ -474,5 +475,71 @@ suite('Extension Test Suite', () => {
         assert.strictEqual(codeLenses[0].range.start.character, 0);
         assert.strictEqual(codeLenses[1].range.start.line, 0);
         assert.strictEqual(codeLenses[1].range.start.character, 0);
+    });
+
+    test('runManualFixersForEditor refreshes only automatic linters after manual fixers', async () => {
+        const fileUri = vscode.Uri.file('/tmp/lint-runner-manual-fixer.ts');
+        const fixer = createTestRunnableFixer('php-cs-fixer', 'php', 'manual');
+        const calls: string[] = [];
+        const diagnostics = {
+            delete() {
+                // no-op
+            },
+            set() {
+                // no-op
+            },
+        } as unknown as vscode.DiagnosticCollection;
+        const output = {
+            appendLine() {
+                // no-op
+            },
+        };
+        const statusBar = {
+            hide() {
+                // no-op
+            },
+            show() {
+                // no-op
+            },
+            text: '',
+            tooltip: '',
+            name: '',
+        } as unknown as vscode.StatusBarItem;
+
+        await runManualFixersForEditor(
+            {
+                document: {
+                    fileName: fileUri.fsPath,
+                    uri: fileUri,
+                } as Pick<vscode.TextDocument, 'fileName' | 'uri'> as vscode.TextDocument,
+            } as vscode.TextEditor,
+            diagnostics,
+            output,
+            statusBar,
+            [fixer],
+            {
+                saveDocumentBeforeManualFixers: async () => {
+                    calls.push('save');
+                    return true;
+                },
+                runFixers: async (filePath, _output, _statusBar, trigger, selectedFixers) => {
+                    calls.push(`fix:${filePath}:${trigger}:${selectedFixers.map((item) => item.label).join(',')}`);
+                    return selectedFixers.length;
+                },
+                runLinters: async (filePath, trigger) => {
+                    calls.push(`lint:${filePath}:${trigger}`);
+                },
+                showWarningMessage: async (message) => {
+                    calls.push(`warn:${message}`);
+                    return undefined;
+                },
+            }
+        );
+
+        assert.deepStrictEqual(calls, [
+            'save',
+            `fix:${fileUri.fsPath}:manual:php-cs-fixer`,
+            `lint:${fileUri.fsPath}:onSave`,
+        ]);
     });
 });

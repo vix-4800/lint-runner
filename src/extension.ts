@@ -56,6 +56,26 @@ interface ActionQuickPickItem extends vscode.QuickPickItem {
     action?: () => Promise<void>;
 }
 
+interface ManualFixerRunnerDeps {
+    saveDocumentBeforeManualFixers?: (document: vscode.TextDocument) => Promise<boolean>;
+    selectManualFixers?: (fileName: string) => Promise<readonly RunnableFixer[] | undefined>;
+    runFixers?: (
+        filePath: string,
+        output: RunnerOutput,
+        statusBar: vscode.StatusBarItem,
+        trigger: 'manual',
+        fixers: readonly RunnableFixer[]
+    ) => Promise<number>;
+    runLinters?: (
+        filePath: string,
+        trigger: 'onSave',
+        diagnostics: vscode.DiagnosticCollection,
+        output: RunnerOutput,
+        statusBar: vscode.StatusBarItem
+    ) => Promise<void>;
+    showWarningMessage?: (message: string) => Thenable<string | undefined>;
+}
+
 const manualCodeActionKind = vscode.CodeActionKind.Source.append('lintRunner.manual');
 const manualLinterCodeActionKind = manualCodeActionKind.append('linter');
 const manualFixerCodeActionKind = manualCodeActionKind.append('fixer');
@@ -415,40 +435,46 @@ export function createManualCodeLenses(
     return codeLenses;
 }
 
-async function runManualFixersForEditor(
+export async function runManualFixersForEditor(
     editorOrUri: vscode.TextEditor | vscode.Uri,
     diagnostics: vscode.DiagnosticCollection,
     output: RunnerOutput,
     statusBar: vscode.StatusBarItem,
-    fixers?: readonly RunnableFixer[]
+    fixers?: readonly RunnableFixer[],
+    deps: ManualFixerRunnerDeps = {}
 ): Promise<void> {
+    const saveDocument = deps.saveDocumentBeforeManualFixers ?? saveDocumentBeforeManualFixers;
+    const selectFixers = deps.selectManualFixers ?? selectManualFixers;
+    const runSelectedFixers = deps.runFixers ?? runFixers;
+    const refreshLinters = deps.runLinters ?? runLinters;
+    const showWarningMessage = deps.showWarningMessage ?? vscode.window.showWarningMessage;
     const documentUri = editorOrUri instanceof vscode.Uri ? editorOrUri : editorOrUri.document.uri;
     const editor = editorOrUri instanceof vscode.Uri ? findVisibleFileEditor(documentUri) : editorOrUri;
     if (editor === undefined) {
-        vscode.window.showWarningMessage('LintRunner: No visible file editor for fixer action.');
+        await showWarningMessage('LintRunner: No visible file editor for fixer action.');
         return;
     }
 
     const document = editor.document;
     const fileName = document.fileName;
 
-    const saved = await saveDocumentBeforeManualFixers(document);
+    const saved = await saveDocument(document);
     if (!saved) {
-        vscode.window.showWarningMessage('LintRunner: File was not saved.');
+        await showWarningMessage('LintRunner: File was not saved.');
         return;
     }
 
-    const selectedFixers = fixers ?? (await selectManualFixers(fileName));
+    const selectedFixers = fixers ?? (await selectFixers(fileName));
     if (selectedFixers === undefined) {
         return;
     }
     if (selectedFixers.length === 0) {
-        vscode.window.showWarningMessage('LintRunner: No matching fix command.');
+        await showWarningMessage('LintRunner: No matching fix command.');
         return;
     }
 
-    await runFixers(fileName, output, statusBar, 'manual', selectedFixers);
-    runLinters(fileName, 'manual', diagnostics, output, statusBar);
+    await runSelectedFixers(fileName, output, statusBar, 'manual', selectedFixers);
+    await refreshLinters(fileName, 'onSave', diagnostics, output, statusBar);
 }
 
 async function openActionsMenu(
