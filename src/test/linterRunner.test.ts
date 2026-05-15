@@ -296,7 +296,10 @@ suite('Linter Runner Test Suite', () => {
             await waitForFile(startedMarkerPath, 5_000);
 
             assert.strictEqual(statusBar.text, '$(sync~spin) LintRunner: PHP:fix:php-cs-fixer');
-            assert.strictEqual(statusBar.tooltip, 'Running linters: PHP:fix:php-cs-fixer');
+            assert.strictEqual(
+                statusBar.tooltip,
+                'Running tools: PHP:fix:php-cs-fixer\nClick to stop all running tools.'
+            );
             assert.strictEqual(shown, true);
 
             await fs.writeFile(releaseMarkerPath, 'release');
@@ -306,6 +309,97 @@ suite('Linter Runner Test Suite', () => {
             assert.strictEqual(shown, false);
         } finally {
             output.dispose();
+            await fs.rm(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    test('cancelFileRun stops active fixer processes and prevents later fixers from starting', async function () {
+        this.timeout(10_000);
+
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-cancel-fixer-'));
+        const filePath = path.join(tmpDir, 'test.ts');
+        const slowScriptPath = path.join(tmpDir, 'slow-fixer.js');
+        const quickScriptPath = path.join(tmpDir, 'quick-fixer.js');
+        const startedMarkerPath = path.join(tmpDir, 'started.txt');
+        const terminatedMarkerPath = path.join(tmpDir, 'terminated.txt');
+        const completedMarkerPath = path.join(tmpDir, 'completed.txt');
+        const secondStartedMarkerPath = path.join(tmpDir, 'second-started.txt');
+        await fs.writeFile(filePath, 'const value = 1;\n');
+        await fs.writeFile(
+            slowScriptPath,
+            [
+                "const fs = require('node:fs');",
+                'const [startedMarkerPath, terminatedMarkerPath, completedMarkerPath] = process.argv.slice(2);',
+                "fs.writeFileSync(startedMarkerPath, 'started');",
+                "process.on('SIGTERM', () => {",
+                "    fs.writeFileSync(terminatedMarkerPath, 'terminated');",
+                '    process.exit(0);',
+                '});',
+                'setTimeout(() => {',
+                "    fs.writeFileSync(completedMarkerPath, 'completed');",
+                '    process.exit(0);',
+                `}, ${SLOW_LINTER_TIMEOUT_MS});`,
+                '',
+            ].join('\n')
+        );
+        await fs.writeFile(
+            quickScriptPath,
+            [
+                "const fs = require('node:fs');",
+                'const [secondStartedMarkerPath] = process.argv.slice(2);',
+                "fs.writeFileSync(secondStartedMarkerPath, 'started');",
+                'process.exit(0);',
+                '',
+            ].join('\n')
+        );
+
+        const output = vscode.window.createOutputChannel('LintRunner Cancel Fixer Test');
+        const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+        const slowFixer: RunnableFixer = {
+            label: 'slow-fixer',
+            description: 'PHP',
+            detail: process.execPath,
+            targetName: 'PHP',
+            fixer: {
+                name: 'slow-fixer',
+                command: process.execPath,
+                args: [slowScriptPath, startedMarkerPath, terminatedMarkerPath, completedMarkerPath],
+            },
+        };
+        const quickFixer: RunnableFixer = {
+            label: 'quick-fixer',
+            description: 'PHP',
+            detail: process.execPath,
+            targetName: 'PHP',
+            fixer: {
+                name: 'quick-fixer',
+                command: process.execPath,
+                args: [quickScriptPath, secondStartedMarkerPath],
+            },
+        };
+
+        try {
+            const runPromise = runFixers(filePath, output, statusBar, 'manual', [slowFixer, quickFixer]);
+            await waitForFile(startedMarkerPath, 5_000);
+
+            cancelFileRun(filePath);
+
+            await Promise.race([
+                runPromise,
+                new Promise<never>((_, reject) => {
+                    setTimeout(() => {
+                        reject(new Error('Timed out waiting for cancelled fixer run to finish'));
+                    }, 3_000);
+                }),
+            ]);
+
+            await fs.access(terminatedMarkerPath);
+            await assert.rejects(fs.access(completedMarkerPath));
+            await assert.rejects(fs.access(secondStartedMarkerPath));
+        } finally {
+            cancelFileRun(filePath);
+            output.dispose();
+            statusBar.dispose();
             await fs.rm(tmpDir, { recursive: true, force: true });
         }
     });

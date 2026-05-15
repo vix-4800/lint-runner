@@ -12,13 +12,16 @@ import {
     createManualCodeActions,
     createManualCodeLenses,
     getActionsStatusBarState,
+    getManualRunNotificationTitle,
     handleClosedFileUri,
     handleClosedDocument,
     isLoggingEnabled,
+    isManualRunNotificationEnabled,
     isManualCodeActionFixer,
     isManualCodeActionLinter,
     isContentChanged,
     OutputChannelManager,
+    runManualTaskWithNotification,
     runManualFixersForEditor,
 } from '../extension.js';
 import type { ResolvedTargetConfig, RunnableFixer, RunnableLinter } from '../linterRunner.js';
@@ -250,6 +253,96 @@ suite('Extension Test Suite', () => {
 
         assert.strictEqual(isLoggingEnabled(defaultConfig), true);
         assert.strictEqual(isLoggingEnabled(disabledConfig), false);
+    });
+
+    test('isManualRunNotificationEnabled defaults to true and accepts false', () => {
+        const defaultConfig: Pick<vscode.WorkspaceConfiguration, 'get'> = {
+            get: () => undefined,
+        };
+        const disabledConfig: Pick<vscode.WorkspaceConfiguration, 'get'> = {
+            get: () => false,
+        };
+
+        assert.strictEqual(isManualRunNotificationEnabled(defaultConfig), true);
+        assert.strictEqual(isManualRunNotificationEnabled(disabledConfig), false);
+    });
+
+    test('getManualRunNotificationTitle includes running tool names', () => {
+        assert.strictEqual(
+            getManualRunNotificationTitle(['PHP:phpstan']),
+            'LintRunner: Running PHP:phpstan…'
+        );
+        assert.strictEqual(
+            getManualRunNotificationTitle(['PHP:phpstan', 'PHP:php-cs-fixer', 'JS:eslint']),
+            'LintRunner: Running PHP:phpstan, PHP:php-cs-fixer, +1 more…'
+        );
+    });
+
+    test('runManualTaskWithNotification shows cancellable progress and stops the file run on cancel', async () => {
+        const filePath = '/tmp/lint-runner-notification.ts';
+        let cancelledFilePath: string | undefined;
+        let cancellationListener: (() => void) | undefined;
+        let progressOptions: vscode.ProgressOptions | undefined;
+        let taskRun = false;
+
+        const result = await runManualTaskWithNotification(
+            filePath,
+            ['PHP:phpstan'],
+            async () => {
+                taskRun = true;
+                cancellationListener?.();
+                return 7;
+            },
+            {
+                isEnabled: () => true,
+                withProgress: async (options, task) => {
+                    progressOptions = options;
+                    return task(
+                        { report() {
+                            // no-op
+                        } },
+                        {
+                            isCancellationRequested: false,
+                            onCancellationRequested(listener: () => void) {
+                                cancellationListener = listener;
+                                return { dispose() {
+                                    // no-op
+                                } };
+                            },
+                        } as vscode.CancellationToken
+                    );
+                },
+                onCancel: (currentFilePath) => {
+                    cancelledFilePath = currentFilePath;
+                },
+            }
+        );
+
+        assert.strictEqual(result, 7);
+        assert.strictEqual(taskRun, true);
+        assert.strictEqual(progressOptions?.cancellable, true);
+        assert.strictEqual(progressOptions?.title, 'LintRunner: Running PHP:phpstan…');
+        assert.strictEqual(cancelledFilePath, filePath);
+    });
+
+    test('runManualTaskWithNotification skips progress when notifications are disabled', async () => {
+        let withProgressCalled = false;
+
+        const result = await runManualTaskWithNotification(
+            '/tmp/lint-runner-notification-disabled.ts',
+            ['PHP:phpstan'],
+            async () => 11,
+            {
+                isEnabled: () => false,
+                withProgress: (async () => {
+                    withProgressCalled = true;
+                    return 0;
+                }) as typeof vscode.window.withProgress,
+            }
+        );
+
+        assert.strictEqual(result, 11);
+        assert.strictEqual(withProgressCalled, false);
     });
 
     test('OutputChannelManager creates, forwards, and disposes the output channel based on setting', () => {
@@ -553,6 +646,10 @@ suite('Extension Test Suite', () => {
                     calls.push('save');
                     return true;
                 },
+                runWithManualNotification: async (filePath, labels, task) => {
+                    calls.push(`notify:${filePath}:${labels.join(',')}`);
+                    return task();
+                },
                 runFixers: async (filePath, _output, _statusBar, trigger, selectedFixers) => {
                     calls.push(`fix:${filePath}:${trigger}:${selectedFixers.map((item) => item.label).join(',')}`);
                     return selectedFixers.length;
@@ -569,6 +666,7 @@ suite('Extension Test Suite', () => {
 
         assert.deepStrictEqual(calls, [
             'save',
+            `notify:${fileUri.fsPath}:PHP:fix:php-cs-fixer`,
             `fix:${fileUri.fsPath}:manual:php-cs-fixer`,
             `lint:${fileUri.fsPath}:onSave`,
         ]);
