@@ -85,6 +85,12 @@
           "scope": "resource",
           "description": "Show one CodeLens per manual linter and manual fixer at the top of matching files. Linters/fixers that already run on open or save are not listed."
         },
+        "lintRunner.showManualRunNotifications": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "Show a cancellable notification for manual linter and fixer runs. Automatic runs on open or save never show this notification."
+        },
         "lintRunner.ignorePatterns": {
           "type": "array",
           "default": [],

@@ -829,7 +829,7 @@ function updateStatusBar(statusBar: vscode.StatusBarItem): void {
     }
 
     statusBar.text = `$(sync~spin) LintRunner: ${names.join(', ')}`;
-    statusBar.tooltip = `Running linters: ${names.join(', ')}`;
+    statusBar.tooltip = `Running tools: ${names.join(', ')}\nClick to stop all running tools.`;
     statusBar.show();
 }
 
@@ -1204,17 +1204,27 @@ async function runTargetFixer(
     fixer: FixerConfig,
     filePath: string,
     output: RunnerOutput,
-    statusBar: vscode.StatusBarItem
-): Promise<void> {
+    statusBar: vscode.StatusBarItem,
+    shouldContinue: () => boolean = () => true
+): Promise<boolean> {
+    if (!shouldContinue()) {
+        return false;
+    }
+
     const fixerName = fixer.name ?? fixer.command;
     const label = `${targetName}:fix:${fixerName}`;
     const statusName = label;
     startLinterStatus(statusName, statusBar);
     try {
-        const result = await runCommand(label, fixer, filePath, output);
+        const result = await runCommand(label, fixer, filePath, output, shouldContinue);
+        if (!shouldContinue()) {
+            return false;
+        }
         logCommandResult(label, result, output);
+        return true;
     } catch (err) {
         output.appendLine(`[${label}] failed: ${String(err)}`);
+        return true;
     } finally {
         stopLinterStatus(statusName, statusBar);
     }
@@ -1367,9 +1377,10 @@ async function runRunnableFixer(
     fixer: RunnableFixer,
     filePath: string,
     output: RunnerOutput,
-    statusBar: vscode.StatusBarItem
-): Promise<void> {
-    await runTargetFixer(fixer.targetName, fixer.fixer, filePath, output, statusBar);
+    statusBar: vscode.StatusBarItem,
+    shouldContinue: () => boolean = () => true
+): Promise<boolean> {
+    return runTargetFixer(fixer.targetName, fixer.fixer, filePath, output, statusBar, shouldContinue);
 }
 
 export async function runLinters(
@@ -1441,18 +1452,31 @@ export async function runFixers(
     trigger: FixerRunMode = 'manual',
     fixers: readonly RunnableFixer[] = getRunnableFixers(filePath, trigger)
 ): Promise<number> {
-    if (await shouldSkipFile(filePath)) {
-        return 0;
+    const runId = startFileRun(filePath);
+    const shouldContinue = (): boolean => isActiveFileRun(filePath, runId);
+
+    try {
+        if (await shouldSkipFile(filePath)) {
+            return 0;
+        }
+
+        let fixersRun = 0;
+
+        for (const fixer of fixers) {
+            if (!shouldContinue()) {
+                break;
+            }
+            const completed = await runRunnableFixer(fixer, filePath, output, statusBar, shouldContinue);
+            if (!completed) {
+                break;
+            }
+            fixersRun++;
+        }
+
+        return fixersRun;
+    } finally {
+        finishFileRun(filePath, runId);
     }
-
-    let fixersRun = 0;
-
-    for (const fixer of fixers) {
-        fixersRun++;
-        await runRunnableFixer(fixer, filePath, output, statusBar);
-    }
-
-    return fixersRun;
 }
 
 export async function runRunnableLinters(
