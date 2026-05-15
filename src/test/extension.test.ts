@@ -298,14 +298,14 @@ suite('Extension Test Suite', () => {
                 withProgress: async (options, task) => {
                     progressOptions = options;
                     return task(
-                        { report() {
+                        { report: () => {
                             // no-op
                         } },
                         {
                             isCancellationRequested: false,
                             onCancellationRequested(listener: () => void) {
                                 cancellationListener = listener;
-                                return { dispose() {
+                                return { dispose: () => {
                                     // no-op
                                 } };
                             },
