@@ -603,7 +603,7 @@ suite('Extension Test Suite', () => {
 
     test('runManualFixersForEditor refreshes only automatic linters after manual fixers', async () => {
         const fileUri = vscode.Uri.file('/tmp/lint-runner-manual-fixer.ts');
-        const fixer = createTestRunnableFixer('php-cs-fixer', 'php', 'manual');
+        const fixer = createTestRunnableFixer('php-cs-fixer', 'PHP', 'manual');
         const calls: string[] = [];
         const diagnostics = {
             delete() {
