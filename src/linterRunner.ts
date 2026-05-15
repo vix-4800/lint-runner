@@ -1208,7 +1208,7 @@ async function runTargetFixer(
 ): Promise<void> {
     const fixerName = fixer.name ?? fixer.command;
     const label = `${targetName}:fix:${fixerName}`;
-    const statusName = `${targetName}:fix`;
+    const statusName = label;
     startLinterStatus(statusName, statusBar);
     try {
         const result = await runCommand(label, fixer, filePath, output);

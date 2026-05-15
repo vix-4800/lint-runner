@@ -6,7 +6,9 @@ import * as vscode from 'vscode';
 import {
     cancelAllFileRuns,
     cancelFileRun,
+    runFixers,
     runRunnableLinters,
+    type RunnableFixer,
     type ResolvedTargetConfig,
     type RunnableLinter,
 } from '../linterRunner.js';
@@ -233,6 +235,77 @@ suite('Linter Runner Test Suite', () => {
             diagnostics.dispose();
             output.dispose();
             statusBar.dispose();
+            await fs.rm(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    test('runFixers shows the active fixer name in the status bar', async function () {
+        this.timeout(10_000);
+
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-fixer-status-'));
+        const filePath = path.join(tmpDir, 'test.ts');
+        const scriptPath = path.join(tmpDir, 'wait-for-release.js');
+        const startedMarkerPath = path.join(tmpDir, 'started.txt');
+        const releaseMarkerPath = path.join(tmpDir, 'release.txt');
+        await fs.writeFile(filePath, 'const value = 1;\n');
+        await fs.writeFile(
+            scriptPath,
+            [
+                "const fs = require('node:fs');",
+                "const [startedMarkerPath, releaseMarkerPath] = process.argv.slice(2);",
+                "fs.writeFileSync(startedMarkerPath, 'started');",
+                'const timer = setInterval(() => {',
+                '    if (!fs.existsSync(releaseMarkerPath)) {',
+                '        return;',
+                '    }',
+                '    clearInterval(timer);',
+                '    process.exit(0);',
+                '}, 25);',
+                '',
+            ].join('\n')
+        );
+
+        const output = vscode.window.createOutputChannel('LintRunner Fixer Status Test');
+        let shown = false;
+        const statusBar = {
+            hide() {
+                shown = false;
+            },
+            show() {
+                shown = true;
+            },
+            text: '',
+            tooltip: '',
+            name: '',
+        } as unknown as vscode.StatusBarItem;
+        const fixer: RunnableFixer = {
+            label: 'php-cs-fixer',
+            description: 'PHP',
+            detail: process.execPath,
+            targetName: 'PHP',
+            fixer: {
+                name: 'php-cs-fixer',
+                command: process.execPath,
+                args: [scriptPath, startedMarkerPath, releaseMarkerPath],
+            },
+        };
+
+        try {
+            const runPromise = runFixers(filePath, output, statusBar, 'manual', [fixer]);
+
+            await waitForFile(startedMarkerPath, 5_000);
+
+            assert.strictEqual(statusBar.text, '$(sync~spin) LintRunner: PHP:fix:php-cs-fixer');
+            assert.strictEqual(statusBar.tooltip, 'Running linters: PHP:fix:php-cs-fixer');
+            assert.strictEqual(shown, true);
+
+            await fs.writeFile(releaseMarkerPath, 'release');
+            const fixersRun = await runPromise;
+
+            assert.strictEqual(fixersRun, 1);
+            assert.strictEqual(shown, false);
+        } finally {
+            output.dispose();
             await fs.rm(tmpDir, { recursive: true, force: true });
         }
     });
