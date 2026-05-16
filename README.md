@@ -15,7 +15,7 @@ VS Code extension for running external CLI linters and reporting found issues in
 - optionally show separate top-of-file CodeLens entries for manual linters and fixers;
 - optionally show cancellable notifications for manual linter and fixer runs;
 - clear diagnostics for the active file (or all files) via `LintRunner: Clear Diagnostics`;
-- match targets by VS Code language id, with optional glob-based narrowing;
+- match targets by VS Code language id or `*`, with optional glob-based narrowing;
 - select linters by file glob patterns;
 - substitute command variables in commands and arguments;
 - support `~` in command and argument paths;
@@ -45,12 +45,13 @@ related UI state is cleared.
 `lintRunner.targets` groups a shared file set and commands that should run for those files. The setting is
 resource-scoped: user, workspace, and folder values are merged by target `name`. If a lower-scope target has the same
 `name`, only the fields you specify there are replaced; omitted fields are inherited from the higher scope. A target
-must match the file's VS Code language id via `languages`. `filePatterns` is optional and further narrows the match.
+must match the file's VS Code language id via `languages`. Use `["*"]` to match all detected languages. `filePatterns`
+is optional and further narrows the match.
 
 | Field          | Type                               | Required | Description                                                                                                    |
 | -------------- | ---------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------- |
 | `name`         | `string`                           | yes      | Target name in LintRunner output.                                                                              |
-| `languages`    | `string[]`                         | yes      | VS Code language ids this target applies to.                                                                   |
+| `languages`    | `string[]`                         | yes      | VS Code language ids this target applies to. Use `["*"]` to match all detected language ids.                   |
 | `filePatterns` | `string[]`                         | no       | Optional glob patterns that further narrow matching files.                                                     |
 | `run`          | `"onOpen" \| "onSave" \| "manual"` | no       | Default run mode for linters. Defaults to `onSave`. `onOpen` also runs on save.                                |
 | `preCommands`  | `CommandConfig[]`                  | no       | Commands executed once before target linters.                                                                  |

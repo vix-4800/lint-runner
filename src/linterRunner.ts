@@ -409,13 +409,20 @@ function getDocumentLanguageId(filePath: string): string | undefined {
     )?.languageId;
 }
 
+function matchesLanguageId(targetLanguages: readonly string[], languageId: string | undefined): boolean {
+    return (
+        languageId !== undefined &&
+        (targetLanguages.includes('*') || targetLanguages.includes(languageId))
+    );
+}
+
 function matchesTarget(filePath: string, target: ResolvedTargetConfig): boolean {
     // Language is always required.
     if (target.languages.length === 0) {
         return false;
     }
     const languageId = getDocumentLanguageId(filePath);
-    if (languageId === undefined || !target.languages.includes(languageId)) {
+    if (!matchesLanguageId(target.languages, languageId)) {
         return false;
     }
     // filePatterns is an optional additional filter on top of the language match.
