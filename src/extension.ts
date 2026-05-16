@@ -12,6 +12,8 @@ import {
     resetCommandEnv,
     clearDiagnosticsCache,
     clearFileLinterDiagnostics,
+    clearAllFileLinterDiagnostics,
+    clearFileDiagnosticsCache,
     type RunnerOutput,
     type RunnableFixer,
     type RunnableLinter,
@@ -951,9 +953,14 @@ export function activate(context: vscode.ExtensionContext): void {
             }
             const editor = getActiveFileEditor();
             if (editor !== undefined) {
-                diagnostics.delete(editor.document.uri);
+                const uri = editor.document.uri;
+                diagnostics.delete(uri);
+                clearFileLinterDiagnostics(uri.toString());
+                clearFileDiagnosticsCache(uri.fsPath);
             } else {
                 diagnostics.clear();
+                clearAllFileLinterDiagnostics();
+                clearDiagnosticsCache();
             }
         })
     );

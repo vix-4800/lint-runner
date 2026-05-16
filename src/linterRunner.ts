@@ -43,6 +43,10 @@ export function clearFileLinterDiagnostics(uriString: string): void {
     fileLinterDiagnostics.delete(uriString);
 }
 
+export function clearAllFileLinterDiagnostics(): void {
+    fileLinterDiagnostics.clear();
+}
+
 const activeFileProcesses = new Map<string, Set<cp.ChildProcess>>();
 
 function registerProcess(filePath: string, proc: cp.ChildProcess): void {
@@ -132,6 +136,15 @@ function linterCacheKey(filePath: string, linterName: string): string {
 
 export function clearDiagnosticsCache(): void {
     linterDiagnosticsCache.clear();
+}
+
+export function clearFileDiagnosticsCache(filePath: string): void {
+    const prefix = `${filePath}\x00`;
+    for (const key of linterDiagnosticsCache.keys()) {
+        if (key.startsWith(prefix)) {
+            linterDiagnosticsCache.delete(key);
+        }
+    }
 }
 
 const SHELL_ENV_TIMEOUT_MS = 3000;
