@@ -437,7 +437,7 @@ export function getActionsStatusBarState(
     return {
         text: '$(wrench)',
         tooltip:
-            `LintRunner: ${linters.length} linter(s), ${fixers.length} fixer(s) for ${editor.document.fileName}`,
+            `LintRunner: ${linters.length} linter(s), ${fixers.length} fixer(s) for ${vscode.workspace.asRelativePath(editor.document.fileName)}`,
     };
 }
 
