@@ -470,6 +470,54 @@ suite('Linter Runner', () => {
         );
     });
 
+    test('languages: [*] matches any opened file language for linters and fixers', async () => {
+        const phpFilePath = path.resolve(__dirname, '../../lint-test/test.php');
+        const tsFilePath = path.resolve(__dirname, '../../lint-test/test.ts');
+        await vscode.workspace.openTextDocument(phpFilePath);
+        await vscode.workspace.openTextDocument(tsFilePath);
+
+        const targets = resolveConfiguredTargets([
+            {
+                name: 'All languages',
+                languages: ['*'],
+                linters: [
+                    {
+                        name: 'Universal linter',
+                        command: 'lint',
+                        args: ['${file}'],
+                        parser: TEST_REGEX_PARSER,
+                    },
+                ],
+                fixers: [
+                    {
+                        name: 'Universal fixer',
+                        command: 'fix',
+                        args: ['${file}'],
+                    },
+                ],
+            },
+        ]);
+
+        assert.strictEqual(
+            collectRunnableLinters(targets, phpFilePath, 'manual').length,
+            1,
+            'languages: [*] should match a PHP file'
+        );
+        assert.strictEqual(
+            collectRunnableLinters(targets, tsFilePath, 'manual').length,
+            1,
+            'languages: [*] should match a TypeScript file'
+        );
+        assert.deepStrictEqual(
+            collectRunnableFixers(targets, phpFilePath, 'manual').map((fixer) => fixer.label),
+            ['Universal fixer']
+        );
+        assert.deepStrictEqual(
+            collectRunnableFixers(targets, tsFilePath, 'manual').map((fixer) => fixer.label),
+            ['Universal fixer']
+        );
+    });
+
     test('filePatterns filters further on top of language match', async () => {
         const phpFilePath = path.resolve(__dirname, '../../lint-test/test.php');
         await vscode.workspace.openTextDocument(phpFilePath);

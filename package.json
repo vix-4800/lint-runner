@@ -112,7 +112,7 @@
           "type": "array",
           "default": [],
           "scope": "resource",
-          "markdownDescription": "Target-first configurations merged by `name` across user, workspace, and folder settings. Folder-level entries can override only selected target, linter, or fixer fields while inheriting the rest from higher scopes. New targets still need `languages`; partial entries are only valid when they match an existing target name from a higher scope.",
+          "markdownDescription": "Target-first configurations merged by `name` across user, workspace, and folder settings. Folder-level entries can override only selected target, linter, or fixer fields while inheriting the rest from higher scopes. New targets still need `languages`; partial entries are only valid when they match an existing target name from a higher scope. Use `languages: [\"*\"]` to match any detected VS Code language ID.",
           "items": {
             "type": "object",
             "required": [
@@ -136,7 +136,7 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "VS Code language identifiers this target applies to (e.g. `[\"php\", \"javascript\"]`). Required when defining a new target. The file's language ID must match. Use `filePatterns` for additional narrowing."
+                "description": "VS Code language identifiers this target applies to (e.g. `[\"php\", \"javascript\"]`). Required when defining a new target. The file's language ID must match. Use `[\"*\"]` to match any detected language ID, and `filePatterns` for additional narrowing."
               },
               "run": {
                 "type": "string",
