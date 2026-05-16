@@ -470,7 +470,7 @@ suite('Linter Runner', () => {
         );
     });
 
-    test('languages: [*] matches any opened file language for linters and fixers', async () => {
+    test('languages: ["*"] matches any opened file language for linters and fixers', async () => {
         const phpFilePath = path.resolve(__dirname, '../../lint-test/test.php');
         const tsFilePath = path.resolve(__dirname, '../../lint-test/test.ts');
         await vscode.workspace.openTextDocument(phpFilePath);
