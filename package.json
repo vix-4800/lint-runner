@@ -106,7 +106,7 @@
         "lintRunner.respectGitignore": {
           "type": "boolean",
           "default": false,
-          "description": "Skip files ignored by .gitignore. Requires git to be available on PATH. The workspace root is used as the working directory for git check-ignore."
+          "description": "Skip files ignored by .gitignore. Requires git to be available on PATH. The file's workspace folder is used as the working directory for git check-ignore."
         },
         "lintRunner.targets": {
           "type": "array",
@@ -168,13 +168,13 @@
                       "type": "string",
                       "description": "Executable to invoke before target linters. Must be on PATH or an absolute path. Supports ~ and command variables."
                     },
-                    "args": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Arguments passed to the pre-command. Supports command variables."
-                    }
+                            "args": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "description": "Arguments passed to the pre-command. Supports ~ and command variables."
+                            }
                   }
                 }
               },
@@ -207,7 +207,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Arguments passed to the command. Supports command variables. Required when defining a new linter."
+                      "description": "Arguments passed to the command. Supports ~ and command variables. Required when defining a new linter."
                     },
                     "preCommands": {
                       "type": "array",
@@ -234,7 +234,7 @@
                             "items": {
                               "type": "string"
                             },
-                            "description": "Arguments passed to the pre-command. Supports command variables."
+                            "description": "Arguments passed to the pre-command. Supports ~ and command variables."
                           }
                         }
                       }
@@ -334,7 +334,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Arguments passed to the fix command. Supports command variables. Required when defining a new fixer."
+                      "description": "Arguments passed to the fix command. Supports ~ and command variables. Required when defining a new fixer."
                     },
                     "run": {
                       "type": "string",
