@@ -51,7 +51,7 @@ is optional and further narrows the match.
 | Field          | Type                               | Required | Description                                                                                                    |
 | -------------- | ---------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------- |
 | `name`         | `string`                           | yes      | Target name in LintRunner output.                                                                              |
-| `languages`    | `string[]`                         | yes      | VS Code language ids this target applies to. Use `["*"]` to match all detected language ids.                 |
+| `languages`    | `string[]`                         | yes      | VS Code language ids this target applies to. Use `["*"]` to match all detected language ids.                   |
 | `filePatterns` | `string[]`                         | no       | Optional glob patterns that further narrow matching files.                                                     |
 | `run`          | `"onOpen" \| "onSave" \| "manual"` | no       | Default run mode for linters. Defaults to `onSave`. `onOpen` also runs on save.                                |
 | `preCommands`  | `CommandConfig[]`                  | no       | Commands executed once before target linters.                                                                  |
