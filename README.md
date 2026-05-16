@@ -36,26 +36,26 @@ Real-world target examples: [docs/examples.md](docs/examples.md).
 
 ### `lintRunner.enabled`
 
-Set `lintRunner.enabled` to `false` to disable the extension and all of its features. When disabled, LintRunner
-does not run linters or fixers automatically, manual commands are blocked, Code Actions and CodeLens entries are
-hidden, and related UI state is cleared.
+Set `lintRunner.enabled` to `false` to disable the extension and all of its features. When disabled, LintRunner does not
+run linters or fixers automatically, manual commands are blocked, Code Actions and CodeLens entries are hidden, and
+related UI state is cleared.
 
 ## Target Config
 
-`lintRunner.targets` groups a shared file set and commands that should run for those files. The setting is resource-scoped:
-user, workspace, and folder values are merged by target `name`. If a lower-scope target has the same `name`, only the
-fields you specify there are replaced; omitted fields are inherited from the higher scope. A target must match the
-file's VS Code language id via `languages`. `filePatterns` is optional and further narrows the match.
+`lintRunner.targets` groups a shared file set and commands that should run for those files. The setting is
+resource-scoped: user, workspace, and folder values are merged by target `name`. If a lower-scope target has the same
+`name`, only the fields you specify there are replaced; omitted fields are inherited from the higher scope. A target
+must match the file's VS Code language id via `languages`. `filePatterns` is optional and further narrows the match.
 
-| Field                 | Type                               | Required | Description                                                                                                    |
-| --------------------- | ---------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------- |
-| `name`                | `string`                           | yes      | Target name in LintRunner output.                                                                              |
-| `languages`           | `string[]`                         | yes      | VS Code language ids this target applies to.                                                                   |
-| `filePatterns`        | `string[]`                         | no       | Optional glob patterns that further narrow matching files.                                                     |
-| `run`                 | `"onOpen" \| "onSave" \| "manual"` | no       | Default run mode for linters. Defaults to `onSave`. `onOpen` also runs on save.                                |
-| `preCommands`         | `CommandConfig[]`                  | no       | Commands executed once before target linters.                                                                  |
-| `linters`             | `TargetLinterConfig[]`             | no       | Linter commands for the target.                                                                                |
-| `fixers`              | `FixerConfig[]`                    | no       | Auto-fixer commands. By default they run via `LintRunner: Run Fixers`; `run: "onSave"` also runs them on save. |
+| Field          | Type                               | Required | Description                                                                                                    |
+| -------------- | ---------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------- |
+| `name`         | `string`                           | yes      | Target name in LintRunner output.                                                                              |
+| `languages`    | `string[]`                         | yes      | VS Code language ids this target applies to.                                                                   |
+| `filePatterns` | `string[]`                         | no       | Optional glob patterns that further narrow matching files.                                                     |
+| `run`          | `"onOpen" \| "onSave" \| "manual"` | no       | Default run mode for linters. Defaults to `onSave`. `onOpen` also runs on save.                                |
+| `preCommands`  | `CommandConfig[]`                  | no       | Commands executed once before target linters.                                                                  |
+| `linters`      | `TargetLinterConfig[]`             | no       | Linter commands for the target.                                                                                |
+| `fixers`       | `FixerConfig[]`                    | no       | Auto-fixer commands. By default they run via `LintRunner: Run Fixers`; `run: "onSave"` also runs them on save. |
 
 `filePatterns` use the same path matching rules as before: the extension checks the file name, workspace-relative path,
 and full path.
@@ -66,17 +66,17 @@ fixer you want to override from a lower scope a unique `name`.
 
 ### Target Linter Config
 
-| Field                 | Type                               | Required | Description                                                                                |
-| --------------------- | ---------------------------------- | -------- | ------------------------------------------------------------------------------------------ |
-| `name`                | `string`                           | yes      | Source name in Problems.                                                                   |
-| `enabled`             | `boolean`                          | no       | Enables or disables this linter. Defaults to `true`.                                       |
-| `command`             | `string`                           | yes      | Linter command. Must be in `PATH` or an absolute path. Supports `~` and command variables. |
-| `args`                | `string[]`                         | yes      | Command arguments. Supports `~` and command variables.                                     |
-| `parser`              | `RegexParserConfig`                | yes      | Regex parser config.                                                                       |
-| `run`                 | `"onOpen" \| "onSave" \| "manual"` | no       | Overrides target `run`. `onOpen` also runs on save.                                        |
-| `preCommands`         | `CommandConfig[]`                  | no       | Commands before the main linter.                                                           |
-| `timeout`             | `number`                           | no       | Timeout in milliseconds for this linter. Defaults to `30000`.                             |
-| `maxFileSize`         | `number`                           | no       | Maximum file size in bytes for this linter. Larger files are skipped.                      |
+| Field         | Type                               | Required | Description                                                                                |
+| ------------- | ---------------------------------- | -------- | ------------------------------------------------------------------------------------------ |
+| `name`        | `string`                           | yes      | Source name in Problems.                                                                   |
+| `enabled`     | `boolean`                          | no       | Enables or disables this linter. Defaults to `true`.                                       |
+| `command`     | `string`                           | yes      | Linter command. Must be in `PATH` or an absolute path. Supports `~` and command variables. |
+| `args`        | `string[]`                         | yes      | Command arguments. Supports `~` and command variables.                                     |
+| `parser`      | `RegexParserConfig`                | yes      | Regex parser config.                                                                       |
+| `run`         | `"onOpen" \| "onSave" \| "manual"` | no       | Overrides target `run`. `onOpen` also runs on save.                                        |
+| `preCommands` | `CommandConfig[]`                  | no       | Commands before the main linter.                                                           |
+| `timeout`     | `number`                           | no       | Timeout in milliseconds for this linter. Defaults to `30000`.                              |
+| `maxFileSize` | `number`                           | no       | Maximum file size in bytes for this linter. Larger files are skipped.                      |
 
 When a folder-level target reuses a linter `name`, the linter is merged into the higher-scope one by name. You can
 override only `args`, only `run`, only `parser`, or any other linter fields without repeating the rest of the config.
@@ -97,12 +97,12 @@ does not run.
 
 ### Fixer Config
 
-| Field     | Type                   | Required | Description                                                         |
-| --------- | ---------------------- | -------- | ------------------------------------------------------------------- |
+| Field     | Type                   | Required | Description                                                                                                        |
+| --------- | ---------------------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
 | `name`    | `string`               | no       | Optional fixer name shown in LintRunner output. Set it when you want the fixer to be merged by name across scopes. |
-| `enabled` | `boolean`              | no       | Enables or disables this fixer. Defaults to `true`.                 |
-| `run`     | `"manual" \| "onSave"` | no       | Defaults to `manual`. `onSave` runs the fixer on save and manually. |
-| `timeout` | `number`               | no       | Timeout in milliseconds for this fixer. Defaults to `30000`.        |
+| `enabled` | `boolean`              | no       | Enables or disables this fixer. Defaults to `true`.                                                                |
+| `run`     | `"manual" \| "onSave"` | no       | Defaults to `manual`. `onSave` runs the fixer on save and manually.                                                |
+| `timeout` | `number`               | no       | Timeout in milliseconds for this fixer. Defaults to `30000`.                                                       |
 
 Other fields are the same as `CommandConfig`.
 
@@ -162,17 +162,17 @@ When `true` (default), LintRunner writes command lifecycle messages to the `Lint
 
 ### `lintRunner.enableCodeActions`
 
-When enabled, LintRunner exposes one source code action per matching manual linter and manual fixer for the
-current file. Linters with `run: "onOpen"` or `run: "onSave"` and fixers with `run: "onSave"` are not listed
-there because they already run automatically.
+When enabled, LintRunner exposes one source code action per matching manual linter and manual fixer for the current
+file. Linters with `run: "onOpen"` or `run: "onSave"` and fixers with `run: "onSave"` are not listed there because they
+already run automatically.
 
 ## Code Lens
 
 ### `lintRunner.enableCodeLens`
 
-When enabled, LintRunner exposes one top-of-file CodeLens per matching manual linter and manual fixer for the
-current file. Linters with `run: "onOpen"` or `run: "onSave"` and fixers with `run: "onSave"` are not listed
-there because they already run automatically.
+When enabled, LintRunner exposes one top-of-file CodeLens per matching manual linter and manual fixer for the current
+file. Linters with `run: "onOpen"` or `run: "onSave"` and fixers with `run: "onSave"` are not listed there because they
+already run automatically.
 
 ## Manual Run Notifications
 
@@ -184,22 +184,22 @@ notification.
 
 ## Fix Commands
 
-`fixers` run via `LintRunner: Run Fixers`. If a fixer command has `run: "onSave"`, it also runs when a
-matching file is saved. Commands run sequentially for all matching configs. After fixers finish, the extension runs
-linters to update Problems.
+`fixers` run via `LintRunner: Run Fixers`. If a fixer command has `run: "onSave"`, it also runs when a matching file is
+saved. Commands run sequentially for all matching configs. After fixers finish, the extension runs linters to update
+Problems.
 
 ## Regex Parser
 
 `parser` is a regex config object. The regex runs globally over selected command output and creates one diagnostic per
 match.
 
-| Field             | Type                             | Required | Description                                                       |
-| ----------------- | -------------------------------- | -------- | ----------------------------------------------------------------- |
-| `pattern`         | `string`                         | yes      | JavaScript regex pattern.                                         |
-| `flags`           | `string`                         | no       | JavaScript regex flags. `g` is added automatically.               |
-| `output`          | `"stdout" \| "stderr" \| "both"` | no       | Output stream to parse. Defaults to `both`.                       |
+| Field             | Type                                              | Required | Description                                                       |
+| ----------------- | ------------------------------------------------- | -------- | ----------------------------------------------------------------- |
+| `pattern`         | `string`                                          | yes      | JavaScript regex pattern.                                         |
+| `flags`           | `string`                                          | no       | JavaScript regex flags. `g` is added automatically.               |
+| `output`          | `"stdout" \| "stderr" \| "both"`                  | no       | Output stream to parse. Defaults to `both`.                       |
 | `defaultSeverity` | `"error" \| "warning" \| "info" \| "information"` | no       | Severity when no `severity` group matched. Defaults to `warning`. |
-| `messageFormat`   | `"plain" \| "json"`              | no       | Decode the captured `message` as plain text or JSON.              |
+| `messageFormat`   | `"plain" \| "json"`                               | no       | Decode the captured `message` as plain text or JSON.              |
 
 Required named groups:
 

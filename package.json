@@ -168,13 +168,13 @@
                       "type": "string",
                       "description": "Executable to invoke before target linters. Must be on PATH or an absolute path. Supports ~ and command variables."
                     },
-                            "args": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              },
-                              "description": "Arguments passed to the pre-command. Supports ~ and command variables."
-                            }
+                    "args": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Arguments passed to the pre-command. Supports ~ and command variables."
+                    }
                   }
                 }
               },
