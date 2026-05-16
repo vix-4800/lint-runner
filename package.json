@@ -52,6 +52,10 @@
       {
         "command": "lintRunner.actions",
         "title": "LintRunner: Open Actions Menu"
+      },
+      {
+        "command": "lintRunner.stopRunningTools",
+        "title": "LintRunner: Stop Running Tools"
       }
     ],
     "configuration": {
