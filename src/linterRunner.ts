@@ -166,6 +166,7 @@ export interface FixerConfig extends CommandConfig {
     name?: string;
     run?: FixerRunMode;
     enabled?: boolean;
+    timeout?: number;
 }
 
 export type { RegexParserConfig };
@@ -220,6 +221,7 @@ export interface FixerPatch {
     args?: string[];
     run?: FixerRunMode;
     enabled?: boolean;
+    timeout?: number;
 }
 
 export interface TargetPatch {
@@ -1229,7 +1231,7 @@ async function runTargetFixer(
     const statusName = label;
     startLinterStatus(statusName, statusBar);
     try {
-        const result = await runCommand(label, fixer, filePath, output, shouldContinue);
+        const result = await runCommand(label, fixer, filePath, output, shouldContinue, fixer.timeout ?? TIMEOUT_MS);
         if (!shouldContinue()) {
             return false;
         }
