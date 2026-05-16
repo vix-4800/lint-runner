@@ -227,7 +227,7 @@ suite('Extension Test Suite', () => {
             } as Pick<vscode.TextDocument, 'fileName' | 'isUntitled' | 'uri'>,
         } as Pick<vscode.TextEditor, 'document'>), {
             text: '$(wrench)',
-            tooltip: `LintRunner: 0 linter(s), 0 fixer(s) for ${fileUri.fsPath}`,
+            tooltip: `LintRunner: 0 linter(s), 0 fixer(s) for ${vscode.workspace.asRelativePath(fileUri.fsPath)}`,
         });
     });
 
