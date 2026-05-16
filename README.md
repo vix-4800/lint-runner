@@ -6,6 +6,7 @@ VS Code extension for running external CLI linters and reporting found issues in
 
 - run linters manually via `LintRunner: Run Linters`;
 - run auto-fixers manually via `LintRunner: Run Fixers`;
+- open a quick actions menu via `LintRunner: Open Actions Menu`;
 - run linters when a file is opened;
 - run linters when a file is saved;
 - run auto-fixers when a file is saved;
@@ -22,6 +23,7 @@ VS Code extension for running external CLI linters and reporting found issues in
 - pre-commands before the main linter;
 - hide diagnostic rule codes in Problems;
 - status bar with active tool names and click-to-stop cancellation;
+- stop running tools manually via `LintRunner: Stop Running Tools`;
 - block command execution in untrusted workspaces.
 
 ## Configuration
@@ -73,6 +75,7 @@ fixer you want to override from a lower scope a unique `name`.
 | `parser`              | `RegexParserConfig`                | yes      | Regex parser config.                                                                       |
 | `run`                 | `"onOpen" \| "onSave" \| "manual"` | no       | Overrides target `run`. `onOpen` also runs on save.                                        |
 | `preCommands`         | `CommandConfig[]`                  | no       | Commands before the main linter.                                                           |
+| `timeout`             | `number`                           | no       | Timeout in milliseconds for this linter. Defaults to `30000`.                             |
 | `maxFileSize`         | `number`                           | no       | Maximum file size in bytes for this linter. Larger files are skipped.                      |
 
 When a folder-level target reuses a linter `name`, the linter is merged into the higher-scope one by name. You can
@@ -99,6 +102,7 @@ does not run.
 | `name`    | `string`               | no       | Optional fixer name shown in LintRunner output. Set it when you want the fixer to be merged by name across scopes. |
 | `enabled` | `boolean`              | no       | Enables or disables this fixer. Defaults to `true`.                 |
 | `run`     | `"manual" \| "onSave"` | no       | Defaults to `manual`. `onSave` runs the fixer on save and manually. |
+| `timeout` | `number`               | no       | Timeout in milliseconds for this fixer. Defaults to `30000`.        |
 
 Other fields are the same as `CommandConfig`.
 
@@ -194,7 +198,7 @@ match.
 | `pattern`         | `string`                         | yes      | JavaScript regex pattern.                                         |
 | `flags`           | `string`                         | no       | JavaScript regex flags. `g` is added automatically.               |
 | `output`          | `"stdout" \| "stderr" \| "both"` | no       | Output stream to parse. Defaults to `both`.                       |
-| `defaultSeverity` | `"error" \| "warning" \| "info"` | no       | Severity when no `severity` group matched. Defaults to `warning`. |
+| `defaultSeverity` | `"error" \| "warning" \| "info" \| "information"` | no       | Severity when no `severity` group matched. Defaults to `warning`. |
 | `messageFormat`   | `"plain" \| "json"`              | no       | Decode the captured `message` as plain text or JSON.              |
 
 Required named groups:
