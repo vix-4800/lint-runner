@@ -11,12 +11,12 @@ function resolveDiagnosticRangeEnd(
 ): { endLine: number; endCharacter: number; hasExplicitRange: boolean } {
     const defaultEndCharacter = startCharacter + 1;
     const hasAnyEndPosition = endLine !== undefined || endColumn !== undefined;
-    const candidateEndLine = Math.max(0, endLine ?? line);
-    const candidateEndCharacter = Math.max(0, endColumn ?? defaultEndCharacter);
+    const candidateEndLine = endLine ?? line;
+    const candidateEndCharacter = endColumn ?? defaultEndCharacter;
     const hasExplicitRange =
         hasAnyEndPosition &&
         (candidateEndLine > line ||
-            (candidateEndLine === line && candidateEndCharacter > startCharacter));
+            (candidateEndLine === line && candidateEndCharacter >= startCharacter));
 
     return {
         endLine: hasExplicitRange ? candidateEndLine : line,

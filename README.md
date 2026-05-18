@@ -219,7 +219,7 @@ Optional named groups:
 | `severity` | `error`, `warning`, `info`, plus aliases like `note`. |
 | `code`     | Rule id for the diagnostic.                           |
 
-When `endLine` and `endCol` are not captured, LintRunner keeps the current inferred range behavior.
+When `endLine` or `endCol` are not captured, LintRunner keeps the current inferred range behavior.
 
 ## Development
 
