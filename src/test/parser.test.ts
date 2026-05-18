@@ -898,7 +898,13 @@ suite('Regex Parser', () => {
                 pattern: String.raw`(?<line>\S+):(?<col>\S+):(?<endLine>\S+):(?<endCol>\S+):(?<message>[^\n]+)`,
                 flags: 'gm',
             },
-            ['4:2:4:5:Valid', 'nope:2:4:5:Bad line', '5:bad:5:7:Bad col', '6:3:end:7:Bad end line', '7:4:7:oops:Bad end col'].join('\n')
+            [
+                '4:2:4:5:Valid',
+                'nope:2:4:5:Bad line',
+                '5:bad:5:7:Bad col',
+                '6:3:end:7:Bad end line',
+                '7:4:7:oops:Bad end col',
+            ].join('\n')
         );
 
         assert.strictEqual(diags.length, 1);

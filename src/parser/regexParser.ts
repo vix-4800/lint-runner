@@ -60,7 +60,7 @@ function formatMessage(message: string, messageFormat: string | undefined): stri
  * non-integer content such as partial numeric text.
  */
 function parseIntegerGroup(value: string | undefined): number | undefined {
-    if (value === undefined || !/^-?\d+$/.test(value)) {
+    if (value === undefined || !/^\d+$/.test(value)) {
         return undefined;
     }
 
