@@ -6,7 +6,10 @@ import * as vscode from 'vscode';
 import {
     cancelAllFileRuns,
     cancelFileRun,
+    clearAllFileLinterDiagnostics,
+    clearDiagnosticsCache,
     runFixers,
+    runLinters,
     runRunnableLinters,
     type RunnableFixer,
     type ResolvedTargetConfig,
@@ -232,6 +235,94 @@ suite('Linter Runner Test Suite', () => {
             await assert.rejects(fs.access(secondCompletedMarkerPath));
         } finally {
             cancelAllFileRuns();
+            diagnostics.dispose();
+            output.dispose();
+            statusBar.dispose();
+            await fs.rm(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    test('runLinters keeps diagnostics and cache separate for targets sharing a linter name', async function () {
+        this.timeout(10_000);
+
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-shared-linter-'));
+        const filePath = path.join(tmpDir, 'test.ts');
+        const scriptPath = path.join(tmpDir, 'emit-diagnostic.js');
+        await fs.writeFile(filePath, 'const value = 1;\n');
+        await fs.writeFile(
+            scriptPath,
+            [
+                'const [message] = process.argv.slice(2);',
+                "process.stdout.write(`1:${message}\\n`);",
+                '',
+            ].join('\n')
+        );
+
+        const diagnostics = vscode.languages.createDiagnosticCollection('lintRunner-shared-linter-test');
+        const output = vscode.window.createOutputChannel('LintRunner Shared Linter Test');
+        const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+        const config = vscode.workspace.getConfiguration('lintRunner');
+        const previousTargets = config.inspect<unknown[]>('targets')?.globalValue;
+        const uri = vscode.Uri.file(filePath);
+        const expectedMessages = ['backend issue', 'frontend issue'];
+
+        try {
+            await vscode.workspace.openTextDocument(filePath);
+            clearAllFileLinterDiagnostics();
+            clearDiagnosticsCache();
+
+            await config.update(
+                'targets',
+                [
+                    {
+                        name: 'frontend',
+                        languages: ['typescript'],
+                        linters: [
+                            {
+                                name: 'shared-linter',
+                                command: process.execPath,
+                                args: [scriptPath, 'frontend issue'],
+                                parser: {
+                                    pattern: '(?<line>\\d+):(?<message>.+)',
+                                },
+                                run: 'onSave',
+                            },
+                        ],
+                    },
+                    {
+                        name: 'backend',
+                        languages: ['typescript'],
+                        linters: [
+                            {
+                                name: 'shared-linter',
+                                command: process.execPath,
+                                args: [scriptPath, 'backend issue'],
+                                parser: {
+                                    pattern: '(?<line>\\d+):(?<message>.+)',
+                                },
+                                run: 'onSave',
+                            },
+                        ],
+                    },
+                ],
+                vscode.ConfigurationTarget.Global
+            );
+
+            await runLinters(filePath, 'onSave', diagnostics, output, statusBar);
+            assert.deepStrictEqual(
+                (diagnostics.get(uri) ?? []).map((diagnostic) => diagnostic.message).sort(),
+                expectedMessages
+            );
+
+            await runLinters(filePath, 'onSave', diagnostics, output, statusBar);
+            assert.deepStrictEqual(
+                (diagnostics.get(uri) ?? []).map((diagnostic) => diagnostic.message).sort(),
+                expectedMessages
+            );
+        } finally {
+            clearAllFileLinterDiagnostics();
+            clearDiagnosticsCache();
+            await config.update('targets', previousTargets, vscode.ConfigurationTarget.Global);
             diagnostics.dispose();
             output.dispose();
             statusBar.dispose();

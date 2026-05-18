@@ -246,7 +246,7 @@
                       "properties": {
                         "pattern": {
                           "type": "string",
-                          "description": "JavaScript regular expression. Named capture groups: `line` and `message` are required; `col`, `severity` (error/warning/info), and `code` are optional."
+                          "description": "JavaScript regular expression. Named capture groups: `line` and `message` are required; `col`, `endLine`, `endCol`, `severity` (error/warning/info), and `code` are optional."
                         },
                         "flags": {
                           "type": "string",

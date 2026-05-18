@@ -127,11 +127,13 @@ export function parseRegexOutput(
 
             const line = Math.max(0, lineNumber - 1);
             const col = colNumber !== undefined ? Math.max(0, colNumber - 1) : undefined;
+            const endLine = endLineNumber !== undefined ? Math.max(0, endLineNumber - 1) : undefined;
+            const endCol = endColNumber !== undefined ? Math.max(0, endColNumber - 1) : undefined;
             const severity = parseSeverity(groups['severity'], config.defaultSeverity);
             const message = formatMessage(rawMessage, config.messageFormat);
             const code = groups['code'];
 
-            const diagnostic = createDiagnostic(line, col, message, severity);
+            const diagnostic = createDiagnostic(line, col, message, severity, endLine, endCol);
             diagnostic.source = source;
             if (code !== undefined) {
                 diagnostic.code = code;

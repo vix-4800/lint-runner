@@ -50,6 +50,9 @@ type OnOpenTabGroup = {
     readonly viewColumn: vscode.ViewColumn;
 };
 type OutputChannelLike = Pick<vscode.OutputChannel, 'appendLine' | 'dispose'>;
+type CollectVisibleFileNamesOptions = {
+    readonly includeSeen?: boolean;
+};
 
 interface FixerQuickPickItem extends vscode.QuickPickItem {
     fixer: RunnableFixer;
@@ -334,9 +337,11 @@ function isVisibleDiffDocument(
 export function collectNewVisibleFileNames(
     editors: readonly OnOpenEditor[],
     seenDocumentUris: Set<string>,
-    diffDocumentUrisByColumn: ReadonlyMap<vscode.ViewColumn, ReadonlySet<string>> = new Map()
+    diffDocumentUrisByColumn: ReadonlyMap<vscode.ViewColumn, ReadonlySet<string>> = new Map(),
+    options: CollectVisibleFileNamesOptions = {}
 ): string[] {
     const fileNames: string[] = [];
+    const includeSeen = options.includeSeen === true;
 
     for (const editor of editors) {
         const document = editor.document;
@@ -349,7 +354,7 @@ export function collectNewVisibleFileNames(
         }
 
         const key = documentKey(document);
-        if (seenDocumentUris.has(key)) {
+        if (!includeSeen && seenDocumentUris.has(key)) {
             continue;
         }
 
@@ -358,6 +363,27 @@ export function collectNewVisibleFileNames(
     }
 
     return fileNames;
+}
+
+export function runOnOpenLintersForVisibleEditors(
+    editors: readonly OnOpenEditor[],
+    seenDocumentUris: Set<string>,
+    diagnostics: vscode.DiagnosticCollection,
+    output: RunnerOutput,
+    statusBar: vscode.StatusBarItem,
+    tabGroups: readonly OnOpenTabGroup[] = vscode.window.tabGroups.all,
+    options: CollectVisibleFileNamesOptions = {},
+    onRunLinters: typeof runLinters = runLinters
+): void {
+    const diffDocumentUrisByColumn = collectVisibleDiffDocumentUrisByColumn(tabGroups);
+    for (const fileName of collectNewVisibleFileNames(
+        editors,
+        seenDocumentUris,
+        diffDocumentUrisByColumn,
+        options
+    )) {
+        void onRunLinters(fileName, 'onOpen', diagnostics, output, statusBar);
+    }
 }
 
 export function collectClosedFileTabUris(tabs: readonly OnOpenTab[]): vscode.Uri[] {
@@ -714,11 +740,22 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(diagnostics, output, runningStatusBar, actionsStatusBar, codeLensRefreshEmitter);
 
     const seenOnOpenDocumentUris = new Set<string>();
-    collectNewVisibleFileNames(
-        vscode.window.visibleTextEditors,
-        seenOnOpenDocumentUris,
-        collectVisibleDiffDocumentUrisByColumn(vscode.window.tabGroups.all)
-    );
+    let lintRunnerEnabled = isLintRunnerEnabled();
+    if (canRunWorkspaceCommands(false)) {
+        runOnOpenLintersForVisibleEditors(
+            vscode.window.visibleTextEditors,
+            seenOnOpenDocumentUris,
+            diagnostics,
+            output,
+            runningStatusBar
+        );
+    } else {
+        collectNewVisibleFileNames(
+            vscode.window.visibleTextEditors,
+            seenOnOpenDocumentUris,
+            collectVisibleDiffDocumentUrisByColumn(vscode.window.tabGroups.all)
+        );
+    }
 
     context.subscriptions.push(
         vscode.languages.registerCodeLensProvider({ scheme: 'file' }, {
@@ -777,17 +814,34 @@ export function activate(context: vscode.ExtensionContext): void {
                 return;
             }
 
-            const diffDocumentUrisByColumn = collectVisibleDiffDocumentUrisByColumn(
-                vscode.window.tabGroups.all
-            );
-            for (const fileName of collectNewVisibleFileNames(
+            runOnOpenLintersForVisibleEditors(
                 editors,
                 seenOnOpenDocumentUris,
-                diffDocumentUrisByColumn
-            )) {
-                runLinters(fileName, 'onOpen', diagnostics, output, runningStatusBar);
-            }
+                diagnostics,
+                output,
+                runningStatusBar
+            );
             updateActionsStatusBar(actionsStatusBar);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.workspace.onDidGrantWorkspaceTrust(() => {
+            if (!canRunWorkspaceCommands(false)) {
+                return;
+            }
+
+            runOnOpenLintersForVisibleEditors(
+                vscode.window.visibleTextEditors,
+                seenOnOpenDocumentUris,
+                diagnostics,
+                output,
+                runningStatusBar,
+                vscode.window.tabGroups.all,
+                { includeSeen: true }
+            );
+            updateActionsStatusBar(actionsStatusBar);
+            codeLensRefreshEmitter.fire();
         })
     );
 
@@ -871,6 +925,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration((event) => {
             if (event.affectsConfiguration('lintRunner')) {
+                const wasEnabled = lintRunnerEnabled;
                 resetCommandEnv();
                 clearDiagnosticsCache();
                 clearAllPendingSaveDebounces();
@@ -880,6 +935,24 @@ export function activate(context: vscode.ExtensionContext): void {
                 output.sync(shouldEnableOutputChannel());
                 updateActionsStatusBar(actionsStatusBar);
                 codeLensRefreshEmitter.fire();
+                lintRunnerEnabled = isLintRunnerEnabled();
+
+                if (
+                    event.affectsConfiguration('lintRunner.enabled') &&
+                    !wasEnabled &&
+                    lintRunnerEnabled &&
+                    vscode.workspace.isTrusted
+                ) {
+                    runOnOpenLintersForVisibleEditors(
+                        vscode.window.visibleTextEditors,
+                        seenOnOpenDocumentUris,
+                        diagnostics,
+                        output,
+                        runningStatusBar,
+                        vscode.window.tabGroups.all,
+                        { includeSeen: true }
+                    );
+                }
             }
         })
     );
