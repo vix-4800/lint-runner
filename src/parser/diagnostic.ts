@@ -12,13 +12,16 @@ export function createDiagnostic(
     endColumn?: number
 ): vscode.Diagnostic {
     const startCharacter = Math.max(0, column ?? 0);
-    const hasExplicitRange = endLine !== undefined || endColumn !== undefined;
-    const rangeEndLine = Math.max(line, endLine ?? line);
     const defaultEndCharacter = startCharacter + 1;
-    const rangeEndCharacter =
-        hasExplicitRange && rangeEndLine === line
-            ? Math.max(defaultEndCharacter, endColumn ?? defaultEndCharacter)
-            : Math.max(0, endColumn ?? defaultEndCharacter);
+    const hasRequestedExplicitRange = endLine !== undefined || endColumn !== undefined;
+    const candidateEndLine = Math.max(0, endLine ?? line);
+    const candidateEndCharacter = Math.max(0, endColumn ?? defaultEndCharacter);
+    const hasValidExplicitRange =
+        hasRequestedExplicitRange &&
+        (candidateEndLine > line ||
+            (candidateEndLine === line && candidateEndCharacter > startCharacter));
+    const rangeEndLine = hasValidExplicitRange ? candidateEndLine : line;
+    const rangeEndCharacter = hasValidExplicitRange ? candidateEndCharacter : defaultEndCharacter;
     const diagnostic = new vscode.Diagnostic(
         new vscode.Range(line, startCharacter, rangeEndLine, rangeEndCharacter),
         message,
@@ -27,7 +30,7 @@ export function createDiagnostic(
     if (column !== undefined) {
         explicitColumnDiagnostics.add(diagnostic);
     }
-    if (hasExplicitRange) {
+    if (hasValidExplicitRange) {
         explicitRangeDiagnostics.add(diagnostic);
     }
     return diagnostic;
