@@ -956,7 +956,7 @@ suite('Regex Parser', () => {
     test('partially numeric line captures are skipped', () => {
         const diags = parseRegexFixture(
             'test',
-            { pattern: String.raw`(?<line>[^:]+):(?<message>[^\n]+)`, flags: 'gm' },
+            { pattern: String.raw`^(?<line>[^:\n]+):(?<message>[^\n]+)$`, flags: 'gm' },
             '12x:Broken\n8:Valid'
         );
 
