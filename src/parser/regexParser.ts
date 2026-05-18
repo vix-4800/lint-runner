@@ -52,6 +52,25 @@ function formatMessage(message: string, messageFormat: string | undefined): stri
     }
 }
 
+/**
+ * Parses a regex capture as an exact base-10 integer.
+ *
+ * @param value Raw named capture value from the regex match.
+ * @returns The parsed integer, or undefined when the capture is missing or contains
+ * non-integer content such as partial numeric text.
+ */
+function parseIntegerGroup(value: string | undefined): number | undefined {
+    if (value === undefined || !/^\d+$/.test(value)) {
+        return undefined;
+    }
+
+    return Number.parseInt(value, 10);
+}
+
+function hasInvalidNumericCapture(rawValue: string | undefined, parsedValue: number | undefined): boolean {
+    return rawValue !== undefined && parsedValue === undefined;
+}
+
 export function parseRegexOutput(
     output: string,
     config: RegexParserConfig,
@@ -83,15 +102,33 @@ export function parseRegexOutput(
         const rawMessage = groups['message'];
 
         if (rawLine !== undefined && rawMessage !== undefined) {
-            const line = Math.max(0, parseInt(rawLine, 10) - 1);
             const rawCol = groups['col'];
-            const col = rawCol !== undefined ? Math.max(0, parseInt(rawCol, 10) - 1) : undefined;
             const rawEndLine = groups['endLine'];
-            const endLine =
-                rawEndLine !== undefined ? Math.max(0, parseInt(rawEndLine, 10) - 1) : undefined;
             const rawEndCol = groups['endCol'];
-            const endCol =
-                rawEndCol !== undefined ? Math.max(0, parseInt(rawEndCol, 10) - 1) : undefined;
+            const lineNumber = parseIntegerGroup(rawLine);
+            const colNumber = parseIntegerGroup(rawCol);
+            const endLineNumber = parseIntegerGroup(rawEndLine);
+            const endColNumber = parseIntegerGroup(rawEndCol);
+
+            if (
+                lineNumber === undefined ||
+                hasInvalidNumericCapture(rawCol, colNumber) ||
+                hasInvalidNumericCapture(rawEndLine, endLineNumber) ||
+                hasInvalidNumericCapture(rawEndCol, endColNumber)
+            ) {
+                if (isZeroWidthMatch) {
+                    if (regex.lastIndex >= output.length) {
+                        break;
+                    }
+                    regex.lastIndex++;
+                }
+                continue;
+            }
+
+            const line = Math.max(0, lineNumber - 1);
+            const col = colNumber !== undefined ? Math.max(0, colNumber - 1) : undefined;
+            const endLine = endLineNumber !== undefined ? Math.max(0, endLineNumber - 1) : undefined;
+            const endCol = endColNumber !== undefined ? Math.max(0, endColNumber - 1) : undefined;
             const severity = parseSeverity(groups['severity'], config.defaultSeverity);
             const message = formatMessage(rawMessage, config.messageFormat);
             const code = groups['code'];

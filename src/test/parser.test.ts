@@ -930,6 +930,40 @@ suite('Regex Parser', () => {
         assert.strictEqual(diags[0].message, 'First');
         assert.strictEqual(diags[1].message, 'Second');
     });
+
+    test('malformed numeric captures are skipped without throwing', () => {
+        const diags = parseRegexFixture(
+            'test',
+            {
+                pattern: String.raw`(?<line>\S+):(?<col>\S+):(?<endLine>\S+):(?<endCol>\S+):(?<message>[^\n]+)`,
+                flags: 'gm',
+            },
+            [
+                '4:2:4:5:Valid',
+                'nope:2:4:5:Bad line',
+                '5:bad:5:7:Bad col',
+                '6:3:end:7:Bad end line',
+                '7:4:7:oops:Bad end col',
+            ].join('\n')
+        );
+
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].range.start.line, 3);
+        assert.strictEqual(diags[0].range.start.character, 1);
+        assert.strictEqual(diags[0].message, 'Valid');
+    });
+
+    test('partially numeric line captures are skipped', () => {
+        const diags = parseRegexFixture(
+            'test',
+            { pattern: String.raw`^(?<line>[^:\n]+):(?<message>[^\n]+)$`, flags: 'gm' },
+            '12x:Broken\n8:Valid'
+        );
+
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].range.start.line, 7);
+        assert.strictEqual(diags[0].message, 'Valid');
+    });
 });
 
 suite('Regex Utility Parser Configs', () => {
