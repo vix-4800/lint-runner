@@ -21,6 +21,7 @@ import {
     isManualCodeActionLinter,
     isContentChanged,
     OutputChannelManager,
+    runOnOpenLintersForVisibleEditors,
     runManualTaskWithNotification,
     runManualFixersForEditor,
 } from '../extension.js';
@@ -124,6 +125,29 @@ suite('Extension Test Suite', () => {
         );
     });
 
+    test('collects seen visible file documents when includeSeen is enabled', () => {
+        const fileUri = vscode.Uri.file('/tmp/lint-runner-seen.ts');
+        const seenDocumentUris = new Set<string>([fileUri.toString()]);
+
+        assert.deepStrictEqual(
+            collectNewVisibleFileNames(
+                [
+                    {
+                        document: {
+                            fileName: fileUri.fsPath,
+                            isUntitled: false,
+                            uri: fileUri,
+                        },
+                    },
+                ],
+                seenDocumentUris,
+                new Map(),
+                { includeSeen: true }
+            ),
+            [fileUri.fsPath]
+        );
+    });
+
     test('collects visible diff document URIs by view column', () => {
         const originalUri = vscode.Uri.file('/tmp/lint-runner-original.ts');
         const modifiedUri = vscode.Uri.file('/tmp/lint-runner-modified.ts');
@@ -210,6 +234,56 @@ suite('Extension Test Suite', () => {
             ]),
             [fileUri]
         );
+    });
+
+    test('runOnOpenLintersForVisibleEditors reruns already seen visible files when requested', () => {
+        const fileUri = vscode.Uri.file('/tmp/lint-runner-rerun.ts');
+        const seenDocumentUris = new Set<string>([fileUri.toString()]);
+        const runs: string[] = [];
+
+        runOnOpenLintersForVisibleEditors(
+            [
+                {
+                    document: {
+                        fileName: fileUri.fsPath,
+                        isUntitled: false,
+                        uri: fileUri,
+                    },
+                },
+            ],
+            seenDocumentUris,
+            {
+                delete() {
+                    // no-op
+                },
+                set() {
+                    // no-op
+                },
+            } as unknown as vscode.DiagnosticCollection,
+            {
+                appendLine() {
+                    // no-op
+                },
+            },
+            {
+                hide() {
+                    // no-op
+                },
+                show() {
+                    // no-op
+                },
+                text: '',
+                tooltip: '',
+                name: '',
+            } as unknown as vscode.StatusBarItem,
+            [],
+            { includeSeen: true },
+            async (fileName, trigger) => {
+                runs.push(`${fileName}:${trigger}`);
+            }
+        );
+
+        assert.deepStrictEqual(runs, [`${fileUri.fsPath}:onOpen`]);
     });
 
     test('getActionsStatusBarState returns undefined without an active file editor', () => {
