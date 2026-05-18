@@ -52,6 +52,14 @@ function formatMessage(message: string, messageFormat: string | undefined): stri
     }
 }
 
+function parseIntegerGroup(value: string | undefined): number | undefined {
+    if (value === undefined || !/^-?\d+$/.test(value)) {
+        return undefined;
+    }
+
+    return Number.parseInt(value, 10);
+}
+
 export function parseRegexOutput(
     output: string,
     config: RegexParserConfig,
@@ -83,9 +91,31 @@ export function parseRegexOutput(
         const rawMessage = groups['message'];
 
         if (rawLine !== undefined && rawMessage !== undefined) {
-            const line = Math.max(0, parseInt(rawLine, 10) - 1);
             const rawCol = groups['col'];
-            const col = rawCol !== undefined ? Math.max(0, parseInt(rawCol, 10) - 1) : undefined;
+            const rawEndLine = groups['endLine'];
+            const rawEndCol = groups['endCol'];
+            const lineNumber = parseIntegerGroup(rawLine);
+            const colNumber = parseIntegerGroup(rawCol);
+            const endLineNumber = parseIntegerGroup(rawEndLine);
+            const endColNumber = parseIntegerGroup(rawEndCol);
+
+            const hasInvalidLine = lineNumber === undefined;
+            const hasInvalidCol = rawCol !== undefined && colNumber === undefined;
+            const hasInvalidEndLine = rawEndLine !== undefined && endLineNumber === undefined;
+            const hasInvalidEndCol = rawEndCol !== undefined && endColNumber === undefined;
+
+            if (hasInvalidLine || hasInvalidCol || hasInvalidEndLine || hasInvalidEndCol) {
+                if (isZeroWidthMatch) {
+                    if (regex.lastIndex >= output.length) {
+                        break;
+                    }
+                    regex.lastIndex++;
+                }
+                continue;
+            }
+
+            const line = Math.max(0, lineNumber - 1);
+            const col = colNumber !== undefined ? Math.max(0, colNumber - 1) : undefined;
             const severity = parseSeverity(groups['severity'], config.defaultSeverity);
             const message = formatMessage(rawMessage, config.messageFormat);
             const code = groups['code'];
