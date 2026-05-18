@@ -52,7 +52,13 @@ function formatMessage(message: string, messageFormat: string | undefined): stri
     }
 }
 
-/** Parses an exact integer capture and returns undefined for missing or malformed values. */
+/**
+ * Parses a regex capture as an exact base-10 integer.
+ *
+ * @param value Raw named capture value from the regex match.
+ * @returns The parsed integer, or undefined when the capture is missing or contains
+ * non-integer content such as partial numeric text.
+ */
 function parseIntegerGroup(value: string | undefined): number | undefined {
     if (value === undefined || !/^-?\d+$/.test(value)) {
         return undefined;
