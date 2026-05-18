@@ -213,9 +213,13 @@ Optional named groups:
 
 | Group      | Description                                           |
 | ---------- | ----------------------------------------------------- |
-| `col`      | 1-based column number.                                |
+| `col`      | 1-based start column number.                          |
+| `endLine`  | 1-based end line for an explicit diagnostic range.    |
+| `endCol`   | 1-based end column for an explicit diagnostic range.  |
 | `severity` | `error`, `warning`, `info`, plus aliases like `note`. |
 | `code`     | Rule id for the diagnostic.                           |
+
+When `endLine` and `endCol` are not captured, LintRunner keeps the current inferred range behavior.
 
 ## Development
 

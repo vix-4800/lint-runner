@@ -107,6 +107,25 @@ suite('Linter Runner', () => {
         assert.strictEqual(diagnostics[0].range.end.character, 12);
     });
 
+    test('preserves explicit end range during normalization', async () => {
+        const filePath = path.resolve(__dirname, '../../lint-test/test.js');
+        const diagnostics = parseRegexFixture(
+            'ruff',
+            {
+                pattern: String.raw`(?<line>\d+):(?<col>\d+):(?<endLine>\d+):(?<endCol>\d+):(?<message>.+)`,
+            },
+            '4:10:4:15:Function name'
+        );
+
+        await normalizeDiagnosticRanges(filePath, diagnostics);
+
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].range.start.line, 3);
+        assert.strictEqual(diagnostics[0].range.start.character, 9);
+        assert.strictEqual(diagnostics[0].range.end.line, 3);
+        assert.strictEqual(diagnostics[0].range.end.character, 14);
+    });
+
     test('prepends shell PATH to command PATH', () => {
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
         const env = buildCommandEnv(workspaceRoot);
@@ -642,6 +661,27 @@ suite('Regex Parser', () => {
         assert.strictEqual(diags[0].range.start.character, 9);
     });
 
+    test('with endLine and endCol: sets explicit range', () => {
+        const diags = parseLinterOutput(
+            {
+                name: 'test',
+                filePatterns: ['*'],
+                command: 'test',
+                args: [],
+                parser: {
+                    pattern: String.raw`(?<line>\d+):(?<col>\d+):(?<endLine>\d+):(?<endCol>\d+):(?<message>.+)`,
+                },
+                run: 'manual',
+            },
+            { code: 1, stdout: '2:5:3:2:Some issue', stderr: '' }
+        );
+        assert.strictEqual(diags.length, 1);
+        assert.strictEqual(diags[0].range.start.line, 1);
+        assert.strictEqual(diags[0].range.start.character, 4);
+        assert.strictEqual(diags[0].range.end.line, 2);
+        assert.strictEqual(diags[0].range.end.character, 1);
+    });
+
     test('severity mapping: error', () => {
         const diags = parseLinterOutput(
             {
@@ -999,7 +1039,7 @@ suite('Regex Utility Parser Configs', () => {
         const diags = parseRegexFixture(
             'Ruff',
             {
-                pattern: String.raw`^::(?<severity>error|warning) title=ruff \((?<code>[^)]+)\),file=[^,]+,line=(?<line>\d+),col=(?<col>\d+),endLine=\d+,endColumn=\d+::(?:[^:]+:\d+:\d+: [A-Z]\d+ )?(?<message>[^\n%]+)`,
+                pattern: String.raw`^::(?<severity>error|warning) title=ruff \((?<code>[^)]+)\),file=[^,]+,line=(?<line>\d+),col=(?<col>\d+),endLine=(?<endLine>\d+),endColumn=(?<endCol>\d+)::(?:[^:]+:\d+:\d+: [A-Z]\d+ )?(?<message>[^\n%]+)`,
                 flags: 'gm',
             },
             output
@@ -1007,6 +1047,8 @@ suite('Regex Utility Parser Configs', () => {
 
         assert.strictEqual(diags.length, 1);
         assert.strictEqual(diags[0].range.start.character, 4);
+        assert.strictEqual(diags[0].range.end.line, 1);
+        assert.strictEqual(diags[0].range.end.character, 5);
         assert.strictEqual(diags[0].code, 'F841');
         assert.strictEqual(diags[0].message, 'Local variable `x` is assigned to but never used');
     });
@@ -1159,7 +1201,7 @@ suite('Regex Utility Parser Configs', () => {
         const diags = parseRegexFixture(
             'Sql Fluff',
             {
-                pattern: String.raw`^::(?<severity>error|warning|notice) title=SQLFluff,file=[^,]+,line=(?<line>\d+),col=(?<col>\d+),endLine=\d+,endColumn=\d+::(?<code>[A-Z]+\d+): (?<message>.+?)(?: \[[^\]]+\])?$`,
+                pattern: String.raw`^::(?<severity>error|warning|notice) title=SQLFluff,file=[^,]+,line=(?<line>\d+),col=(?<col>\d+),endLine=(?<endLine>\d+),endColumn=(?<endCol>\d+)::(?<code>[A-Z]+\d+): (?<message>.+?)(?: \[[^\]]+\])?$`,
                 flags: 'gm',
             },
             output
@@ -1168,6 +1210,7 @@ suite('Regex Utility Parser Configs', () => {
         assert.strictEqual(diags.length, 2);
         assert.strictEqual(diags[0].code, 'CP01');
         assert.strictEqual(diags[1].range.start.character, 34);
+        assert.strictEqual(diags[1].range.end.character, 39);
     });
 
     test('checkmake json format with regex', () => {

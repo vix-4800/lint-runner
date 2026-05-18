@@ -86,11 +86,17 @@ export function parseRegexOutput(
             const line = Math.max(0, parseInt(rawLine, 10) - 1);
             const rawCol = groups['col'];
             const col = rawCol !== undefined ? Math.max(0, parseInt(rawCol, 10) - 1) : undefined;
+            const rawEndLine = groups['endLine'];
+            const endLine =
+                rawEndLine !== undefined ? Math.max(0, parseInt(rawEndLine, 10) - 1) : undefined;
+            const rawEndCol = groups['endCol'];
+            const endCol =
+                rawEndCol !== undefined ? Math.max(0, parseInt(rawEndCol, 10) - 1) : undefined;
             const severity = parseSeverity(groups['severity'], config.defaultSeverity);
             const message = formatMessage(rawMessage, config.messageFormat);
             const code = groups['code'];
 
-            const diagnostic = createDiagnostic(line, col, message, severity);
+            const diagnostic = createDiagnostic(line, col, message, severity, endLine, endCol);
             diagnostic.source = source;
             if (code !== undefined) {
                 diagnostic.code = code;

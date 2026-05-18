@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { diagnosticHasExplicitColumn } from './parser/diagnostic.js';
+import { diagnosticHasExplicitColumn, diagnosticHasExplicitRange } from './parser/diagnostic.js';
 import { parseRegexOutput, type RegexParserConfig } from './parser/regexParser.js';
 
 const runningLinters = new Map<string, number>();
@@ -1037,6 +1037,10 @@ export async function normalizeDiagnosticRanges(
 
     const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
     for (const diagnostic of diagnostics) {
+        if (diagnosticHasExplicitRange(diagnostic)) {
+            continue;
+        }
+
         if (diagnostic.range.start.line >= document.lineCount) {
             continue;
         }
