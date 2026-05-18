@@ -52,12 +52,17 @@ function formatMessage(message: string, messageFormat: string | undefined): stri
     }
 }
 
+/** Parses an exact integer capture and returns undefined for missing or malformed values. */
 function parseIntegerGroup(value: string | undefined): number | undefined {
     if (value === undefined || !/^-?\d+$/.test(value)) {
         return undefined;
     }
 
     return Number.parseInt(value, 10);
+}
+
+function hasInvalidNumericCapture(rawValue: string | undefined, parsedValue: number | undefined): boolean {
+    return rawValue !== undefined && parsedValue === undefined;
 }
 
 export function parseRegexOutput(
@@ -99,12 +104,12 @@ export function parseRegexOutput(
             const endLineNumber = parseIntegerGroup(rawEndLine);
             const endColNumber = parseIntegerGroup(rawEndCol);
 
-            const hasInvalidLine = lineNumber === undefined;
-            const hasInvalidCol = rawCol !== undefined && colNumber === undefined;
-            const hasInvalidEndLine = rawEndLine !== undefined && endLineNumber === undefined;
-            const hasInvalidEndCol = rawEndCol !== undefined && endColNumber === undefined;
-
-            if (hasInvalidLine || hasInvalidCol || hasInvalidEndLine || hasInvalidEndCol) {
+            if (
+                lineNumber === undefined ||
+                hasInvalidNumericCapture(rawCol, colNumber) ||
+                hasInvalidNumericCapture(rawEndLine, endLineNumber) ||
+                hasInvalidNumericCapture(rawEndCol, endColNumber)
+            ) {
                 if (isZeroWidthMatch) {
                     if (regex.lastIndex >= output.length) {
                         break;
