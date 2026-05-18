@@ -10,8 +10,8 @@ const runningLinters = new Map<string, number>();
 const activeRunIds = new Map<string, number>();
 let nextRunId = 0;
 
-// Per-linter diagnostics store: file URI string -> linter name -> diagnostics.
-// Allows multiple linters' results to coexist without overwriting each other.
+// Per-target+linter diagnostics store: file URI string -> ownership key -> diagnostics.
+// Allows diagnostics from matching targets with the same linter name to coexist.
 const fileLinterDiagnostics = new Map<string, Map<string, vscode.Diagnostic[]>>();
 
 function getOrCreateLinterMap(uriString: string): Map<string, vscode.Diagnostic[]> {
@@ -130,8 +130,12 @@ interface LinterCacheEntry {
 }
 const linterDiagnosticsCache = new Map<string, LinterCacheEntry>();
 
-function linterCacheKey(filePath: string, linterName: string): string {
-    return `${filePath}\x00${linterName}`;
+function targetLinterKey(targetName: string, linterName: string): string {
+    return `${targetName}\x00${linterName}`;
+}
+
+function linterCacheKey(filePath: string, targetName: string, linterName: string): string {
+    return `${filePath}\x00${targetLinterKey(targetName, linterName)}`;
 }
 
 export function clearDiagnosticsCache(): void {
@@ -152,7 +156,11 @@ const SHELL_PATH_PREFIX = 'LINT_RUNNER_PATH=';
 
 type RunMode = 'manual' | 'onSave' | 'onOpen';
 type FixerRunMode = Extract<RunMode, 'manual' | 'onSave'>;
-type DiagnosticsHandler = (linterName: string, diagnostics: vscode.Diagnostic[]) => void;
+type DiagnosticsHandler = (
+    targetName: string,
+    linterName: string,
+    diagnostics: vscode.Diagnostic[]
+) => void;
 let commandEnvPromise: Promise<NodeJS.ProcessEnv> | undefined;
 
 export interface CommandConfig {
@@ -1064,6 +1072,7 @@ export async function normalizeDiagnosticRanges(
 }
 
 async function spawnLinter(
+    targetName: string,
     linter: LinterConfig,
     filePath: string,
     output: RunnerOutput,
@@ -1096,7 +1105,7 @@ async function spawnLinter(
     }
 
     if (trigger !== 'manual') {
-        const key = linterCacheKey(filePath, linter.name);
+        const key = linterCacheKey(filePath, targetName, linter.name);
         const cached = linterDiagnosticsCache.get(key);
         if (cached !== undefined && fileStat !== undefined) {
             if (fileStat.mtimeMs === cached.mtime && fileStat.size === cached.size) {
@@ -1128,7 +1137,7 @@ async function spawnLinter(
 
         try {
             const stat = fileStat ?? await fs.promises.stat(filePath);
-            linterDiagnosticsCache.set(linterCacheKey(filePath, linter.name), {
+            linterDiagnosticsCache.set(linterCacheKey(filePath, targetName, linter.name), {
                 mtime: stat.mtimeMs,
                 size: stat.size,
                 diagnostics: diags,
@@ -1178,6 +1187,7 @@ async function spawnTargetLinters(
     const diagnostics = await Promise.all(
         matchingLinters.map(async (linter) => {
             const linterDiagnostics = await spawnLinter(
+                target.name,
                 linter,
                 filePath,
                 output,
@@ -1185,7 +1195,7 @@ async function spawnTargetLinters(
                 trigger,
                 shouldContinue
             );
-            onLinterDiagnostics(linter.name, linterDiagnostics);
+            onLinterDiagnostics(target.name, linter.name, linterDiagnostics);
             return linterDiagnostics;
         })
     );
@@ -1360,7 +1370,7 @@ function createDiagnosticsRun(
     uri: vscode.Uri,
     diagnostics: vscode.DiagnosticCollection,
     runId: number,
-    linterNames: string[]
+    linterKeys: string[]
 ): {
     publish: DiagnosticsHandler;
     finish: () => void;
@@ -1371,19 +1381,19 @@ function createDiagnosticsRun(
     // remain visible while this run (e.g. a manual phpstan) executes.
     const uriString = uri.toString();
     const linterMap = getOrCreateLinterMap(uriString);
-    for (const name of linterNames) {
-        linterMap.delete(name);
+    for (const key of linterKeys) {
+        linterMap.delete(key);
     }
     republishMergedDiagnostics(uri, linterMap, diagnostics);
 
     const isActive = (): boolean => isActiveFileRun(filePath, runId);
 
     return {
-        publish(linterName, diags) {
+        publish(targetName, linterName, diags) {
             if (!isActive()) {
                 return;
             }
-            linterMap.set(linterName, diags);
+            linterMap.set(targetLinterKey(targetName, linterName), diags);
             republishMergedDiagnostics(uri, linterMap, diagnostics);
         },
         finish() {
@@ -1433,12 +1443,12 @@ export async function runLinters(
         return;
     }
 
-    const linterNames = [...new Set(matching.flatMap((target) =>
+    const linterKeys = [...new Set(matching.flatMap((target) =>
         target.linters
             .filter((linter) => shouldRunLinter(linter, trigger))
-            .map((linter) => linter.name)
+            .map((linter) => targetLinterKey(target.name, linter.name))
     ))];
-    const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics, runId, linterNames);
+    const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics, runId, linterKeys);
 
     if (!shouldContinue()) {
         abort();
@@ -1515,8 +1525,8 @@ export async function runRunnableLinters(
     const runId = startFileRun(filePath);
     const shouldContinue = (): boolean => isActiveFileRun(filePath, runId);
     const uri = vscode.Uri.file(filePath);
-    const linterNames = [...new Set(linters.map((r) => r.linter.name))];
-    const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics, runId, linterNames);
+    const linterKeys = [...new Set(linters.map((r) => targetLinterKey(r.target.name, r.linter.name)))];
+    const { publish, finish, abort } = createDiagnosticsRun(filePath, uri, diagnostics, runId, linterKeys);
     let lintersRun = 0;
     const lintersByTarget = new Map<ResolvedTargetConfig, RunnableLinter[]>();
 
@@ -1547,6 +1557,7 @@ export async function runRunnableLinters(
                     targetLinters.map(async (runnable) => {
                         lintersRun++;
                         const linterDiagnostics = await spawnLinter(
+                            runnable.target.name,
                             runnable.linter,
                             filePath,
                             output,
@@ -1554,7 +1565,7 @@ export async function runRunnableLinters(
                             'manual',
                             shouldContinue
                         );
-                        publish(runnable.linter.name, linterDiagnostics);
+                        publish(runnable.target.name, runnable.linter.name, linterDiagnostics);
                     })
                 );
             })
