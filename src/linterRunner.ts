@@ -592,30 +592,32 @@ export function validateTargetScopes(
                 }
 
                 const isExistingLinter = nextTargetState.linters.has(linter.name);
-                if (!isExistingLinter && !hasCommandAndArgs(linter.command, linter.args)) {
-                    pushValidationIssue(issues, scope.label, `${linterLabel} is missing command or args.`);
-                }
+                if (linter.enabled !== false) {
+                    if (!isExistingLinter && !hasCommandAndArgs(linter.command, linter.args)) {
+                        pushValidationIssue(issues, scope.label, `${linterLabel} is missing command or args.`);
+                    }
 
-                if (!isExistingLinter || linter.parser !== undefined) {
-                    validateParserConfig(scope.label, linterLabel, linter.parser, issues);
-                }
+                    if (!isExistingLinter || linter.parser !== undefined) {
+                        validateParserConfig(scope.label, linterLabel, linter.parser, issues);
+                    }
 
-                validateCommandAvailability(
-                    scope.label,
-                    linterLabel,
-                    linter.command,
-                    env,
-                    platform,
-                    issues
-                );
-                validateCommandConfigs(
-                    scope.label,
-                    linterLabel,
-                    linter.preCommands,
-                    env,
-                    platform,
-                    issues
-                );
+                    validateCommandAvailability(
+                        scope.label,
+                        linterLabel,
+                        linter.command,
+                        env,
+                        platform,
+                        issues
+                    );
+                    validateCommandConfigs(
+                        scope.label,
+                        linterLabel,
+                        linter.preCommands,
+                        env,
+                        platform,
+                        issues
+                    );
+                }
                 validateSuccessExitCodes(scope.label, linterLabel, linter.successExitCodes, issues);
                 nextTargetState.linters.add(linter.name);
             }
@@ -641,18 +643,20 @@ export function validateTargetScopes(
 
                 const isExistingFixer =
                     fixer.name !== undefined && nextTargetState.fixers.has(fixer.name);
-                if (!isExistingFixer && !hasCommandAndArgs(fixer.command, fixer.args)) {
-                    pushValidationIssue(issues, scope.label, `${fixerLabel} is missing command or args.`);
-                }
+                if (fixer.enabled !== false) {
+                    if (!isExistingFixer && !hasCommandAndArgs(fixer.command, fixer.args)) {
+                        pushValidationIssue(issues, scope.label, `${fixerLabel} is missing command or args.`);
+                    }
 
-                validateCommandAvailability(
-                    scope.label,
-                    fixerLabel,
-                    fixer.command,
-                    env,
-                    platform,
-                    issues
-                );
+                    validateCommandAvailability(
+                        scope.label,
+                        fixerLabel,
+                        fixer.command,
+                        env,
+                        platform,
+                        issues
+                    );
+                }
                 validateSuccessExitCodes(scope.label, fixerLabel, fixer.successExitCodes, issues);
 
                 if (fixer.name !== undefined) {
