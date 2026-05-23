@@ -1905,6 +1905,62 @@ suite('Config validation', () => {
         );
     });
 
+    test('skips incomplete and unavailable disabled linters and fixers', () => {
+        const issues = validateTargetScopes(
+            [
+                {
+                    label: 'Workspace settings',
+                    targets: [
+                        {
+                            name: 'PHP',
+                            languages: ['php'],
+                            linters: [
+                                {
+                                    name: 'disabled-linter',
+                                    enabled: false,
+                                },
+                                {
+                                    name: 'disabled-parser',
+                                    enabled: false,
+                                    command: 'missing-command',
+                                    args: ['${file}'],
+                                    parser: { pattern: String.raw`(?<line>\d+)` },
+                                },
+                                {
+                                    name: 'disabled-pre-command',
+                                    enabled: false,
+                                    command: '/bin/true',
+                                    args: ['${file}'],
+                                    parser: BASE_PARSER,
+                                    preCommands: [{ command: 'missing-pre-command' }],
+                                },
+                            ],
+                            fixers: [
+                                {
+                                    name: 'disabled-fixer',
+                                    enabled: false,
+                                },
+                                {
+                                    name: 'disabled-missing-command',
+                                    enabled: false,
+                                    command: 'missing-command',
+                                    args: ['${file}'],
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+            {
+                knownLanguageIds: ['php'],
+                env: { PATH: '' },
+                platform: 'linux',
+            }
+        );
+
+        assert.deepStrictEqual(issues, []);
+    });
+
     test('reports invalid successExitCodes entries', () => {
         const issues = validateTargetScopes(
             [
