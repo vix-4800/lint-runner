@@ -1008,7 +1008,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 configValid = await refreshConfigValidation();
 
                 if (
-                    (!wasEnabled || !wasConfigValid || event.affectsConfiguration('lintRunner.enabled')) &&
+                    (!wasEnabled || !wasConfigValid) &&
                     lintRunnerEnabled &&
                     configValid &&
                     vscode.workspace.isTrusted
