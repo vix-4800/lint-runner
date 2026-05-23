@@ -523,7 +523,7 @@ suite('Linter Runner Test Suite', () => {
             const fixersRun = await runFixers(filePath, output, statusBar, 'manual', [failingFixer, quickFixer]);
 
             await fs.access(firstStartedMarkerPath);
-            await assert.rejects(fs.access(secondStartedMarkerPath));
+            await assert.rejects(fs.access(secondStartedMarkerPath), { code: 'ENOENT' });
             assert.strictEqual(fixersRun, 0);
         } finally {
             output.dispose();
