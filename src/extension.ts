@@ -15,6 +15,7 @@ import {
     clearAllFileLinterDiagnostics,
     clearFileDiagnosticsCache,
     validateLintRunnerConfig,
+    type RunnerFailure,
     type RunnerOutput,
     type RunnableFixer,
     type RunnableLinter,
@@ -88,6 +89,29 @@ interface ManualFixerRunnerDeps {
         output: RunnerOutput,
         statusBar: vscode.StatusBarItem
     ) => Promise<void>;
+    showWarningMessage?: (message: string) => Thenable<string | undefined>;
+}
+
+interface ManualLinterRunnerDeps {
+    runWithManualNotification?: <T>(
+        filePath: string,
+        labels: readonly string[],
+        task: () => Promise<T>
+    ) => Promise<T>;
+    runLinters?: (
+        filePath: string,
+        trigger: 'manual',
+        diagnostics: vscode.DiagnosticCollection,
+        output: RunnerOutput,
+        statusBar: vscode.StatusBarItem
+    ) => Promise<void>;
+    runRunnableLinters?: (
+        filePath: string,
+        diagnostics: vscode.DiagnosticCollection,
+        output: RunnerOutput,
+        statusBar: vscode.StatusBarItem,
+        linters: readonly RunnableLinter[]
+    ) => Promise<number>;
     showWarningMessage?: (message: string) => Thenable<string | undefined>;
 }
 
@@ -174,6 +198,44 @@ export async function runManualTaskWithNotification<T>(
             }
         }
     );
+}
+
+function createFailureAwareOutput(output: RunnerOutput, failures: RunnerFailure[]): RunnerOutput {
+    return {
+        appendLine(value: string): void {
+            output.appendLine(value);
+        },
+        reportFailure(failure: RunnerFailure): void {
+            failures.push(failure);
+            output.reportFailure?.(failure);
+        },
+    };
+}
+
+function getManualRunFailureMessage(failures: readonly RunnerFailure[]): string | undefined {
+    if (failures.length === 0) {
+        return undefined;
+    }
+
+    if (failures.length === 1) {
+        const [failure] = failures;
+        return `LintRunner: ${failure.label} failed: ${failure.message}`;
+    }
+
+    const labels = uniqueLabels(failures.map((failure) => failure.label));
+    const preview = labels.slice(0, 2);
+    const suffix = labels.length > preview.length ? `, +${labels.length - preview.length} more` : '';
+    return `LintRunner: ${labels.length} tools failed: ${preview.join(', ')}${suffix}. See output for details.`;
+}
+
+async function showManualRunFailureWarning(
+    failures: readonly RunnerFailure[],
+    showWarningMessage: (message: string) => Thenable<string | undefined>
+): Promise<void> {
+    const message = getManualRunFailureMessage(failures);
+    if (message !== undefined) {
+        await showWarningMessage(message);
+    }
 }
 
 function hasValidConfig(): boolean {
@@ -677,25 +739,37 @@ export async function runManualFixersForEditor(
         return;
     }
 
+    const failures: RunnerFailure[] = [];
+    const failureAwareOutput = createFailureAwareOutput(output, failures);
     await runWithManualNotification(fileName, getRunnableFixerLabels(selectedFixers), async () =>
-        runSelectedFixers(fileName, output, statusBar, 'manual', selectedFixers)
+        runSelectedFixers(fileName, failureAwareOutput, statusBar, 'manual', selectedFixers)
     );
+    await showManualRunFailureWarning(failures, showWarningMessage);
     await refreshLinters(fileName, 'onSave', diagnostics, output, statusBar);
 }
 
-async function runManualLintersForFile(
+export async function runManualLintersForFile(
     fileName: string,
     diagnostics: vscode.DiagnosticCollection,
     output: RunnerOutput,
     statusBar: vscode.StatusBarItem,
-    linters?: readonly RunnableLinter[]
+    linters?: readonly RunnableLinter[],
+    deps: ManualLinterRunnerDeps = {}
 ): Promise<void> {
     const manualLinters = linters ?? getRunnableLinters(fileName, 'manual');
-    await runManualTaskWithNotification(fileName, getRunnableLinterLabels(manualLinters), async () =>
+    const runWithManualNotification = deps.runWithManualNotification ?? runManualTaskWithNotification;
+    const runSelectedLinters = deps.runRunnableLinters ?? runRunnableLinters;
+    const runAllLinters = deps.runLinters ?? runLinters;
+    const showWarningMessage = deps.showWarningMessage ?? vscode.window.showWarningMessage;
+    const failures: RunnerFailure[] = [];
+    const failureAwareOutput = createFailureAwareOutput(output, failures);
+
+    await runWithManualNotification(fileName, getRunnableLinterLabels(manualLinters), async () =>
         linters === undefined
-            ? runLinters(fileName, 'manual', diagnostics, output, statusBar)
-            : runRunnableLinters(fileName, diagnostics, output, statusBar, manualLinters)
+            ? runAllLinters(fileName, 'manual', diagnostics, failureAwareOutput, statusBar)
+            : runSelectedLinters(fileName, diagnostics, failureAwareOutput, statusBar, manualLinters)
     );
+    await showManualRunFailureWarning(failures, showWarningMessage);
 }
 
 async function openActionsMenu(

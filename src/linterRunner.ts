@@ -279,7 +279,14 @@ export interface CommandResult {
     error?: string;
 }
 
-export type RunnerOutput = Pick<vscode.OutputChannel, 'appendLine'>;
+export interface RunnerFailure {
+    label: string;
+    message: string;
+}
+
+export type RunnerOutput = Pick<vscode.OutputChannel, 'appendLine'> & {
+    reportFailure?: (failure: RunnerFailure) => void;
+};
 
 export interface TargetValidationScope {
     label: string;
@@ -474,6 +481,24 @@ function validateCommandConfigs(
     }
 }
 
+function validateSuccessExitCodes(
+    scopeLabel: string,
+    ownerLabel: string,
+    successExitCodes: unknown,
+    issues: string[]
+): void {
+    if (successExitCodes === undefined) {
+        return;
+    }
+
+    if (
+        !Array.isArray(successExitCodes) ||
+        successExitCodes.some((code) => typeof code !== 'number' || !Number.isInteger(code))
+    ) {
+        pushValidationIssue(issues, scopeLabel, `${ownerLabel} successExitCodes must be an array of integers.`);
+    }
+}
+
 function getScopedTargetPatches(resource?: vscode.Uri): TargetValidationScope[] {
     const config =
         resource === undefined
@@ -591,6 +616,7 @@ export function validateTargetScopes(
                     platform,
                     issues
                 );
+                validateSuccessExitCodes(scope.label, linterLabel, linter.successExitCodes, issues);
                 nextTargetState.linters.add(linter.name);
             }
 
@@ -627,6 +653,7 @@ export function validateTargetScopes(
                     platform,
                     issues
                 );
+                validateSuccessExitCodes(scope.label, fixerLabel, fixer.successExitCodes, issues);
 
                 if (fixer.name !== undefined) {
                     nextTargetState.fixers.add(fixer.name);
@@ -1241,6 +1268,10 @@ function formatExitCodePolicyFailure(result: CommandResult, successExitCodes?: r
     return `exit ${result.code ?? 'null'} is not in successExitCodes [${successExitCodes.join(', ')}]`;
 }
 
+function reportCommandFailure(output: RunnerOutput, label: string, message: string): void {
+    output.reportFailure?.({ label, message });
+}
+
 function formatRunningLinterName(name: string, count: number): string {
     return count > 1 ? `${name} x${count}` : name;
 }
@@ -1533,8 +1564,10 @@ async function spawnLinter(
             return [];
         }
         if (!isAcceptedExitCode(result, linter.successExitCodes)) {
+            const failureMessage = formatExitCodePolicyFailure(result, linter.successExitCodes);
             logCommandResult(linter.name, result, output);
-            output.appendLine(`[${linter.name}] failed: ${formatExitCodePolicyFailure(result, linter.successExitCodes)}`);
+            output.appendLine(`[${linter.name}] failed: ${failureMessage}`);
+            reportCommandFailure(output, `${targetName}:${linter.name}`, failureMessage);
             return [];
         }
         const diags = parseLinterOutput(linter, result);
@@ -1554,7 +1587,9 @@ async function spawnLinter(
 
         return diags;
     } catch (err) {
-        output.appendLine(`[${linter.name}] failed: ${String(err)}`);
+        const failureMessage = String(err);
+        output.appendLine(`[${linter.name}] failed: ${failureMessage}`);
+        reportCommandFailure(output, `${targetName}:${linter.name}`, failureMessage);
         return [];
     } finally {
         stopLinterStatus(linter.name, statusBar);
@@ -1660,12 +1695,16 @@ async function runTargetFixer(
         }
         logCommandResult(label, result, output);
         if (!isAcceptedExitCode(result, fixer.successExitCodes)) {
-            output.appendLine(`[${label}] failed: ${formatExitCodePolicyFailure(result, fixer.successExitCodes)}`);
+            const failureMessage = formatExitCodePolicyFailure(result, fixer.successExitCodes);
+            output.appendLine(`[${label}] failed: ${failureMessage}`);
+            reportCommandFailure(output, label, failureMessage);
             return false;
         }
         return true;
     } catch (err) {
-        output.appendLine(`[${label}] failed: ${String(err)}`);
+        const failureMessage = String(err);
+        output.appendLine(`[${label}] failed: ${failureMessage}`);
+        reportCommandFailure(output, label, failureMessage);
         return true;
     } finally {
         stopLinterStatus(statusName, statusBar);
