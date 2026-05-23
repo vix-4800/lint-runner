@@ -24,6 +24,7 @@ import {
     runOnOpenLintersForVisibleEditors,
     runManualTaskWithNotification,
     runManualFixersForEditor,
+    runManualLintersForFile,
 } from '../extension.js';
 import type { ResolvedTargetConfig, RunnableFixer, RunnableLinter } from '../linterRunner.js';
 
@@ -759,6 +760,143 @@ suite('Extension Test Suite', () => {
             `notify:${fileUri.fsPath}:PHP:fix:php-cs-fixer`,
             `fix:${fileUri.fsPath}:manual:php-cs-fixer`,
             `lint:${fileUri.fsPath}:onSave`,
+        ]);
+    });
+
+    test('runManualFixersForEditor shows a warning when a fixer fails', async () => {
+        const fileUri = vscode.Uri.file('/tmp/manual-fixer-failure.ts');
+        const calls: string[] = [];
+        const fixer = createTestRunnableFixer('php-cs-fixer', 'PHP', 'manual');
+        const diagnostics = {
+            clear() {
+                // no-op
+            },
+            delete() {
+                // no-op
+            },
+            dispose() {
+                // no-op
+            },
+            set() {
+                // no-op
+            },
+        } as unknown as vscode.DiagnosticCollection;
+        const output = {
+            appendLine() {
+                // no-op
+            },
+        };
+        const statusBar = {
+            hide() {
+                // no-op
+            },
+            show() {
+                // no-op
+            },
+            text: '',
+            tooltip: '',
+            name: '',
+        } as unknown as vscode.StatusBarItem;
+
+        await runManualFixersForEditor(
+            {
+                document: {
+                    fileName: fileUri.fsPath,
+                    uri: fileUri,
+                } as Pick<vscode.TextDocument, 'fileName' | 'uri'> as vscode.TextDocument,
+            } as vscode.TextEditor,
+            diagnostics,
+            output,
+            statusBar,
+            [fixer],
+            {
+                saveDocumentBeforeManualFixers: async () => true,
+                runWithManualNotification: async (_filePath, _labels, task) => task(),
+                runFixers: async (_filePath, runOutput) => {
+                    runOutput.reportFailure?.({
+                        label: 'PHP:fix:php-cs-fixer',
+                        message: 'exit 2 is not in successExitCodes [0, 1]',
+                    });
+                    return 0;
+                },
+                runLinters: async () => {
+                    calls.push('lint');
+                },
+                showWarningMessage: async (message) => {
+                    calls.push(`warn:${message}`);
+                    return undefined;
+                },
+            }
+        );
+
+        assert.deepStrictEqual(calls, [
+            'warn:LintRunner: PHP:fix:php-cs-fixer failed: exit 2 is not in successExitCodes [0, 1]',
+            'lint',
+        ]);
+    });
+
+    test('runManualLintersForFile shows a warning when a linter fails', async () => {
+        const fileUri = vscode.Uri.file('/tmp/manual-linter-failure.ts');
+        const calls: string[] = [];
+        const diagnostics = {
+            clear() {
+                // no-op
+            },
+            delete() {
+                // no-op
+            },
+            dispose() {
+                // no-op
+            },
+            set() {
+                // no-op
+            },
+        } as unknown as vscode.DiagnosticCollection;
+        const output = {
+            appendLine() {
+                // no-op
+            },
+        };
+        const statusBar = {
+            hide() {
+                // no-op
+            },
+            show() {
+                // no-op
+            },
+            text: '',
+            tooltip: '',
+            name: '',
+        } as unknown as vscode.StatusBarItem;
+
+        await runManualLintersForFile(
+            fileUri.fsPath,
+            diagnostics,
+            output,
+            statusBar,
+            [createTestRunnableLinter('phpstan', 'PHP', 'manual')],
+            {
+                runWithManualNotification: async (_filePath, labels, task) => {
+                    calls.push(`notify:${labels.join(',')}`);
+                    return task();
+                },
+                runRunnableLinters: async (_filePath, _diagnostics, runOutput) => {
+                    runOutput.reportFailure?.({
+                        label: 'PHP:phpstan',
+                        message: 'spawn ENOENT',
+                    });
+                    return 1;
+                },
+                showWarningMessage: async (message) => {
+                    calls.push(`warn:${message}`);
+                    return undefined;
+                },
+            }
+        );
+
+        assert.deepStrictEqual(calls, [
+            'notify:PHP:phpstan',
+            'warn:LintRunner: PHP:phpstan failed: spawn ENOENT',
         ]);
     });
 });

@@ -1905,6 +1905,55 @@ suite('Config validation', () => {
         );
     });
 
+    test('reports invalid successExitCodes entries', () => {
+        const issues = validateTargetScopes(
+            [
+                {
+                    label: 'Workspace settings',
+                    targets: [
+                        {
+                            name: 'PHP',
+                            languages: ['php'],
+                            linters: [
+                                {
+                                    name: 'phpstan',
+                                    command: '/bin/true',
+                                    args: ['${file}'],
+                                    parser: BASE_PARSER,
+                                    successExitCodes: [0, 1.5] as unknown as number[],
+                                },
+                            ],
+                            fixers: [
+                                {
+                                    name: 'php-cs-fixer',
+                                    command: '/bin/true',
+                                    args: ['fix', '${file}'],
+                                    successExitCodes: [0, '8'] as unknown as number[],
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+            {
+                knownLanguageIds: ['php'],
+                env: { PATH: '' },
+                platform: 'linux',
+            }
+        );
+
+        assert.ok(
+            issues.includes(
+                "Workspace settings: target 'PHP' linter 'phpstan' successExitCodes must be an array of integers."
+            )
+        );
+        assert.ok(
+            issues.includes(
+                "Workspace settings: target 'PHP' fixer 'php-cs-fixer' successExitCodes must be an array of integers."
+            )
+        );
+    });
+
     test('reports safely checkable commands that are not found', () => {
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-runner-validate-'));
         const existingCommand = path.join(tempDir, 'existing-command');

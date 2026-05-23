@@ -388,6 +388,66 @@ suite('Linter Runner Test Suite', () => {
         }
     });
 
+    test('runRunnableLinters reports failures outside successExitCodes', async function () {
+        this.timeout(10_000);
+
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-linter-failure-report-'));
+        const filePath = path.join(tmpDir, 'test.ts');
+        const scriptPath = path.join(tmpDir, 'fail-linter.js');
+        await fs.writeFile(filePath, 'const value = 1;\n');
+        await fs.writeFile(scriptPath, 'process.exit(2);\n');
+
+        const diagnostics = vscode.languages.createDiagnosticCollection('lintRunner-linter-failure-report-test');
+        const failures: Array<{ label: string; message: string }> = [];
+        const output = {
+            appendLine() {
+                // no-op
+            },
+            reportFailure(failure: { label: string; message: string }) {
+                failures.push(failure);
+            },
+        };
+        const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+        const target: ResolvedTargetConfig = {
+            name: 'PHP',
+            filePatterns: [],
+            languages: ['typescript'],
+            preCommands: [],
+            linters: [],
+            fixers: [],
+        };
+        const runnable: RunnableLinter = {
+            label: 'phpstan',
+            description: target.name,
+            detail: process.execPath,
+            target,
+            linter: {
+                name: 'phpstan',
+                command: process.execPath,
+                args: [scriptPath],
+                parser: {
+                    pattern: '(?<line>\\d+):(?<message>.+)',
+                },
+                successExitCodes: [0, 1],
+                run: 'manual',
+            },
+        };
+
+        try {
+            await runRunnableLinters(filePath, diagnostics, output, statusBar, [runnable]);
+            assert.deepStrictEqual(failures, [
+                {
+                    label: 'PHP:phpstan',
+                    message: 'exit 2 is not in successExitCodes [0, 1]',
+                },
+            ]);
+        } finally {
+            diagnostics.dispose();
+            statusBar.dispose();
+            await fs.rm(tmpDir, { recursive: true, force: true });
+        }
+    });
+
     test('runFixers shows the active fixer name in the status bar', async function () {
         this.timeout(10_000);
 
@@ -527,6 +587,54 @@ suite('Linter Runner Test Suite', () => {
             assert.strictEqual(fixersRun, 0);
         } finally {
             output.dispose();
+            statusBar.dispose();
+            await fs.rm(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    test('runFixers reports failures outside successExitCodes', async function () {
+        this.timeout(10_000);
+
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-fixer-failure-report-'));
+        const filePath = path.join(tmpDir, 'test.ts');
+        const scriptPath = path.join(tmpDir, 'fail-fixer.js');
+        await fs.writeFile(filePath, 'const value = 1;\n');
+        await fs.writeFile(scriptPath, 'process.exit(2);\n');
+
+        const failures: Array<{ label: string; message: string }> = [];
+        const output = {
+            appendLine() {
+                // no-op
+            },
+            reportFailure(failure: { label: string; message: string }) {
+                failures.push(failure);
+            },
+        };
+        const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+        const fixer: RunnableFixer = {
+            label: 'php-cs-fixer',
+            description: 'PHP',
+            detail: process.execPath,
+            targetName: 'PHP',
+            fixer: {
+                name: 'php-cs-fixer',
+                command: process.execPath,
+                args: [scriptPath],
+                successExitCodes: [0, 1],
+            },
+        };
+
+        try {
+            const fixersRun = await runFixers(filePath, output, statusBar, 'manual', [fixer]);
+
+            assert.strictEqual(fixersRun, 0);
+            assert.deepStrictEqual(failures, [
+                {
+                    label: 'PHP:fix:php-cs-fixer',
+                    message: 'exit 2 is not in successExitCodes [0, 1]',
+                },
+            ]);
+        } finally {
             statusBar.dispose();
             await fs.rm(tmpDir, { recursive: true, force: true });
         }
