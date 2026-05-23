@@ -212,6 +212,35 @@ suite('Linter Runner', () => {
         assert.strictEqual(targets[0].linters[0].maxFileSize, 4096);
     });
 
+    test('keeps successExitCodes in resolved target configs', () => {
+        const targets = resolveConfiguredTargets([
+            {
+                name: 'PHP',
+                languages: ['php'],
+                linters: [
+                    {
+                        name: 'phpstan',
+                        command: 'phpstan',
+                        args: ['analyse', '${file}'],
+                        parser: TEST_REGEX_PARSER,
+                        successExitCodes: [0, 1],
+                    },
+                ],
+                fixers: [
+                    {
+                        name: 'php-cs-fixer',
+                        command: 'php-cs-fixer',
+                        args: ['fix', '${file}'],
+                        successExitCodes: [0, 8],
+                    },
+                ],
+            },
+        ]);
+
+        assert.deepStrictEqual(targets[0].linters[0].successExitCodes, [0, 1]);
+        assert.deepStrictEqual(targets[0].fixers[0].successExitCodes, [0, 8]);
+    });
+
     test('runs onOpen linters again on save', () => {
         const linter: LinterConfig = {
             name: 'markdownlint',
@@ -1503,6 +1532,29 @@ suite('mergeConfiguredTargets', () => {
         assert.strictEqual(linters[0].maxFileSize, 2048);
     });
 
+    test('patches linter successExitCodes by name', () => {
+        const global = [
+            {
+                name: 'PHP',
+                languages: ['php'],
+                linters: [
+                    { name: 'phpstan', command: 'phpstan', args: ['${file}'], parser: BASE_PARSER, successExitCodes: [0] },
+                ],
+            },
+        ];
+        const patches: TargetPatch[] = [
+            {
+                name: 'PHP',
+                linters: [
+                    { name: 'phpstan', successExitCodes: [0, 1] },
+                ],
+            },
+        ];
+        const result = mergeConfiguredTargets(global, patches);
+        const linters = result[0].linters ?? [];
+        assert.deepStrictEqual(linters[0].successExitCodes, [0, 1]);
+    });
+
     test('appends new linter to existing target when name does not match', () => {
         const global = [
             {
@@ -1668,6 +1720,29 @@ suite('mergeConfiguredTargets', () => {
         const fixers = result[0].fixers ?? [];
         assert.strictEqual(fixers.length, 1);
         assert.deepStrictEqual(fixers[0].args, ['fix', '--dry-run', '${file}']);
+    });
+
+    test('patches fixer successExitCodes by name', () => {
+        const global = [
+            {
+                name: 'PHP',
+                languages: ['php'],
+                fixers: [
+                    { name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix', '${file}'], successExitCodes: [0] },
+                ],
+            },
+        ];
+        const patches: TargetPatch[] = [
+            {
+                name: 'PHP',
+                fixers: [
+                    { name: 'php-cs-fixer', successExitCodes: [0, 8] },
+                ],
+            },
+        ];
+        const result = mergeConfiguredTargets(global, patches);
+        const fixers = result[0].fixers ?? [];
+        assert.deepStrictEqual(fixers[0].successExitCodes, [0, 8]);
     });
 
     test('duplicate target names in the same source merge rather than duplicate', () => {
