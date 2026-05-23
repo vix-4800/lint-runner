@@ -287,12 +287,13 @@ async function collectConfigValidationIssues(): Promise<ConfigValidationIssues> 
 async function refreshConfigValidation(showSuccessMessage = false): Promise<boolean> {
     configValidationIssues = await collectConfigValidationIssues();
     configValidationWarningShown = false;
+    const configValid = hasValidConfig();
 
-    if (configValidationIssues.warnings.length > 0 || !hasValidConfig()) {
+    if (configValidationIssues.warnings.length > 0 || !configValid) {
         showConfigValidationWarning();
     }
 
-    if (!hasValidConfig()) {
+    if (!configValid) {
         return false;
     }
 
