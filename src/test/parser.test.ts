@@ -1932,7 +1932,12 @@ suite('Config validation', () => {
                                     command: '/bin/true',
                                     args: ['${file}'],
                                     parser: BASE_PARSER,
-                                    preCommands: [{ command: 'missing-pre-command' }],
+                                    preCommands: [
+                                        { command: 'missing-pre-command' } as unknown as {
+                                            command: string;
+                                            args: string[];
+                                        },
+                                    ],
                                 },
                             ],
                             fixers: [
