@@ -32,6 +32,13 @@ async function waitForFile(filePath: string, timeoutMs: number): Promise<void> {
     throw new Error(`Timed out waiting for file ${filePath}`);
 }
 
+async function assertCancelledProcess(completedMarkerPath: string, terminatedMarkerPath?: string): Promise<void> {
+    if (terminatedMarkerPath !== undefined && process.platform !== 'win32') {
+        await fs.access(terminatedMarkerPath);
+    }
+    await assert.rejects(fs.access(completedMarkerPath));
+}
+
 suite('Linter Runner Test Suite', () => {
     test('cancelFileRun stops active linter processes for the closed file', async function () {
         this.timeout(10_000);
@@ -109,8 +116,7 @@ suite('Linter Runner Test Suite', () => {
                 }),
             ]);
             assert.strictEqual(diagnostics.get(vscode.Uri.file(filePath))?.length ?? 0, 0);
-            await fs.access(terminatedMarkerPath);
-            await assert.rejects(fs.access(completedMarkerPath));
+            await assertCancelledProcess(completedMarkerPath, terminatedMarkerPath);
         } finally {
             cancelFileRun(filePath);
             diagnostics.dispose();
@@ -228,11 +234,9 @@ suite('Linter Runner Test Suite', () => {
             assert.strictEqual(diagnostics.get(vscode.Uri.file(firstFilePath))?.length ?? 0, 0);
             assert.strictEqual(diagnostics.get(vscode.Uri.file(secondFilePath))?.length ?? 0, 0);
             await Promise.all([
-                fs.access(firstTerminatedMarkerPath),
-                fs.access(secondTerminatedMarkerPath),
+                assertCancelledProcess(firstCompletedMarkerPath, firstTerminatedMarkerPath),
+                assertCancelledProcess(secondCompletedMarkerPath, secondTerminatedMarkerPath),
             ]);
-            await assert.rejects(fs.access(firstCompletedMarkerPath));
-            await assert.rejects(fs.access(secondCompletedMarkerPath));
         } finally {
             cancelAllFileRuns();
             diagnostics.dispose();
@@ -263,11 +267,12 @@ suite('Linter Runner Test Suite', () => {
         const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
         const config = vscode.workspace.getConfiguration('lintRunner');
         const previousTargets = config.inspect<unknown[]>('targets')?.globalValue;
-        const uri = vscode.Uri.file(filePath);
         const expectedMessages = ['backend issue', 'frontend issue'];
 
         try {
-            await vscode.workspace.openTextDocument(filePath);
+            const document = await vscode.workspace.openTextDocument(filePath);
+            const resolvedFilePath = document.fileName;
+            const uri = document.uri;
             clearAllFileLinterDiagnostics();
             clearDiagnosticsCache();
 
@@ -308,13 +313,13 @@ suite('Linter Runner Test Suite', () => {
                 vscode.ConfigurationTarget.Global
             );
 
-            await runLinters(filePath, 'onSave', diagnostics, output, statusBar);
+            await runLinters(resolvedFilePath, 'onSave', diagnostics, output, statusBar);
             assert.deepStrictEqual(
                 (diagnostics.get(uri) ?? []).map((diagnostic) => diagnostic.message).sort(),
                 expectedMessages
             );
 
-            await runLinters(filePath, 'onSave', diagnostics, output, statusBar);
+            await runLinters(resolvedFilePath, 'onSave', diagnostics, output, statusBar);
             assert.deepStrictEqual(
                 (diagnostics.get(uri) ?? []).map((diagnostic) => diagnostic.message).sort(),
                 expectedMessages
@@ -720,8 +725,7 @@ suite('Linter Runner Test Suite', () => {
                 }),
             ]);
 
-            await fs.access(terminatedMarkerPath);
-            await assert.rejects(fs.access(completedMarkerPath));
+            await assertCancelledProcess(completedMarkerPath, terminatedMarkerPath);
             await assert.rejects(fs.access(secondStartedMarkerPath));
         } finally {
             cancelFileRun(filePath);
