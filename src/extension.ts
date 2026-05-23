@@ -14,15 +14,19 @@ import {
     clearFileLinterDiagnostics,
     clearAllFileLinterDiagnostics,
     clearFileDiagnosticsCache,
+    validateLintRunnerConfig,
     type RunnerOutput,
     type RunnableFixer,
     type RunnableLinter,
 } from './linterRunner.js';
 
 let untrustedWorkspaceWarningShown = false;
+let configValidationIssues: string[] = [];
+let configValidationWarningShown = false;
 const skipFixersOnSave = new Set<string>();
 const saveDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const lastSavedContentHashes = new Map<string, string>();
+const CONFIG_VALIDATION_PREVIEW_LIMIT = 5;
 
 export function computeContentHash(text: string): string {
     return crypto.createHash('sha256').update(text).digest('hex');
@@ -170,6 +174,52 @@ export async function runManualTaskWithNotification<T>(
             }
         }
     );
+}
+
+function hasValidConfig(): boolean {
+    return configValidationIssues.length === 0;
+}
+
+function getConfigValidationMessage(issues: readonly string[]): string {
+    const preview = issues.slice(0, CONFIG_VALIDATION_PREVIEW_LIMIT);
+    const lines = preview.map((issue) => `• ${issue}`);
+    if (issues.length > preview.length) {
+        lines.push(`• +${issues.length - preview.length} more issue(s)`);
+    }
+
+    return `LintRunner: Config validation failed (${issues.length} issue(s)).\n${lines.join('\n')}`;
+}
+
+function showConfigValidationWarning(): void {
+    if (configValidationIssues.length === 0) {
+        return;
+    }
+
+    vscode.window.showWarningMessage(getConfigValidationMessage(configValidationIssues));
+    configValidationWarningShown = true;
+}
+
+async function collectConfigValidationIssues(): Promise<string[]> {
+    const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
+    const resources = workspaceFolders.length === 0 ? [undefined] : workspaceFolders.map((folder) => folder.uri);
+    const results = await Promise.all(resources.map((resource) => validateLintRunnerConfig(resource)));
+    return [...new Set(results.flat())];
+}
+
+async function refreshConfigValidation(showSuccessMessage = false): Promise<boolean> {
+    configValidationIssues = await collectConfigValidationIssues();
+    configValidationWarningShown = false;
+
+    if (!hasValidConfig()) {
+        showConfigValidationWarning();
+        return false;
+    }
+
+    if (showSuccessMessage) {
+        vscode.window.showInformationMessage('LintRunner: Config is valid.');
+    }
+
+    return true;
 }
 
 function shouldEnableOutputChannel(): boolean {
@@ -409,6 +459,13 @@ function canRunWorkspaceCommands(showRepeatedWarning: boolean): boolean {
         return false;
     }
 
+    if (!hasValidConfig()) {
+        if (showRepeatedWarning || !configValidationWarningShown) {
+            showConfigValidationWarning();
+        }
+        return false;
+    }
+
     if (vscode.workspace.isTrusted) {
         return true;
     }
@@ -450,9 +507,15 @@ async function selectManualFixers(fileName: string): Promise<readonly RunnableFi
 
 export function getActionsStatusBarState(
     editor: Pick<vscode.TextEditor, 'document'> | undefined = getActiveFileEditor(),
-    isEnabled: (resource: vscode.Uri) => boolean = isLintRunnerEnabled
+    isEnabled: (resource: vscode.Uri) => boolean = isLintRunnerEnabled,
+    isConfigValid: () => boolean = hasValidConfig
 ): { text: string; tooltip: string } | undefined {
-    if (editor === undefined || !isUserOpenDocument(editor.document) || !isEnabled(editor.document.uri)) {
+    if (
+        editor === undefined ||
+        !isUserOpenDocument(editor.document) ||
+        !isEnabled(editor.document.uri) ||
+        !isConfigValid()
+    ) {
         return undefined;
     }
 
@@ -725,7 +788,7 @@ async function openActionsMenu(
     await selectedItem?.action?.();
 }
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const diagnostics = vscode.languages.createDiagnosticCollection('lintRunner');
     const output = new OutputChannelManager();
     output.sync(shouldEnableOutputChannel());
@@ -741,6 +804,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const seenOnOpenDocumentUris = new Set<string>();
     let lintRunnerEnabled = isLintRunnerEnabled();
+    let configValid = await refreshConfigValidation();
+    updateActionsStatusBar(actionsStatusBar);
+    codeLensRefreshEmitter.fire();
     if (canRunWorkspaceCommands(false)) {
         runOnOpenLintersForVisibleEditors(
             vscode.window.visibleTextEditors,
@@ -764,6 +830,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 const config = vscode.workspace.getConfiguration('lintRunner', document.uri);
                 if (
                     !isLintRunnerEnabled(config) ||
+                    !hasValidConfig() ||
                     config.get<boolean>('enableCodeLens') !== true ||
                     !vscode.workspace.isTrusted
                 ) {
@@ -788,6 +855,7 @@ export function activate(context: vscode.ExtensionContext): void {
                     const config = vscode.workspace.getConfiguration('lintRunner', document.uri);
                     if (
                         !isLintRunnerEnabled(config) ||
+                        !hasValidConfig() ||
                         config.get<boolean>('enableCodeActions') !== true ||
                         !vscode.workspace.isTrusted
                     ) {
@@ -923,9 +991,10 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 
     context.subscriptions.push(
-        vscode.workspace.onDidChangeConfiguration((event) => {
+        vscode.workspace.onDidChangeConfiguration(async (event) => {
             if (event.affectsConfiguration('lintRunner')) {
                 const wasEnabled = lintRunnerEnabled;
+                const wasConfigValid = configValid;
                 resetCommandEnv();
                 clearDiagnosticsCache();
                 clearAllPendingSaveDebounces();
@@ -936,11 +1005,12 @@ export function activate(context: vscode.ExtensionContext): void {
                 updateActionsStatusBar(actionsStatusBar);
                 codeLensRefreshEmitter.fire();
                 lintRunnerEnabled = isLintRunnerEnabled();
+                configValid = await refreshConfigValidation();
 
                 if (
-                    event.affectsConfiguration('lintRunner.enabled') &&
-                    !wasEnabled &&
+                    (!wasEnabled || !wasConfigValid) &&
                     lintRunnerEnabled &&
+                    configValid &&
                     vscode.workspace.isTrusted
                 ) {
                     runOnOpenLintersForVisibleEditors(
@@ -954,6 +1024,14 @@ export function activate(context: vscode.ExtensionContext): void {
                     );
                 }
             }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('lintRunner.validateConfig', async () => {
+            configValid = await refreshConfigValidation(true);
+            updateActionsStatusBar(actionsStatusBar);
+            codeLensRefreshEmitter.fire();
         })
     );
 

@@ -1,4 +1,6 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
@@ -14,6 +16,7 @@ import {
     resolveConfiguredTargets,
     shouldProcessLinterFile,
     shouldRunLinter,
+    validateTargetScopes,
     type TargetPatch,
     type LinterConfig,
     type RegexParserConfig,
@@ -1700,5 +1703,192 @@ suite('mergeConfiguredTargets', () => {
         assert.strictEqual(result.length, 1);
         assert.strictEqual(result[0].linters?.[0].name, 'phpstan');
         assert.strictEqual(result[0].fixers?.[0].name, 'php-cs-fixer');
+    });
+});
+
+suite('Config validation', () => {
+    const BASE_PARSER: RegexParserConfig = {
+        pattern: String.raw`(?<line>\d+):(?<message>.+)`,
+    };
+
+    test('allows target patches without languages when the target already exists in a higher scope', () => {
+        const issues = validateTargetScopes(
+            [
+                {
+                    label: 'User settings',
+                    targets: [{ name: 'PHP', languages: ['php'] }],
+                },
+                {
+                    label: 'Workspace settings',
+                    targets: [{ name: 'PHP', run: 'manual' }],
+                },
+            ],
+            {
+                knownLanguageIds: ['php'],
+                env: { PATH: '' },
+                platform: 'linux',
+            }
+        );
+
+        assert.deepStrictEqual(issues, []);
+    });
+
+    test('reports duplicate target, linter, and fixer names in the same scope', () => {
+        const issues = validateTargetScopes(
+            [
+                {
+                    label: 'Workspace settings',
+                    targets: [
+                        { name: 'PHP', languages: ['php'] },
+                        {
+                            name: 'PHP',
+                            languages: ['php'],
+                            linters: [
+                                { name: 'phpstan', command: 'phpstan', args: ['analyse'], parser: BASE_PARSER },
+                                { name: 'phpstan', command: 'phpstan', args: ['analyse'], parser: BASE_PARSER },
+                            ],
+                            fixers: [
+                                { name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix'] },
+                                { name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix'] },
+                            ],
+                        },
+                    ],
+                },
+            ],
+            {
+                knownLanguageIds: ['php'],
+                env: { PATH: '' },
+                platform: 'linux',
+            }
+        );
+
+        assert.ok(issues.includes("Workspace settings: duplicate target name 'PHP'."));
+        assert.ok(issues.includes("Workspace settings: target 'PHP' has duplicate linter name 'phpstan'."));
+        assert.ok(issues.includes("Workspace settings: target 'PHP' has duplicate fixer name 'php-cs-fixer'."));
+    });
+
+    test('reports missing tool fields, invalid parser groups, and unknown language ids', () => {
+        const issues = validateTargetScopes(
+            [
+                {
+                    label: 'Workspace settings',
+                    targets: [
+                        {
+                            name: 'Broken',
+                            languages: ['made-up-language'],
+                            linters: [
+                                {
+                                    name: 'eslint',
+                                    command: 'eslint',
+                                    args: ['${file}'],
+                                    parser: { pattern: String.raw`(?<line>\d+):(?<severity>\w+)` },
+                                },
+                                {
+                                    name: 'missing-linter',
+                                },
+                            ],
+                            fixers: [
+                                {
+                                    name: 'missing-fixer',
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+            {
+                knownLanguageIds: ['php', 'typescript'],
+                env: { PATH: '' },
+                platform: 'linux',
+            }
+        );
+
+        assert.ok(
+            issues.includes(
+                "Workspace settings: target 'Broken' contains unknown language id 'made-up-language'."
+            )
+        );
+        assert.ok(
+            issues.includes(
+                "Workspace settings: target 'Broken' linter 'eslint' parser is missing required capture groups: message."
+            )
+        );
+        assert.ok(
+            issues.includes(
+                "Workspace settings: target 'Broken' linter 'missing-linter' is missing command or args."
+            )
+        );
+        assert.ok(
+            issues.includes(
+                "Workspace settings: target 'Broken' linter 'missing-linter' parser is missing pattern."
+            )
+        );
+        assert.ok(
+            issues.includes(
+                "Workspace settings: target 'Broken' fixer 'missing-fixer' is missing command or args."
+            )
+        );
+    });
+
+    test('reports safely checkable commands that are not found', () => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-runner-validate-'));
+        const existingCommand = path.join(tempDir, 'existing-command');
+        fs.writeFileSync(existingCommand, '#!/bin/sh\nexit 0\n', 'utf8');
+        fs.chmodSync(existingCommand, 0o755);
+
+        try {
+            const issues = validateTargetScopes(
+                [
+                    {
+                        label: 'Workspace settings',
+                        targets: [
+                            {
+                                name: 'PHP',
+                                languages: ['php'],
+                                linters: [
+                                    {
+                                        name: 'found',
+                                        command: existingCommand,
+                                        args: ['${file}'],
+                                        parser: BASE_PARSER,
+                                    },
+                                    {
+                                        name: 'missing',
+                                        command: 'missing-command',
+                                        args: ['${file}'],
+                                        parser: BASE_PARSER,
+                                    },
+                                ],
+                                fixers: [
+                                    {
+                                        name: 'templated',
+                                        command: '${workspaceFolder}/vendor/bin/pint',
+                                        args: ['${file}'],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+                {
+                    knownLanguageIds: ['php'],
+                    env: { PATH: tempDir },
+                    platform: 'linux',
+                }
+            );
+
+            assert.ok(
+                issues.includes(
+                    "Workspace settings: target 'PHP' linter 'missing' command 'missing-command' was not found."
+                )
+            );
+            assert.ok(
+                !issues.some((issue) =>
+                    issue.includes("target 'PHP' fixer 'templated' command '${workspaceFolder}/vendor/bin/pint'")
+                )
+            );
+        } finally {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
     });
 });

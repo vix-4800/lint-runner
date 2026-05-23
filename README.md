@@ -14,6 +14,7 @@ VS Code extension for running external CLI linters and reporting found issues in
 - optionally show separate source code actions for manual linters and fixers;
 - optionally show separate top-of-file CodeLens entries for manual linters and fixers;
 - optionally show cancellable notifications for manual linter and fixer runs;
+- validate config automatically on startup and after config changes, with a manual `LintRunner: Validate Config` command;
 - clear diagnostics for the active file (or all files) via `LintRunner: Clear Diagnostics`;
 - match targets by VS Code language id or `*`, with optional glob-based narrowing;
 - select linters by file glob patterns;
@@ -31,6 +32,9 @@ VS Code extension for running external CLI linters and reporting found issues in
 Configuration is stored in `settings.json`:
 
 Real-world target examples: [docs/examples.md](docs/examples.md).
+
+LintRunner validates configured targets, linters, fixers, parsers, language IDs, and safely-checkable commands on startup
+and after settings changes. If validation fails, linter and fixer runs are blocked until the config is fixed.
 
 ## Global Enable Switch
 

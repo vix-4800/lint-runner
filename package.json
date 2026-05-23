@@ -56,6 +56,10 @@
       {
         "command": "lintRunner.stopRunningTools",
         "title": "LintRunner: Stop Running Tools"
+      },
+      {
+        "command": "lintRunner.validateConfig",
+        "title": "LintRunner: Validate Config"
       }
     ],
     "configuration": {
