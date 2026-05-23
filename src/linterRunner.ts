@@ -277,7 +277,25 @@ export interface CommandResult {
 
 export type RunnerOutput = Pick<vscode.OutputChannel, 'appendLine'>;
 
+export interface TargetValidationScope {
+    label: string;
+    targets: TargetPatch[];
+}
+
+export interface ValidateTargetScopesOptions {
+    knownLanguageIds?: Iterable<string>;
+    env?: NodeJS.ProcessEnv;
+    platform?: NodeJS.Platform;
+}
+
 type WorkspaceConfigLike = Pick<vscode.WorkspaceConfiguration, 'get'>;
+type KnownTargetState = {
+    linters: Set<string>;
+    fixers: Set<string>;
+};
+
+const REQUIRED_PARSER_GROUPS = ['line', 'message'] as const;
+const NAMED_CAPTURE_GROUP_RE = /(?<!\\)\(\?<([A-Za-z][A-Za-z0-9]*)>/g;
 
 export function isLintRunnerEnabled(
     resourceOrConfig: vscode.Uri | WorkspaceConfigLike = vscode.workspace.getConfiguration('lintRunner')
@@ -287,6 +305,347 @@ export function isLintRunnerEnabled(
             ? vscode.workspace.getConfiguration('lintRunner', resourceOrConfig)
             : resourceOrConfig;
     return config.get<boolean>('enabled') !== false;
+}
+
+function pushValidationIssue(issues: string[], scopeLabel: string, message: string): void {
+    issues.push(`${scopeLabel}: ${message}`);
+}
+
+function collectNamedCaptureGroups(pattern: string): Set<string> {
+    const groups = new Set<string>();
+    for (const match of pattern.matchAll(NAMED_CAPTURE_GROUP_RE)) {
+        const name = match[1];
+        if (name !== undefined) {
+            groups.add(name);
+        }
+    }
+    return groups;
+}
+
+function hasCommandAndArgs(command: string | undefined, args: string[] | undefined): boolean {
+    return typeof command === 'string' && command.trim() !== '' && Array.isArray(args);
+}
+
+function hasRequiredParserGroups(parser: RegexParserConfig): { valid: boolean; missingGroups: string[] } {
+    const groups = collectNamedCaptureGroups(parser.pattern);
+    const missingGroups = REQUIRED_PARSER_GROUPS.filter((group) => !groups.has(group));
+    return {
+        valid: missingGroups.length === 0,
+        missingGroups,
+    };
+}
+
+function validateParserConfig(
+    scopeLabel: string,
+    ownerLabel: string,
+    parser: RegexParserConfig | undefined,
+    issues: string[]
+): boolean {
+    if (parser === undefined || typeof parser.pattern !== 'string' || parser.pattern.length === 0) {
+        pushValidationIssue(issues, scopeLabel, `${ownerLabel} parser is missing pattern.`);
+        return false;
+    }
+
+    const flags = parser.flags ?? 'g';
+    const normalizedFlags = flags.includes('g') ? flags : `${flags}g`;
+    try {
+        new RegExp(parser.pattern, normalizedFlags);
+    } catch {
+        pushValidationIssue(issues, scopeLabel, `${ownerLabel} parser has an invalid regex pattern.`);
+        return false;
+    }
+
+    const { valid, missingGroups } = hasRequiredParserGroups(parser);
+    if (!valid) {
+        pushValidationIssue(
+            issues,
+            scopeLabel,
+            `${ownerLabel} parser is missing required capture groups: ${missingGroups.join(', ')}.`
+        );
+    }
+
+    return valid;
+}
+
+function isCommandPathLike(command: string): boolean {
+    return command.includes('/') || command.includes('\\');
+}
+
+function isCommandSafelyCheckable(command: string): boolean {
+    return command.trim() !== '' && !command.includes('${');
+}
+
+function isExecutablePath(filePath: string, platform: NodeJS.Platform): boolean {
+    try {
+        fs.accessSync(filePath, platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK);
+        return fs.statSync(filePath).isFile();
+    } catch {
+        return false;
+    }
+}
+
+function commandExistsForValidation(
+    command: string,
+    env: NodeJS.ProcessEnv,
+    platform: NodeJS.Platform
+): boolean | undefined {
+    const expandedCommand = expandHome(command.trim());
+    if (!isCommandSafelyCheckable(expandedCommand)) {
+        return undefined;
+    }
+
+    if (path.isAbsolute(expandedCommand)) {
+        return isExecutablePath(expandedCommand, platform);
+    }
+
+    if (isCommandPathLike(expandedCommand)) {
+        return undefined;
+    }
+
+    const pathValue = env[getPathKey(env)] ?? '';
+    const directories = pathValue.split(path.delimiter).filter((entry) => entry !== '');
+    const hasExtension = path.extname(expandedCommand) !== '';
+    const executableNames =
+        platform === 'win32' && !hasExtension
+            ? (env.PATHEXT?.split(';').filter((entry) => entry !== '') ?? ['.COM', '.EXE', '.BAT', '.CMD'])
+                .map((extension) => `${expandedCommand}${extension}`)
+            : [expandedCommand];
+
+    for (const directory of directories) {
+        for (const executableName of executableNames) {
+            if (isExecutablePath(path.join(directory, executableName), platform)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+function validateCommandAvailability(
+    scopeLabel: string,
+    ownerLabel: string,
+    command: string | undefined,
+    env: NodeJS.ProcessEnv,
+    platform: NodeJS.Platform,
+    issues: string[]
+): void {
+    if (command === undefined || command.trim() === '') {
+        return;
+    }
+
+    const exists = commandExistsForValidation(command, env, platform);
+    if (exists === false) {
+        pushValidationIssue(
+            issues,
+            scopeLabel,
+            `${ownerLabel} command '${command}' was not found.`
+        );
+    }
+}
+
+function validateCommandConfigs(
+    scopeLabel: string,
+    ownerLabel: string,
+    commands: CommandConfig[] | undefined,
+    env: NodeJS.ProcessEnv,
+    platform: NodeJS.Platform,
+    issues: string[]
+): void {
+    for (const [index, commandConfig] of (commands ?? []).entries()) {
+        const commandLabel = `${ownerLabel} pre-command #${index + 1}`;
+        if (!hasCommandAndArgs(commandConfig.command, commandConfig.args)) {
+            pushValidationIssue(issues, scopeLabel, `${commandLabel} is missing command or args.`);
+            continue;
+        }
+
+        validateCommandAvailability(
+            scopeLabel,
+            commandLabel,
+            commandConfig.command,
+            env,
+            platform,
+            issues
+        );
+    }
+}
+
+function getScopedTargetPatches(resource?: vscode.Uri): TargetValidationScope[] {
+    const config =
+        resource === undefined
+            ? vscode.workspace.getConfiguration('lintRunner')
+            : vscode.workspace.getConfiguration('lintRunner', resource);
+    const inspectedTargets = config.inspect<TargetPatch[]>('targets');
+    const folderName = resource === undefined ? undefined : vscode.workspace.getWorkspaceFolder(resource)?.name;
+
+    return [
+        {
+            label: 'User settings',
+            targets: inspectedTargets?.globalValue ?? [],
+        },
+        {
+            label: 'Workspace settings',
+            targets: inspectedTargets?.workspaceValue ?? [],
+        },
+        {
+            label: folderName === undefined ? 'Folder settings' : `Folder settings (${folderName})`,
+            targets: inspectedTargets?.workspaceFolderValue ?? [],
+        },
+    ].filter((scope) => scope.targets.length > 0);
+}
+
+export function validateTargetScopes(
+    scopes: readonly TargetValidationScope[],
+    options: ValidateTargetScopesOptions = {}
+): string[] {
+    const issues: string[] = [];
+    const knownLanguageIds = new Set(options.knownLanguageIds ?? []);
+    const env = options.env ?? process.env;
+    const platform = options.platform ?? process.platform;
+    const knownTargets = new Map<string, KnownTargetState>();
+
+    for (const scope of scopes) {
+        const seenTargetNames = new Set<string>();
+
+        for (const target of scope.targets) {
+            if (seenTargetNames.has(target.name)) {
+                pushValidationIssue(issues, scope.label, `duplicate target name '${target.name}'.`);
+            } else {
+                seenTargetNames.add(target.name);
+            }
+
+            const existingTarget = knownTargets.get(target.name);
+            const nextTargetState: KnownTargetState = {
+                linters: new Set(existingTarget?.linters ?? []),
+                fixers: new Set(existingTarget?.fixers ?? []),
+            };
+
+            if (target.languages === undefined || target.languages.length === 0) {
+                if (existingTarget === undefined) {
+                    pushValidationIssue(
+                        issues,
+                        scope.label,
+                        `target '${target.name}' is missing languages.`
+                    );
+                }
+            } else {
+                for (const languageId of target.languages) {
+                    if (languageId !== '*' && !knownLanguageIds.has(languageId)) {
+                        pushValidationIssue(
+                            issues,
+                            scope.label,
+                            `target '${target.name}' contains unknown language id '${languageId}'.`
+                        );
+                    }
+                }
+            }
+
+            validateCommandConfigs(
+                scope.label,
+                `target '${target.name}'`,
+                target.preCommands,
+                env,
+                platform,
+                issues
+            );
+
+            const seenLinterNames = new Set<string>();
+            for (const linter of target.linters ?? []) {
+                const linterLabel = `target '${target.name}' linter '${linter.name}'`;
+                if (seenLinterNames.has(linter.name)) {
+                    pushValidationIssue(
+                        issues,
+                        scope.label,
+                        `target '${target.name}' has duplicate linter name '${linter.name}'.`
+                    );
+                } else {
+                    seenLinterNames.add(linter.name);
+                }
+
+                const isExistingLinter = nextTargetState.linters.has(linter.name);
+                if (!isExistingLinter && !hasCommandAndArgs(linter.command, linter.args)) {
+                    pushValidationIssue(issues, scope.label, `${linterLabel} is missing command or args.`);
+                }
+
+                if (!isExistingLinter || linter.parser !== undefined) {
+                    validateParserConfig(scope.label, linterLabel, linter.parser, issues);
+                }
+
+                validateCommandAvailability(
+                    scope.label,
+                    linterLabel,
+                    linter.command,
+                    env,
+                    platform,
+                    issues
+                );
+                validateCommandConfigs(
+                    scope.label,
+                    linterLabel,
+                    linter.preCommands,
+                    env,
+                    platform,
+                    issues
+                );
+                nextTargetState.linters.add(linter.name);
+            }
+
+            const seenFixerNames = new Set<string>();
+            for (const [index, fixer] of (target.fixers ?? []).entries()) {
+                const fixerLabel =
+                    fixer.name === undefined
+                        ? `target '${target.name}' fixer #${index + 1}`
+                        : `target '${target.name}' fixer '${fixer.name}'`;
+
+                if (fixer.name !== undefined) {
+                    if (seenFixerNames.has(fixer.name)) {
+                        pushValidationIssue(
+                            issues,
+                            scope.label,
+                            `target '${target.name}' has duplicate fixer name '${fixer.name}'.`
+                        );
+                    } else {
+                        seenFixerNames.add(fixer.name);
+                    }
+                }
+
+                const isExistingFixer =
+                    fixer.name !== undefined && nextTargetState.fixers.has(fixer.name);
+                if (!isExistingFixer && !hasCommandAndArgs(fixer.command, fixer.args)) {
+                    pushValidationIssue(issues, scope.label, `${fixerLabel} is missing command or args.`);
+                }
+
+                validateCommandAvailability(
+                    scope.label,
+                    fixerLabel,
+                    fixer.command,
+                    env,
+                    platform,
+                    issues
+                );
+
+                if (fixer.name !== undefined) {
+                    nextTargetState.fixers.add(fixer.name);
+                }
+            }
+
+            knownTargets.set(target.name, nextTargetState);
+        }
+    }
+
+    return issues;
+}
+
+export async function validateLintRunnerConfig(resource?: vscode.Uri): Promise<string[]> {
+    const [knownLanguageIds, env] = await Promise.all([
+        vscode.languages.getLanguages(),
+        getCommandEnv(),
+    ]);
+
+    return validateTargetScopes(getScopedTargetPatches(resource), {
+        knownLanguageIds,
+        env,
+    });
 }
 
 function globPatternToRegexBody(pattern: string): string {
