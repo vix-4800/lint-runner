@@ -1,11 +1,13 @@
 # Configuration Examples
 
-Each snippet below is a single entry for `lintRunner.targets`.
+The snippets below are copied from a real working VS Code setup.
 
-`languages` must match the document's VS Code language id. Some ids depend on installed extensions or file
-associations, so adjust them if your editor reports a different language.
+The first block shows top-level `lintRunner.*` settings. Each target block after that is a single entry for `lintRunner.targets`.
 
-- [Configuration Examples](#configuration-examples)
+`languages` must match the document's VS Code language id. Some ids depend on installed extensions or file associations, so adjust them if your editor reports a different language.
+
+- [Top-level LintRunner settings](#top-level-lintrunner-settings)
+  - [GitLeaks](#gitleaks)
   - [Shell](#shell)
   - [Dockerfile](#dockerfile)
   - [Markdown](#markdown)
@@ -18,7 +20,7 @@ associations, so adjust them if your editor reports a different language.
   - [TOML](#toml)
   - [Go](#go)
   - [Fish](#fish)
-  - [JavaScript / TypeScript / Vue](#javascript--typescript--vue)
+  - [JavaScript/TypeScript/Vue](#javascripttypescriptvue)
   - [Styles](#styles)
   - [HTML](#html)
   - [SQL](#sql)
@@ -31,23 +33,90 @@ associations, so adjust them if your editor reports a different language.
   - [PHP](#php)
 
 
+## Top-level LintRunner settings
+
+```json
+{
+  "lintRunner.debounceMs": 300,
+  "lintRunner.enableCodeActions": true,
+  "lintRunner.enableCodeLens": true,
+  "lintRunner.ignorePatterns": [
+    "vendor/**",
+    "*.min.js",
+    "dist/**",
+    "node_modules/**",
+    "storage/framework/views/**",
+    "logs/**",
+    "cache/**",
+    "runtime/**",
+    "venv/**"
+  ],
+  "lintRunner.respectGitignore": true
+}
+```
+
+
+## GitLeaks
+
+```json
+{
+  "languages": [
+    "php"
+  ],
+  "linters": [
+    {
+      "args": [
+        "dir",
+        "--config",
+        "~/.gitleaks.toml",
+        "--report-format",
+        "json",
+        "--report-path",
+        "-",
+        "${file}"
+      ],
+      "command": "gitleaks",
+      "name": "GitLeaks",
+      "parser": {
+        "defaultSeverity": "error",
+        "flags": "gm",
+        "messageFormat": "json",
+        "output": "stdout",
+        "pattern": "\\{\\s*\"RuleID\":\\s*\"(?<code>(?:\\\\.|[^\\\"])*)\",\\s*\"Description\":\\s*\"(?<message>(?:\\\\.|[^\\\"])*)\",\\s*\"StartLine\":\\s*(?<line>\\d+),\\s*\"EndLine\":\\s*\\d+,\\s*\"StartColumn\":\\s*(?<col>\\d+),[\\s\\S]*?\"File\":\\s*\"(?<file>(?:\\\\.|[^\\\"])*)\""
+      },
+      "run": "onSave"
+    }
+  ],
+  "name": "GitLeaks"
+}
+```
+
+
 ## Shell
 
 ```json
 {
-  "name": "Shell",
-  "languages": ["shellscript"],
-  "filePatterns": ["*.sh"],
   "fixers": [
     {
-      "args": ["-w", "${file}"],
+      "args": [
+        "-w",
+        "${file}"
+      ],
       "command": "shfmt",
       "name": "shfmt"
     }
   ],
+  "languages": [
+    "shellscript"
+  ],
   "linters": [
     {
-      "args": ["-x", "--format", "gcc", "${file}"],
+      "args": [
+        "-x",
+        "--format",
+        "gcc",
+        "${file}"
+      ],
       "command": "shellcheck",
       "name": "Shell Check",
       "parser": {
@@ -55,7 +124,8 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<severity>\\w+): (?<message>.+?) \\[(?<code>SC\\d+)\\]$"
       }
     }
-  ]
+  ],
+  "name": "Shell"
 }
 ```
 
@@ -64,9 +134,9 @@ associations, so adjust them if your editor reports a different language.
 
 ```json
 {
-  "name": "Dockerfile",
-  "languages": ["dockerfile"],
-  "filePatterns": ["Dockerfile", "Dockerfile.*"],
+  "languages": [
+    "dockerfile"
+  ],
   "linters": [
     {
       "args": [
@@ -85,33 +155,50 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^(?:hadolint:)?(?:.+?):(?<line>\\d+):? (?<code>\\S+) (?<severity>\\w+): (?<message>.+)$"
       }
     }
-  ]
+  ],
+  "name": "Dockerfile"
 }
 ```
+
 
 ## Markdown
 
 ```json
 {
-  "name": "Markdown",
-  "languages": ["markdown"],
-  "filePatterns": ["*.md"],
   "fixers": [
     {
-      "args": ["--config", "~/.config/markdownlint/.markdownlint.jsonc", "--fix", "${file}"],
+      "args": [
+        "--config",
+        "~/.config/markdownlint/.markdownlint.jsonc",
+        "--fix",
+        "${file}"
+      ],
       "command": "markdownlint",
-      "name": "Markdown Lint"
+      "name": "Markdown Lint",
+      "run": "onSave"
     },
     {
-      "args": ["--write", "--config", "~/.prettierrc", "${file}"],
+      "args": [
+        "--write",
+        "--config",
+        "~/.prettierrc",
+        "${file}"
+      ],
       "command": "prettier",
       "enabled": false,
       "name": "Prettier"
     }
   ],
+  "languages": [
+    "markdown"
+  ],
   "linters": [
     {
-      "args": ["--config", "~/.config/markdownlint/.markdownlint.jsonc", "${file}"],
+      "args": [
+        "--config",
+        "~/.config/markdownlint/.markdownlint.jsonc",
+        "${file}"
+      ],
       "command": "markdownlint",
       "name": "Markdown Lint",
       "parser": {
@@ -119,28 +206,41 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+) (?<severity>\\w+) (?<code>[A-Z0-9]+)(?:/\\S+)? (?<message>.+)$"
       }
     }
-  ]
+  ],
+  "name": "Markdown"
 }
 ```
+
 
 ## YAML
 
 ```json
 {
-  "name": "YAML",
-  "languages": ["yaml"],
-  "filePatterns": ["*.yml", "*.yaml"],
   "fixers": [
     {
-      "args": ["-conf", "~/.config/yamlfmt/.yamlfmt", "${file}"],
+      "args": [
+        "-conf",
+        "~/.config/yamlfmt/.yamlfmt",
+        "${file}"
+      ],
       "command": "yamlfmt",
       "name": "YAML Format",
       "run": "onSave"
     }
   ],
+  "languages": [
+    "yaml",
+    "dockercompose"
+  ],
   "linters": [
     {
-      "args": ["--format", "parsable", "--config-file", "~/.config/yamllint/config", "${file}"],
+      "args": [
+        "--format",
+        "parsable",
+        "--config-file",
+        "~/.config/yamllint/config",
+        "${file}"
+      ],
       "command": "yamllint",
       "name": "YAML Lint",
       "parser": {
@@ -148,16 +248,16 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): \\[(?<severity>\\w+)\\] (?<message>.+?) \\((?<code>[^)]+)\\)$"
       }
     }
-  ]
+  ],
+  "name": "YAML"
 }
 ```
+
 
 ## Ansible
 
 ```json
 {
-  "name": "Ansible",
-  "languages": ["ansible", "yaml"],
   "filePatterns": [
     "ansible/**/*.yml",
     "roles/**/tasks/*.yml",
@@ -167,9 +267,18 @@ associations, so adjust them if your editor reports a different language.
     "roles/**/vars/*.yml",
     "playbooks/**/*.yml"
   ],
+  "languages": [
+    "ansible",
+    "yaml"
+  ],
   "linters": [
     {
-      "args": ["-c", "~/.ansible-lint", "--nocolor", "${file}"],
+      "args": [
+        "-c",
+        "~/.ansible-lint",
+        "--nocolor",
+        "${file}"
+      ],
       "command": "ansible-lint",
       "name": "Ansible Lint",
       "parser": {
@@ -178,28 +287,39 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^(?<code>[a-z][\\w.\\[\\]-]+): (?<message>.+)\\n.+?:(?<line>\\d+)(?::(?<col>\\d+))?"
       }
     }
-  ]
+  ],
+  "name": "Ansible"
 }
 ```
+
 
 ## Python
 
 ```json
 {
-  "name": "Python",
-  "languages": ["python"],
-  "filePatterns": ["*.py"],
   "fixers": [
     {
-      "args": ["check", "--fix", "--config=~/.config/ruff/pyproject.toml", "${file}"],
+      "args": [
+        "check",
+        "--fix",
+        "--config=~/.config/ruff/pyproject.toml",
+        "${file}"
+      ],
       "command": "ruff",
       "name": "Ruff Fix"
     },
     {
-      "args": ["format", "--config=~/.config/ruff/pyproject.toml", "${file}"],
+      "args": [
+        "format",
+        "--config=~/.config/ruff/pyproject.toml",
+        "${file}"
+      ],
       "command": "ruff",
       "name": "Ruff Format"
     }
+  ],
+  "languages": [
+    "python"
   ],
   "linters": [
     {
@@ -217,27 +337,44 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^::(?<severity>error|warning) title=ruff \\((?<code>[^)]+)\\),file=[^,]+,line=(?<line>\\d+),col=(?<col>\\d+),endLine=\\d+,endColumn=\\d+::(?:[^:]+:\\d+:\\d+: [A-Z]\\d+ )?(?<message>[^\\n%]+)"
       }
     }
-  ]
+  ],
+  "name": "Python"
 }
 ```
+
 
 ## Dotenv
 
 ```json
 {
-  "name": "Dotenv",
-  "languages": ["dotenv", "shellscript"],
-  "filePatterns": [".env", ".env.*"],
+  "filePatterns": [
+    ".env",
+    ".env.*"
+  ],
   "fixers": [
     {
-      "args": ["--plain", "fix", "--no-backup", "${file}"],
+      "args": [
+        "--plain",
+        "fix",
+        "--no-backup",
+        "${file}"
+      ],
       "command": "dotenv-linter",
       "name": "Dotenv Linter"
     }
   ],
+  "languages": [
+    "dotenv",
+    "shellscript"
+  ],
   "linters": [
     {
-      "args": ["--plain", "check", "--skip-updates", "${file}"],
+      "args": [
+        "--plain",
+        "check",
+        "--skip-updates",
+        "${file}"
+      ],
       "command": "dotenv-linter",
       "name": "Dotenv Linter",
       "parser": {
@@ -245,39 +382,55 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^.+?:(?<line>\\d+) (?<code>[A-Za-z][\\w-]*): (?<message>.+)$"
       }
     }
-  ]
+  ],
+  "name": "Dotenv"
 }
 ```
+
 
 ## INI
 
 ```json
 {
-  "name": "INI",
-  "languages": ["ini", "properties", "editorconfig"],
   "fixers": [
     {
-      "args": ["--write", "${file}"],
+      "args": [
+        "--write",
+        "${file}",
+        "--single-space"
+      ],
       "command": "inifmt",
-      "name": "inifmt"
+      "name": "INI Format",
+      "run": "onSave"
     }
-  ]
+  ],
+  "languages": [
+    "ini",
+    "properties",
+    "editorconfig"
+  ],
+  "name": "INI"
 }
 ```
+
 
 ## Lua
 
 ```json
 {
-  "name": "Lua",
-  "languages": ["lua"],
-  "filePatterns": ["*.lua"],
   "fixers": [
     {
-      "args": ["--config-path", "~/.config/stylua/stylua.toml", "${file}"],
+      "args": [
+        "--config-path",
+        "~/.config/stylua/stylua.toml",
+        "${file}"
+      ],
       "command": "stylua",
       "name": "StyLua"
     }
+  ],
+  "languages": [
+    "lua"
   ],
   "linters": [
     {
@@ -296,98 +449,126 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): \\((?<code>[A-Z]\\d+)\\) (?<message>.+)$"
       }
     }
-  ]
+  ],
+  "name": "Lua"
 }
 ```
+
 
 ## TOML
 
 ```json
 {
-  "name": "TOML",
-  "languages": ["toml"],
-  "filePatterns": ["*.toml"],
-  "preCommands": [
-    {
-      "args": ["check", "--config", "~/.config/taplo/taplo.toml", "${file}"],
-      "command": "taplo",
-      "name": "Taplo"
-    }
-  ],
   "fixers": [
     {
-      "args": ["fmt", "--config", "~/.config/taplo/taplo.toml", "${file}"],
-      "command": "taplo",
-      "name": "Taplo"
-    }
-  ],
-  "linters": [
-    {
-      "args": ["lint", "--config", "~/.config/taplo/taplo.toml", "${file}"],
+      "args": [
+        "format",
+        "--config",
+        "~/.config/taplo/taplo.toml",
+        "${file}"
+      ],
       "command": "taplo",
       "name": "Taplo",
-      "parser": {
-        "flags": "g",
-        "pattern": "(?<severity>error|warning|info):\\s*(?<message>[^\\n]+)[\\s\\S]*?\\u250c\\u2500\\s+[^:\\n]+:(?<line>\\d+):(?<col>\\d+)"
-      }
+      "run": "onSave"
+    }
+  ],
+  "languages": [
+    "toml"
+  ],
+  "name": "TOML",
+  "preCommands": [
+    {
+      "args": [
+        "check",
+        "--config",
+        "~/.config/taplo/taplo.toml",
+        "${file}"
+      ],
+      "command": "taplo",
+      "name": "Taplo"
     }
   ]
 }
 ```
+
 
 ## Go
 
 ```json
 {
-  "name": "Go",
-  "languages": ["go"],
-  "filePatterns": ["*.go"],
   "fixers": [
     {
-      "args": ["-w", "${file}"],
+      "args": [
+        "-w",
+        "${file}"
+      ],
       "command": "gofmt",
-      "name": "gofmt"
+      "name": "Go Format"
     }
-  ]
+  ],
+  "languages": [
+    "go"
+  ],
+  "name": "Go"
 }
 ```
+
 
 ## Fish
 
 ```json
 {
-  "name": "Fish",
-  "languages": ["fish"],
-  "filePatterns": ["*.fish"],
   "fixers": [
     {
-      "args": ["-w", "${file}"],
+      "args": [
+        "-w",
+        "${file}"
+      ],
       "command": "fish_indent",
-      "name": "fish_indent"
+      "name": "Fish Format"
     }
-  ]
+  ],
+  "languages": [
+    "fish"
+  ],
+  "name": "Fish"
 }
 ```
 
-## JavaScript / TypeScript / Vue
+
+## JavaScript/TypeScript/Vue
 
 ```json
 {
-  "name": "JavaScript/TypeScript/Vue",
-  "languages": ["javascript", "typescript", "javascriptreact", "typescriptreact", "vue"],
-  "filePatterns": ["*.js", "*.ts", "*.jsx", "*.tsx", "*.vue"],
   "fixers": [
     {
-      "args": ["--config", "~/.config/eslint/eslint.config.js", "--fix", "${file}"],
+      "args": [
+        "--config",
+        "~/.config/eslint/eslint.config.js",
+        "--fix",
+        "${file}"
+      ],
       "command": "eslint",
       "name": "ESLint"
     },
     {
-      "args": ["--write", "--config", "~/.prettierrc", "${file}"],
+      "args": [
+        "--write",
+        "--config",
+        "~/.prettierrc",
+        "${file}"
+      ],
       "command": "prettier",
       "enabled": false,
       "name": "Prettier"
     }
+  ],
+  "languages": [
+    "javascript",
+    "typescript",
+    "javascriptreact",
+    "typescriptreact",
+    "vue"
   ],
   "linters": [
     {
@@ -405,33 +586,53 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^\\s*(?<line>\\d+):(?<col>\\d+)\\s+(?<severity>error|warning)\\s+(?<message>.+?)\\s{2,}(?<code>\\S+)\\s*$"
       }
     }
-  ]
+  ],
+  "name": "JavaScript/TypeScript/Vue"
 }
 ```
+
 
 ## Styles
 
 ```json
 {
-  "name": "Styles",
-  "languages": ["css", "scss", "less"],
-  "filePatterns": ["*.css", "*.scss", "*.less"],
   "fixers": [
     {
-      "args": ["--config", "~/.stylelintrc.json", "--fix", "${file}"],
+      "args": [
+        "--config",
+        "~/.stylelintrc.json",
+        "--fix",
+        "${file}"
+      ],
       "command": "stylelint",
       "name": "Style Lint"
     },
     {
-      "args": ["--write", "--config", "~/.prettierrc", "${file}"],
+      "args": [
+        "--write",
+        "--config",
+        "~/.prettierrc",
+        "${file}"
+      ],
       "command": "prettier",
       "enabled": false,
       "name": "Prettier"
     }
   ],
+  "languages": [
+    "css",
+    "scss",
+    "less"
+  ],
   "linters": [
     {
-      "args": ["--config", "~/.stylelintrc.json", "--formatter", "compact", "${file}"],
+      "args": [
+        "--config",
+        "~/.stylelintrc.json",
+        "--formatter",
+        "compact",
+        "${file}"
+      ],
       "command": "stylelint",
       "name": "Style Lint",
       "parser": {
@@ -439,23 +640,30 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^.+?: line (?<line>\\d+), col (?<col>\\d+), (?<severity>\\w+) - (?<message>.+?) \\((?<code>[^)]+)\\)$"
       }
     }
-  ]
+  ],
+  "name": "Styles"
 }
 ```
+
 
 ## HTML
 
 ```json
 {
-  "name": "HTML",
-  "languages": ["html"],
-  "filePatterns": ["*.html"],
   "fixers": [
     {
-      "args": ["--write", "--config", "~/.prettierrc", "${file}"],
+      "args": [
+        "--write",
+        "--config",
+        "~/.prettierrc",
+        "${file}"
+      ],
       "command": "prettier",
       "name": "Prettier"
     }
+  ],
+  "languages": [
+    "html"
   ],
   "linters": [
     {
@@ -474,7 +682,13 @@ associations, so adjust them if your editor reports a different language.
       }
     },
     {
-      "args": ["--config", "~/.htmlhintrc", "--format", "unix", "${file}"],
+      "args": [
+        "--config",
+        "~/.htmlhintrc",
+        "--format",
+        "unix",
+        "${file}"
+      ],
       "command": "htmlhint",
       "name": "HTML Hint",
       "parser": {
@@ -482,23 +696,32 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<message>.+) \\[(?<severity>[^/\\]]+)/(?<code>[^\\]]+)\\]$"
       }
     }
-  ]
+  ],
+  "name": "HTML"
 }
 ```
+
 
 ## SQL
 
 ```json
 {
-  "name": "SQL",
-  "languages": ["sql"],
-  "filePatterns": ["*.sql"],
   "fixers": [
     {
-      "args": ["fix", "--config", "~/.sqlfluff", "--dialect", "mysql", "${file}"],
+      "args": [
+        "fix",
+        "--config",
+        "~/.sqlfluff",
+        "--dialect",
+        "mysql",
+        "${file}"
+      ],
       "command": "sqlfluff",
       "name": "Sql Fluff"
     }
+  ],
+  "languages": [
+    "sql"
   ],
   "linters": [
     {
@@ -519,20 +742,27 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^::(?<severity>error|warning|notice) title=SQLFluff,file=[^,]+,line=(?<line>\\d+),col=(?<col>\\d+),endLine=\\d+,endColumn=\\d+::(?<code>[A-Z]+\\d+): (?<message>.+?)(?: \\[[^\\]]+\\])?$"
       }
     }
-  ]
+  ],
+  "name": "SQL"
 }
 ```
+
 
 ## Make
 
 ```json
 {
-  "name": "Make",
-  "languages": ["makefile"],
-  "filePatterns": ["Makefile", "*.mk"],
+  "languages": [
+    "makefile"
+  ],
   "linters": [
     {
-      "args": ["--config=~/.config/checkmake/checkmake.ini", "-o", "json", "${file}"],
+      "args": [
+        "--config=~/.config/checkmake/checkmake.ini",
+        "-o",
+        "json",
+        "${file}"
+      ],
       "command": "checkmake",
       "name": "Check Make",
       "parser": {
@@ -541,16 +771,16 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "\\{\\s*\"rule\":\\s*\"(?<code>[^\"]+)\",\\s*\"violation\":\\s*\"(?<message>(?:\\\\.|[^\"])*)\",\\s*\"file_name\":\\s*\"[^\"]+\",\\s*\"line_number\":\\s*(?<line>\\d+)\\s*\\}"
       }
     }
-  ]
+  ],
+  "name": "Make"
 }
 ```
+
 
 ## Nginx
 
 ```json
 {
-  "name": "Nginx",
-  "languages": ["nginx", "plaintext"],
   "filePatterns": [
     "nginx.conf",
     "**/nginx/**/*.conf",
@@ -559,11 +789,20 @@ associations, so adjust them if your editor reports a different language.
   ],
   "fixers": [
     {
-      "args": ["-s", "4", "-i", "${file}"],
+      "args": [
+        "-s",
+        "4",
+        "-i",
+        "${file}"
+      ],
       "command": "nginxbeautifier",
       "name": "Nginx Beautifier",
       "run": "onSave"
     }
+  ],
+  "languages": [
+    "nginx",
+    "plaintext"
   ],
   "linters": [
     {
@@ -582,27 +821,33 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<severity>\\w+)\\[(?<code>[^\\]]+)\\]: (?<message>.+)$"
       }
     }
-  ]
+  ],
+  "name": "Nginx"
 }
 ```
+
 
 ## XML
 
 ```json
 {
-  "name": "XML",
-  "languages": ["xml", "xsl"],
-  "filePatterns": ["*.xml", "*.xsd", "*.xsl", "*.xslt"],
-  "preCommands": [
-    {
-      "args": ["--nonet", "--noout", "${file}"],
-      "command": "xmllint",
-      "name": "XML Validate"
-    }
+  "filePatterns": [
+    "*.xml",
+    "*.xsd",
+    "*.xsl",
+    "*.xslt"
+  ],
+  "languages": [
+    "xml",
+    "xsl"
   ],
   "linters": [
     {
-      "args": ["--nonet", "--noout", "${file}"],
+      "args": [
+        "--nonet",
+        "--noout",
+        "${file}"
+      ],
       "command": "xmllint",
       "name": "XML Lint",
       "parser": {
@@ -611,28 +856,51 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^.+?:(?<line>\\d+): (?:(?:parser )?(?<severity>error|warning)) : (?<message>.+)$"
       }
     }
+  ],
+  "name": "XML",
+  "preCommands": [
+    {
+      "args": [
+        "--nonet",
+        "--noout",
+        "${file}"
+      ],
+      "command": "xmllint",
+      "name": "XML Validate"
+    }
   ]
 }
 ```
+
 
 ## JSON
 
 ```json
 {
-  "name": "JSON",
-  "languages": ["json", "jsonc"],
-  "filePatterns": ["*.json", "*.jsonc"],
   "fixers": [
     {
-      "args": ["--write", "--config", "~/.prettierrc", "${file}"],
+      "args": [
+        "--write",
+        "--config",
+        "~/.prettierrc",
+        "${file}"
+      ],
       "command": "prettier",
       "name": "Prettier",
       "run": "onSave"
     }
   ],
+  "languages": [
+    "json",
+    "jsonc"
+  ],
   "linters": [
     {
-      "args": ["-f", "~/.jsonlintrc", "${file}"],
+      "args": [
+        "-f",
+        "~/.jsonlintrc",
+        "${file}"
+      ],
       "command": "jsonlint",
       "name": "JSON Lint",
       "parser": {
@@ -641,20 +909,29 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^(?:.+?:\\s*)?line\\s+(?<line>\\d+),\\s*col\\s+(?<col>\\d+),\\s*(?<message>.+?)(?:\\.)?$"
       }
     }
-  ]
+  ],
+  "name": "JSON"
 }
 ```
+
 
 ## GitHub Actions
 
 ```json
 {
-  "name": "GitHub Actions",
-  "languages": ["github-actions-workflow", "yaml"],
-  "filePatterns": [".github/workflows/*.yml", ".github/workflows/*.yaml"],
+  "filePatterns": [
+    ".github/workflows/*.yml",
+    ".github/workflows/*.yaml"
+  ],
+  "languages": [
+    "github-actions-workflow",
+    "yaml"
+  ],
   "linters": [
     {
-      "args": ["${file}"],
+      "args": [
+        "${file}"
+      ],
       "command": "actionlint",
       "name": "Action Lint",
       "parser": {
@@ -663,17 +940,19 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<message>.+?) \\[(?<code>[^\\]]+)\\]$"
       }
     }
-  ]
+  ],
+  "name": "GitHub Actions"
 }
 ```
+
 
 ## Blade
 
 ```json
 {
-  "name": "Blade",
-  "languages": ["blade", "php"],
-  "filePatterns": ["*.blade.php"],
+  "filePatterns": [
+    "*.blade.php"
+  ],
   "fixers": [
     {
       "args": [
@@ -685,29 +964,44 @@ associations, so adjust them if your editor reports a different language.
       "command": "blade-formatter",
       "name": "Blade Formatter"
     }
-  ]
+  ],
+  "languages": [
+    "blade",
+    "php"
+  ],
+  "name": "Blade"
 }
 ```
+
 
 ## PHP
 
 ```json
 {
-  "name": "PHP",
-  "languages": ["php"],
-  "filePatterns": ["*.php"],
-  "preCommands": [
-    {
-      "args": ["-l", "${file}"],
-      "command": "php",
-      "name": "PHP Lint"
-    }
-  ],
   "fixers": [
     {
-      "args": ["fix", "--config", "~/.config/php-cs-fixer/php-cs-fixer.php", "${file}"],
-      "command": "~/.config/composer/vendor/bin/php-cs-fixer",
+      "args": [
+        "fix",
+        "--config",
+        "~/.config/php-cs-fixer/php-cs-fixer.php",
+        "${file}"
+      ],
+      "command": "php-cs-fixer",
       "name": "PHP CS Fixer"
+    },
+    {
+      "args": [
+        "--standard=~/.config/phpcs/phpcs.xml",
+        "-q",
+        "--ignore-annotations",
+        "--parallel=8",
+        "--no-colors",
+        "-d",
+        "memory_limit=512M",
+        "${file}"
+      ],
+      "command": "phpcbf",
+      "name": "PHP Code Beautifier"
     },
     {
       "args": [
@@ -720,16 +1014,23 @@ associations, so adjust them if your editor reports a different language.
         "--no-diffs",
         "${file}"
       ],
-      "command": "~/.config/composer/vendor/bin/rector",
+      "command": "rector",
       "name": "Rector",
       "run": "manual"
     },
     {
-      "args": ["${file}"],
-      "command": "~/.config/composer/vendor/bin/phpcbf",
+      "args": [
+        "--colors=never",
+        "format",
+        "${file}"
+      ],
+      "command": "mago",
       "enabled": false,
-      "name": "PHP Code Beautifier and Fixer"
+      "name": "Mago Formatter"
     }
+  ],
+  "languages": [
+    "php"
   ],
   "linters": [
     {
@@ -740,18 +1041,27 @@ associations, so adjust them if your editor reports a different language.
         "-q",
         "--ignore-annotations",
         "--parallel=8",
+        "--no-colors",
+        "-d",
+        "memory_limit=512M",
         "${file}"
       ],
-      "command": "~/.config/composer/vendor/bin/phpcs",
+      "command": "phpcs",
+      "maxFileSize": 75000,
       "name": "PHP CodeSniffer",
       "parser": {
         "flags": "gm",
         "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+): (?<severity>warning|error) - (?<message>.+)$"
-      }
+      },
+      "timeout": 60000
     },
     {
-      "args": ["${file}", "text", "~/.config/phpmd/phpmd.xml"],
-      "command": "~/.config/composer/vendor/bin/phpmd",
+      "args": [
+        "${file}",
+        "text",
+        "~/.config/phpmd/phpmd.xml"
+      ],
+      "command": "phpmd",
       "name": "PHP Mess Detector",
       "parser": {
         "flags": "gm",
@@ -768,7 +1078,7 @@ associations, so adjust them if your editor reports a different language.
         "--autoload-file=${workspaceFolder}/phpstan-bootstrap.php",
         "${file}"
       ],
-      "command": "~/.config/composer/vendor/bin/phpstan",
+      "command": "phpstan",
       "name": "PHPStan",
       "parser": {
         "defaultSeverity": "error",
@@ -776,6 +1086,72 @@ associations, so adjust them if your editor reports a different language.
         "pattern": "^.+?:(?<line>\\d+):(?<message>.+?)(?: \\[identifier=(?<code>[^\\]]+)\\])?$"
       },
       "run": "manual"
+    },
+    {
+      "args": [
+        "--colors=never",
+        "lint",
+        "--reporting-format=emacs",
+        "--minimum-report-level=warning",
+        "--minimum-fail-level=warning",
+        "${file}"
+      ],
+      "command": "mago",
+      "name": "Mago Linter",
+      "parser": {
+        "defaultSeverity": "error",
+        "flags": "gm",
+        "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+):\\s*(?:(?<severity>error|warning)|note|help)?:?\\s*(?:\\[(?<code>[^\\]]+)\\]\\s*)?(?<message>.+)$"
+      }
+    },
+    {
+      "args": [
+        "--colors=never",
+        "analyze",
+        "--reporting-format=emacs",
+        "--minimum-report-level=warning",
+        "--minimum-fail-level=warning",
+        "${file}"
+      ],
+      "command": "mago",
+      "enabled": false,
+      "name": "Mago Analyzer",
+      "parser": {
+        "defaultSeverity": "error",
+        "flags": "gm",
+        "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+):\\s*(?:(?<severity>error|warning)|note|help)?:?\\s*(?:\\[(?<code>[^\\]]+)\\]\\s*)?(?<message>.+)$"
+      },
+      "run": "manual"
+    },
+    {
+      "args": [
+        "--colors=never",
+        "guard",
+        "--reporting-format=emacs",
+        "--minimum-report-level=warning",
+        "--minimum-fail-level=warning",
+        "${file}"
+      ],
+      "command": "mago",
+      "enabled": false,
+      "name": "Mago Guard",
+      "parser": {
+        "defaultSeverity": "error",
+        "flags": "gm",
+        "pattern": "^.+?:(?<line>\\d+):(?<col>\\d+):\\s*(?:(?<severity>error|warning)|note|help)?:?\\s*(?:\\[(?<code>[^\\]]+)\\]\\s*)?(?<message>.+)$"
+      },
+      "run": "manual"
+    }
+  ],
+  "name": "PHP",
+  "preCommands": [
+    {
+      "args": [
+        "-l",
+        "${file}"
+      ],
+      "command": "php",
+      "name": "PHP Lint"
     }
   ]
 }
