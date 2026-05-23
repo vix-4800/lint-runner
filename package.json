@@ -309,7 +309,7 @@
                       "items": {
                         "type": "integer"
                       },
-                      "description": "Optional exit codes to treat as successful for this linter. When omitted, any completed exit code is accepted and diagnostics are still parsed."
+                      "description": "Optional exit codes to treat as successful for this linter. When omitted, any process exit code is accepted and diagnostics are still parsed unless the command failed to execute, timed out, or was cancelled."
                     },
                     "maxFileSize": {
                       "type": "number",

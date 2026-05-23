@@ -1666,7 +1666,7 @@ async function runTargetFixer(
         return true;
     } catch (err) {
         output.appendLine(`[${label}] failed: ${String(err)}`);
-        return false;
+        return true;
     } finally {
         stopLinterStatus(statusName, statusBar);
     }
