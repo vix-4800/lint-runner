@@ -1705,7 +1705,7 @@ async function runTargetFixer(
         const failureMessage = String(err);
         output.appendLine(`[${label}] failed: ${failureMessage}`);
         reportCommandFailure(output, label, failureMessage);
-        return true;
+        return false;
     } finally {
         stopLinterStatus(statusName, statusBar);
     }
