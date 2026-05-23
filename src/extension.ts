@@ -15,6 +15,7 @@ import {
     clearAllFileLinterDiagnostics,
     clearFileDiagnosticsCache,
     validateLintRunnerConfig,
+    type ConfigValidationIssues,
     type RunnerFailure,
     type RunnerOutput,
     type RunnableFixer,
@@ -22,7 +23,7 @@ import {
 } from './linterRunner.js';
 
 let untrustedWorkspaceWarningShown = false;
-let configValidationIssues: string[] = [];
+let configValidationIssues: ConfigValidationIssues = { errors: [], warnings: [] };
 let configValidationWarningShown = false;
 const skipFixersOnSave = new Set<string>();
 const saveDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -239,21 +240,33 @@ async function showManualRunFailureWarning(
 }
 
 function hasValidConfig(): boolean {
-    return configValidationIssues.length === 0;
+    return configValidationIssues.errors.length === 0;
 }
 
-function getConfigValidationMessage(issues: readonly string[]): string {
-    const preview = issues.slice(0, CONFIG_VALIDATION_PREVIEW_LIMIT);
-    const lines = preview.map((issue) => `• ${issue}`);
-    if (issues.length > preview.length) {
-        lines.push(`• +${issues.length - preview.length} more issue(s)`);
+function getConfigValidationMessage(issues: ConfigValidationIssues): string {
+    const entries = [
+        ...issues.errors.map((issue) => `• Error: ${issue}`),
+        ...issues.warnings.map((issue) => `• Warning: ${issue}`),
+    ];
+    const preview = entries.slice(0, CONFIG_VALIDATION_PREVIEW_LIMIT);
+    if (entries.length > preview.length) {
+        preview.push(`• +${entries.length - preview.length} more issue(s)`);
     }
 
-    return `LintRunner: Config validation failed (${issues.length} issue(s)).\n${lines.join('\n')}`;
+    const summary: string[] = [];
+    if (issues.errors.length > 0) {
+        summary.push(`${issues.errors.length} error(s)`);
+    }
+    if (issues.warnings.length > 0) {
+        summary.push(`${issues.warnings.length} warning(s)`);
+    }
+
+    const status = issues.errors.length > 0 ? 'failed' : 'completed with warnings';
+    return `LintRunner: Config validation ${status} (${summary.join(', ')}).\n${preview.join('\n')}`;
 }
 
 function showConfigValidationWarning(): void {
-    if (configValidationIssues.length === 0) {
+    if (configValidationIssues.errors.length === 0 && configValidationIssues.warnings.length === 0) {
         return;
     }
 
@@ -261,23 +274,29 @@ function showConfigValidationWarning(): void {
     configValidationWarningShown = true;
 }
 
-async function collectConfigValidationIssues(): Promise<string[]> {
+async function collectConfigValidationIssues(): Promise<ConfigValidationIssues> {
     const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
     const resources = workspaceFolders.length === 0 ? [undefined] : workspaceFolders.map((folder) => folder.uri);
     const results = await Promise.all(resources.map((resource) => validateLintRunnerConfig(resource)));
-    return [...new Set(results.flat())];
+    return {
+        errors: [...new Set(results.flatMap((result) => result.errors))],
+        warnings: [...new Set(results.flatMap((result) => result.warnings))],
+    };
 }
 
 async function refreshConfigValidation(showSuccessMessage = false): Promise<boolean> {
     configValidationIssues = await collectConfigValidationIssues();
     configValidationWarningShown = false;
 
-    if (!hasValidConfig()) {
+    if (configValidationIssues.warnings.length > 0 || !hasValidConfig()) {
         showConfigValidationWarning();
+    }
+
+    if (!hasValidConfig()) {
         return false;
     }
 
-    if (showSuccessMessage) {
+    if (showSuccessMessage && configValidationIssues.warnings.length === 0) {
         vscode.window.showInformationMessage('LintRunner: Config is valid.');
     }
 
