@@ -304,6 +304,13 @@
                       "minimum": 1,
                       "description": "Timeout in milliseconds for this linter. Overrides the default 30000ms timeout. The linter process is killed if it does not finish within this time."
                     },
+                    "successExitCodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "description": "Optional exit codes to treat as successful for this linter. When omitted, any completed exit code is accepted and diagnostics are still parsed."
+                    },
                     "maxFileSize": {
                       "type": "number",
                       "minimum": 1,
@@ -354,6 +361,13 @@
                       "default": 30000,
                       "minimum": 1,
                       "description": "Timeout in milliseconds for this fixer. Overrides the default 30000ms timeout. The fixer process is killed if it does not finish within this time."
+                    },
+                    "successExitCodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "description": "Optional exit codes to treat as successful for this fixer. When set, any other exit code stops the remaining fixer pipeline for the file."
                     }
                   }
                 }

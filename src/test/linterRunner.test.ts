@@ -330,6 +330,64 @@ suite('Linter Runner Test Suite', () => {
         }
     });
 
+    test('runRunnableLinters accepts configured non-zero successExitCodes', async function () {
+        this.timeout(10_000);
+
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-linter-exit-codes-'));
+        const filePath = path.join(tmpDir, 'test.ts');
+        const scriptPath = path.join(tmpDir, 'emit-diagnostic.js');
+        await fs.writeFile(filePath, 'const value = 1;\n');
+        await fs.writeFile(
+            scriptPath,
+            [
+                "process.stdout.write('1:configured success\\n');",
+                'process.exit(1);',
+                '',
+            ].join('\n')
+        );
+
+        const diagnostics = vscode.languages.createDiagnosticCollection('lintRunner-linter-exit-codes-test');
+        const output = vscode.window.createOutputChannel('LintRunner Linter Exit Codes Test');
+        const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+        const target: ResolvedTargetConfig = {
+            name: 'exit-code-test-target',
+            filePatterns: [],
+            languages: ['typescript'],
+            preCommands: [],
+            linters: [],
+            fixers: [],
+        };
+        const runnable: RunnableLinter = {
+            label: 'configured-exit-linter',
+            description: target.name,
+            detail: process.execPath,
+            target,
+            linter: {
+                name: 'configured-exit-linter',
+                command: process.execPath,
+                args: [scriptPath],
+                parser: {
+                    pattern: '(?<line>\\d+):(?<message>.+)',
+                },
+                successExitCodes: [1],
+                run: 'manual',
+            },
+        };
+
+        try {
+            const lintersRun = await runRunnableLinters(filePath, diagnostics, output, statusBar, [runnable]);
+            const messages = (diagnostics.get(vscode.Uri.file(filePath)) ?? []).map((diagnostic) => diagnostic.message);
+
+            assert.strictEqual(lintersRun, 1);
+            assert.deepStrictEqual(messages, ['configured success']);
+        } finally {
+            diagnostics.dispose();
+            output.dispose();
+            statusBar.dispose();
+            await fs.rm(tmpDir, { recursive: true, force: true });
+        }
+    });
+
     test('runFixers shows the active fixer name in the status bar', async function () {
         this.timeout(10_000);
 
@@ -400,6 +458,76 @@ suite('Linter Runner Test Suite', () => {
             assert.strictEqual(shown, false);
         } finally {
             output.dispose();
+            await fs.rm(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    test('runFixers stops remaining fixers when exit code is not allowed', async function () {
+        this.timeout(10_000);
+
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-fixer-exit-codes-'));
+        const filePath = path.join(tmpDir, 'test.ts');
+        const failingScriptPath = path.join(tmpDir, 'failing-fixer.js');
+        const quickScriptPath = path.join(tmpDir, 'quick-fixer.js');
+        const firstStartedMarkerPath = path.join(tmpDir, 'first-started.txt');
+        const secondStartedMarkerPath = path.join(tmpDir, 'second-started.txt');
+        await fs.writeFile(filePath, 'const value = 1;\n');
+        await fs.writeFile(
+            failingScriptPath,
+            [
+                "const fs = require('node:fs');",
+                'const [startedMarkerPath] = process.argv.slice(2);',
+                "fs.writeFileSync(startedMarkerPath, 'started');",
+                'process.exit(2);',
+                '',
+            ].join('\n')
+        );
+        await fs.writeFile(
+            quickScriptPath,
+            [
+                "const fs = require('node:fs');",
+                'const [startedMarkerPath] = process.argv.slice(2);',
+                "fs.writeFileSync(startedMarkerPath, 'started');",
+                'process.exit(0);',
+                '',
+            ].join('\n')
+        );
+
+        const output = vscode.window.createOutputChannel('LintRunner Fixer Exit Codes Test');
+        const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+        const failingFixer: RunnableFixer = {
+            label: 'failing-fixer',
+            description: 'PHP',
+            detail: process.execPath,
+            targetName: 'PHP',
+            fixer: {
+                name: 'failing-fixer',
+                command: process.execPath,
+                args: [failingScriptPath, firstStartedMarkerPath],
+                successExitCodes: [0, 1],
+            },
+        };
+        const quickFixer: RunnableFixer = {
+            label: 'quick-fixer',
+            description: 'PHP',
+            detail: process.execPath,
+            targetName: 'PHP',
+            fixer: {
+                name: 'quick-fixer',
+                command: process.execPath,
+                args: [quickScriptPath, secondStartedMarkerPath],
+            },
+        };
+
+        try {
+            const fixersRun = await runFixers(filePath, output, statusBar, 'manual', [failingFixer, quickFixer]);
+
+            await fs.access(firstStartedMarkerPath);
+            await assert.rejects(fs.access(secondStartedMarkerPath));
+            assert.strictEqual(fixersRun, 0);
+        } finally {
+            output.dispose();
+            statusBar.dispose();
             await fs.rm(tmpDir, { recursive: true, force: true });
         }
     });

@@ -175,6 +175,7 @@ export interface FixerConfig extends CommandConfig {
     run?: FixerRunMode;
     enabled?: boolean;
     timeout?: number;
+    successExitCodes?: number[];
 }
 
 export type { RegexParserConfig };
@@ -189,6 +190,7 @@ export interface TargetLinterConfig {
     preCommands?: CommandConfig[];
     timeout?: number;
     maxFileSize?: number;
+    successExitCodes?: number[];
 }
 
 export interface LinterConfig extends TargetLinterConfig {
@@ -219,6 +221,7 @@ export interface LinterPatch {
     preCommands?: CommandConfig[];
     timeout?: number;
     maxFileSize?: number;
+    successExitCodes?: number[];
 }
 
 export interface FixerPatch {
@@ -230,6 +233,7 @@ export interface FixerPatch {
     run?: FixerRunMode;
     enabled?: boolean;
     timeout?: number;
+    successExitCodes?: number[];
 }
 
 export interface TargetPatch {
@@ -835,6 +839,7 @@ function cloneLinterConfig(linter: TargetLinterConfig): TargetLinterConfig {
         args: [...linter.args],
         parser: { ...linter.parser },
         preCommands: linter.preCommands?.map(cloneCommandConfig),
+        successExitCodes: linter.successExitCodes !== undefined ? [...linter.successExitCodes] : undefined,
     };
 }
 
@@ -842,6 +847,7 @@ function cloneFixerConfig(fixer: FixerConfig): FixerConfig {
     return {
         ...fixer,
         args: [...(fixer.args ?? [])],
+        successExitCodes: fixer.successExitCodes !== undefined ? [...fixer.successExitCodes] : undefined,
     };
 }
 
@@ -878,6 +884,10 @@ function applyLinterPatch(result: TargetLinterConfig[], patch: LinterPatch): voi
                 patch.preCommands !== undefined
                     ? patch.preCommands.map(cloneCommandConfig)
                     : result[idx].preCommands,
+            successExitCodes:
+                patch.successExitCodes !== undefined
+                    ? [...patch.successExitCodes]
+                    : result[idx].successExitCodes,
         };
         return;
     }
@@ -915,6 +925,10 @@ function applyFixerPatch(result: FixerConfig[], patch: FixerPatch): void {
             ...result[idx],
             ...patch,
             args: patch.args !== undefined ? [...patch.args] : result[idx].args,
+            successExitCodes:
+                patch.successExitCodes !== undefined
+                    ? [...patch.successExitCodes]
+                    : result[idx].successExitCodes,
         };
         return;
     }
@@ -1201,6 +1215,30 @@ function formatCommandStatus(result: CommandResult): string {
     }
 
     return result.code === 0 ? 'ok' : `exit ${result.code ?? 'null'}`;
+}
+
+function isAcceptedExitCode(result: CommandResult, successExitCodes?: readonly number[]): boolean {
+    if (result.error !== undefined) {
+        return false;
+    }
+
+    if (successExitCodes === undefined) {
+        return true;
+    }
+
+    return result.code !== null && successExitCodes.includes(result.code);
+}
+
+function formatExitCodePolicyFailure(result: CommandResult, successExitCodes?: readonly number[]): string {
+    if (result.error !== undefined) {
+        return result.error;
+    }
+
+    if (successExitCodes === undefined) {
+        return `exit ${result.code ?? 'null'}`;
+    }
+
+    return `exit ${result.code ?? 'null'} is not in successExitCodes [${successExitCodes.join(', ')}]`;
 }
 
 function formatRunningLinterName(name: string, count: number): string {
@@ -1494,6 +1532,11 @@ async function spawnLinter(
         if (!shouldContinue()) {
             return [];
         }
+        if (!isAcceptedExitCode(result, linter.successExitCodes)) {
+            logCommandResult(linter.name, result, output);
+            output.appendLine(`[${linter.name}] failed: ${formatExitCodePolicyFailure(result, linter.successExitCodes)}`);
+            return [];
+        }
         const diags = parseLinterOutput(linter, result);
         await normalizeDiagnosticRanges(filePath, diags);
         logCommandResult(linter.name, result, output, diags.length);
@@ -1616,10 +1659,14 @@ async function runTargetFixer(
             return false;
         }
         logCommandResult(label, result, output);
+        if (!isAcceptedExitCode(result, fixer.successExitCodes)) {
+            output.appendLine(`[${label}] failed: ${formatExitCodePolicyFailure(result, fixer.successExitCodes)}`);
+            return false;
+        }
         return true;
     } catch (err) {
         output.appendLine(`[${label}] failed: ${String(err)}`);
-        return true;
+        return false;
     } finally {
         stopLinterStatus(statusName, statusBar);
     }
