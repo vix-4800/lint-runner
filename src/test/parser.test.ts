@@ -1707,6 +1707,10 @@ suite('mergeConfiguredTargets', () => {
 });
 
 suite('Config validation', () => {
+    const BASE_PARSER: RegexParserConfig = {
+        pattern: String.raw`(?<line>\d+):(?<message>.+)`,
+    };
+
     test('allows target patches without languages when the target already exists in a higher scope', () => {
         const issues = validateTargetScopes(
             [
