@@ -527,23 +527,23 @@ suite('Linter Runner Test Suite', () => {
         }
     });
 
-    test('runRunnableLinters uses configured cwd for linter commands and pre-commands', async function () {
+    test('runRunnableLinters uses configured cwd and env for linter commands and pre-commands', async function () {
         this.timeout(10_000);
 
         const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-linter-cwd-'));
         const fileDir = path.join(tmpDir, 'nested');
         const filePath = path.join(fileDir, 'test.ts');
-        const scriptPath = path.join(tmpDir, 'record-cwd.js');
-        const preCommandMarkerPath = path.join(tmpDir, 'pre-command-cwd.txt');
-        const linterMarkerPath = path.join(tmpDir, 'linter-cwd.txt');
+        const scriptPath = path.join(tmpDir, 'record-command-state.js');
+        const preCommandMarkerPath = path.join(tmpDir, 'pre-command-state.json');
+        const linterMarkerPath = path.join(tmpDir, 'linter-state.json');
         await fs.mkdir(fileDir, { recursive: true });
         await fs.writeFile(filePath, 'const value = 1;\n');
         await fs.writeFile(
             scriptPath,
             [
                 "const fs = require('node:fs');",
-                'const [markerPath] = process.argv.slice(2);',
-                'fs.writeFileSync(markerPath, process.cwd());',
+                'const [markerPath, envName] = process.argv.slice(2);',
+                'fs.writeFileSync(markerPath, JSON.stringify({ cwd: process.cwd(), envValue: envName ? process.env[envName] ?? "" : "" }));',
                 'process.exit(0);',
                 '',
             ].join('\n')
@@ -568,16 +568,18 @@ suite('Linter Runner Test Suite', () => {
             linter: {
                 name: 'cwd-linter',
                 command: process.execPath,
-                args: [scriptPath, linterMarkerPath],
+                args: [scriptPath, linterMarkerPath, 'LINT_RUNNER_MAIN_ENV'],
                 cwd: '${fileDirname}',
+                env: { LINT_RUNNER_MAIN_ENV: '${fileBasename}' },
                 parser: {
                     pattern: '(?<line>\\d+):(?<message>.+)',
                 },
                 preCommands: [
                     {
                         command: process.execPath,
-                        args: [scriptPath, preCommandMarkerPath],
+                        args: [scriptPath, preCommandMarkerPath, 'LINT_RUNNER_PRE_ENV'],
                         cwd: tmpDir,
+                        env: { LINT_RUNNER_PRE_ENV: 'pre-value' },
                     },
                 ],
                 run: 'manual',
@@ -586,10 +588,20 @@ suite('Linter Runner Test Suite', () => {
 
         try {
             const lintersRun = await runRunnableLinters(filePath, diagnostics, output, statusBar, [runnable]);
+            const preCommandState = JSON.parse(await fs.readFile(preCommandMarkerPath, 'utf8')) as {
+                cwd: string;
+                envValue: string;
+            };
+            const linterState = JSON.parse(await fs.readFile(linterMarkerPath, 'utf8')) as {
+                cwd: string;
+                envValue: string;
+            };
 
             assert.strictEqual(lintersRun, 1);
-            await assertSamePath(await fs.readFile(preCommandMarkerPath, 'utf8'), tmpDir);
-            await assertSamePath(await fs.readFile(linterMarkerPath, 'utf8'), fileDir);
+            await assertSamePath(preCommandState.cwd, tmpDir);
+            assert.strictEqual(preCommandState.envValue, 'pre-value');
+            await assertSamePath(linterState.cwd, fileDir);
+            assert.strictEqual(linterState.envValue, 'test.ts');
         } finally {
             diagnostics.dispose();
             output.dispose();
@@ -790,22 +802,22 @@ suite('Linter Runner Test Suite', () => {
         }
     });
 
-    test('runFixers uses configured cwd for fixer commands', async function () {
+    test('runFixers uses configured cwd and env for fixer commands', async function () {
         this.timeout(10_000);
 
         const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-fixer-cwd-'));
         const fileDir = path.join(tmpDir, 'nested');
         const filePath = path.join(fileDir, 'test.ts');
-        const scriptPath = path.join(tmpDir, 'record-cwd.js');
-        const fixerMarkerPath = path.join(tmpDir, 'fixer-cwd.txt');
+        const scriptPath = path.join(tmpDir, 'record-command-state.js');
+        const fixerMarkerPath = path.join(tmpDir, 'fixer-state.json');
         await fs.mkdir(fileDir, { recursive: true });
         await fs.writeFile(filePath, 'const value = 1;\n');
         await fs.writeFile(
             scriptPath,
             [
                 "const fs = require('node:fs');",
-                'const [markerPath] = process.argv.slice(2);',
-                'fs.writeFileSync(markerPath, process.cwd());',
+                'const [markerPath, envName] = process.argv.slice(2);',
+                'fs.writeFileSync(markerPath, JSON.stringify({ cwd: process.cwd(), envValue: envName ? process.env[envName] ?? "" : "" }));',
                 'process.exit(0);',
                 '',
             ].join('\n')
@@ -821,16 +833,22 @@ suite('Linter Runner Test Suite', () => {
             fixer: {
                 name: 'cwd-fixer',
                 command: process.execPath,
-                args: [scriptPath, fixerMarkerPath],
+                args: [scriptPath, fixerMarkerPath, 'LINT_RUNNER_FIXER_ENV'],
                 cwd: '${fileDirname}',
+                env: { LINT_RUNNER_FIXER_ENV: '${fileBasenameNoExtension}' },
             },
         };
 
         try {
             const fixersRun = await runFixers(filePath, output, statusBar, 'manual', [fixer]);
+            const fixerState = JSON.parse(await fs.readFile(fixerMarkerPath, 'utf8')) as {
+                cwd: string;
+                envValue: string;
+            };
 
             assert.strictEqual(fixersRun, 1);
-            await assertSamePath(await fs.readFile(fixerMarkerPath, 'utf8'), fileDir);
+            await assertSamePath(fixerState.cwd, fileDir);
+            assert.strictEqual(fixerState.envValue, 'test');
         } finally {
             output.dispose();
             statusBar.dispose();

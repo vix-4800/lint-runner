@@ -164,11 +164,14 @@ type DiagnosticsHandler = (
 ) => void;
 let commandEnvPromise: Promise<NodeJS.ProcessEnv> | undefined;
 
+export type CommandEnv = Record<string, string>;
+
 export interface CommandConfig {
     name?: string;
     command: string;
     args: string[];
     cwd?: string;
+    env?: CommandEnv;
 }
 
 export interface FixerConfig extends CommandConfig {
@@ -187,6 +190,7 @@ export interface TargetLinterConfig {
     command: string;
     args: string[];
     cwd?: string;
+    env?: CommandEnv;
     parser: RegexParserConfig;
     run?: RunMode;
     enabled?: boolean;
@@ -220,6 +224,7 @@ export interface LinterPatch {
     command?: string;
     args?: string[];
     cwd?: string;
+    env?: CommandEnv;
     parser?: RegexParserConfig;
     run?: RunMode;
     enabled?: boolean;
@@ -236,6 +241,7 @@ export interface FixerPatch {
     command?: string;
     args?: string[];
     cwd?: string;
+    env?: CommandEnv;
     run?: FixerRunMode;
     enabled?: boolean;
     timeout?: number;
@@ -520,7 +526,7 @@ function validateCommandConfigs(
             scopeLabel,
             commandLabel,
             commandConfig.command,
-            env,
+            mergeCommandEnv(env, commandConfig.env),
             platform,
             issues
         );
@@ -654,7 +660,7 @@ export function validateTargetScopes(
                         scope.label,
                         linterLabel,
                         linter.command,
-                        env,
+                        mergeCommandEnv(env, linter.env),
                         platform,
                         issues
                     );
@@ -701,7 +707,7 @@ export function validateTargetScopes(
                         scope.label,
                         fixerLabel,
                         fixer.command,
-                        env,
+                        mergeCommandEnv(env, fixer.env),
                         platform,
                         issues
                     );
@@ -1095,10 +1101,15 @@ export function resolveConfiguredTargets(targets: TargetConfig[]): ResolvedTarge
     return targets.map(normalizeTargetConfig);
 }
 
+function cloneCommandEnv(env: CommandEnv | undefined): CommandEnv | undefined {
+    return env === undefined ? undefined : { ...env };
+}
+
 function cloneCommandConfig(command: CommandConfig): CommandConfig {
     return {
         ...command,
         args: [...(command.args ?? [])],
+        env: cloneCommandEnv(command.env),
     };
 }
 
@@ -1113,6 +1124,7 @@ function cloneLinterConfig(linter: TargetLinterConfig): TargetLinterConfig {
     return {
         ...linter,
         args: [...linter.args],
+        env: cloneCommandEnv(linter.env),
         parser: { ...linter.parser },
         preCommands: linter.preCommands?.map(cloneCommandConfig),
         successExitCodes: linter.successExitCodes !== undefined ? [...linter.successExitCodes] : undefined,
@@ -1123,6 +1135,7 @@ function cloneFixerConfig(fixer: FixerConfig): FixerConfig {
     return {
         ...fixer,
         args: [...(fixer.args ?? [])],
+        env: cloneCommandEnv(fixer.env),
         successExitCodes: fixer.successExitCodes !== undefined ? [...fixer.successExitCodes] : undefined,
     };
 }
@@ -1152,6 +1165,7 @@ function applyLinterPatch(result: TargetLinterConfig[], patch: LinterPatch): voi
             ...result[idx],
             ...patch,
             args: patch.args !== undefined ? [...patch.args] : result[idx].args,
+            env: patch.env !== undefined ? cloneCommandEnv(patch.env) : result[idx].env,
             parser:
                 patch.parser !== undefined
                     ? { ...result[idx].parser, ...patch.parser }
@@ -1201,6 +1215,7 @@ function applyFixerPatch(result: FixerConfig[], patch: FixerPatch): void {
             ...result[idx],
             ...patch,
             args: patch.args !== undefined ? [...patch.args] : result[idx].args,
+            env: patch.env !== undefined ? cloneCommandEnv(patch.env) : result[idx].env,
             successExitCodes:
                 patch.successExitCodes !== undefined
                     ? [...patch.successExitCodes]
@@ -1344,6 +1359,23 @@ export function buildCommandEnv(shellPath?: string): NodeJS.ProcessEnv {
 
     const pathKey = getPathKey(env);
     env[pathKey] = mergePathValues(shellPath, env[pathKey] ?? '');
+    return env;
+}
+
+function mergeCommandEnv(
+    baseEnv: NodeJS.ProcessEnv,
+    overrides: CommandEnv | undefined,
+    filePath?: string
+): NodeJS.ProcessEnv {
+    const env = Object.assign(Object.create(null), baseEnv) as NodeJS.ProcessEnv;
+    if (overrides === undefined) {
+        return env;
+    }
+
+    for (const [key, value] of Object.entries(overrides)) {
+        env[key] = filePath === undefined ? value : expandHome(applyCommandTemplate(value, filePath));
+    }
+
     return env;
 }
 
@@ -1601,7 +1633,7 @@ async function runCommand(
     const command = expandHome(applyCommandTemplate(commandConfig.command, filePath));
     const args = buildArgs(commandConfig.args, filePath);
     const cwd = buildCommandCwd(commandConfig, filePath);
-    const env = await getCommandEnv();
+    const env = mergeCommandEnv(await getCommandEnv(), commandConfig.env, filePath);
     if (!shouldContinue()) {
         return { code: null, stdout: '', stderr: '', error: 'cancelled' };
     }
