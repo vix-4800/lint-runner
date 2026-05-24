@@ -123,6 +123,19 @@ export function cancelAllFileRuns(): void {
     }
 }
 
+export function clearRunnerRuntimeState(): void {
+    for (const filePath of new Set([...activeRunIds.keys(), ...activeFileProcesses.keys()])) {
+        cancelFileRun(filePath);
+    }
+    runningLinters.clear();
+    activeRunIds.clear();
+    activeFileProcesses.clear();
+    clearAllFileLinterDiagnostics();
+    clearDiagnosticsCache();
+    resetCommandEnv();
+    nextRunId = 0;
+}
+
 interface LinterCacheEntry {
     mtime: number;
     size: number;
