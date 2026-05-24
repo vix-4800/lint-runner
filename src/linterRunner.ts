@@ -152,6 +152,7 @@ export function clearFileDiagnosticsCache(filePath: string): void {
 }
 
 const SHELL_ENV_TIMEOUT_MS = 3000;
+const DOCTOR_VERSION_TIMEOUT_MS = 3000;
 const SHELL_PATH_PREFIX = 'LINT_RUNNER_PATH=';
 
 type RunMode = 'manual' | 'onSave' | 'onOpen';
@@ -825,7 +826,7 @@ async function detectCommandVersion(command: string, cwd: string, env: NodeJS.Pr
                 done = true;
                 proc.kill();
                 resolve({ code: null, stdout, stderr, error: 'timeout' });
-            }, SHELL_ENV_TIMEOUT_MS);
+            }, DOCTOR_VERSION_TIMEOUT_MS);
 
             proc.stdout?.on('data', (chunk: Buffer) => {
                 stdout += chunk.toString();
