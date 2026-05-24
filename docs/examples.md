@@ -58,14 +58,12 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 
 ## GitLeaks
 
-These fragments belong to the same `lintRunner.targets` entry.
-
 ### Target settings
 
 ```json
 {
   "languages": [
-    "php"
+    "*"
   ],
   "name": "GitLeaks"
 }
@@ -104,8 +102,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 
 ## Shell
-
-These fragments belong to the same `lintRunner.targets` entry.
 
 ### Target settings
 
@@ -161,8 +157,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 ## Dockerfile
 
-These fragments belong to the same `lintRunner.targets` entry.
-
 ### Target settings
 
 ```json
@@ -202,8 +196,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 
 ## Markdown
-
-These fragments belong to the same `lintRunner.targets` entry.
 
 ### Target settings
 
@@ -281,8 +273,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 ## YAML
 
-These fragments belong to the same `lintRunner.targets` entry.
-
 ### Target settings
 
 ```json
@@ -341,8 +331,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 ## Ansible
 
-These fragments belong to the same `lintRunner.targets` entry.
-
 ### Target settings
 
 ```json
@@ -390,8 +378,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 
 ## Python
-
-These fragments belong to the same `lintRunner.targets` entry.
 
 ### Target settings
 
@@ -468,8 +454,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 ## Dotenv
 
-These fragments belong to the same `lintRunner.targets` entry.
-
 ### Target settings
 
 ```json
@@ -531,8 +515,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 ## INI
 
-These fragments belong to the same `lintRunner.targets` entry.
-
 ### Target settings
 
 ```json
@@ -567,8 +549,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 
 ## Lua
-
-These fragments belong to the same `lintRunner.targets` entry.
 
 ### Target settings
 
@@ -627,8 +607,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 ## TOML
 
-These fragments belong to the same `lintRunner.targets` entry.
-
 ### Target settings
 
 ```json
@@ -682,8 +660,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 ## Go
 
-These fragments belong to the same `lintRunner.targets` entry.
-
 ### Target settings
 
 ```json
@@ -715,8 +691,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 ## Fish
 
-These fragments belong to the same `lintRunner.targets` entry.
-
 ### Target settings
 
 ```json
@@ -747,8 +721,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 
 ## JavaScript/TypeScript/Vue
-
-These fragments belong to the same `lintRunner.targets` entry.
 
 ### Target settings
 
@@ -831,8 +803,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 ## Styles
 
-These fragments belong to the same `lintRunner.targets` entry.
-
 ### Target settings
 
 ```json
@@ -911,8 +881,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 
 ## HTML
-
-These fragments belong to the same `lintRunner.targets` entry.
 
 ### Target settings
 
@@ -995,8 +963,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 ## SQL
 
-These fragments belong to the same `lintRunner.targets` entry.
-
 ### Target settings
 
 ```json
@@ -1059,8 +1025,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 ## Make
 
-These fragments belong to the same `lintRunner.targets` entry.
-
 ### Target settings
 
 ```json
@@ -1098,8 +1062,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 
 ## Nginx
-
-These fragments belong to the same `lintRunner.targets` entry.
 
 ### Target settings
 
@@ -1167,8 +1129,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 ## XML
 
-These fragments belong to the same `lintRunner.targets` entry.
-
 ### Target settings
 
 ```json
@@ -1231,8 +1191,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 ## JSON
 
-These fragments belong to the same `lintRunner.targets` entry.
-
 ### Target settings
 
 ```json
@@ -1291,8 +1249,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 ## GitHub Actions
 
-These fragments belong to the same `lintRunner.targets` entry.
-
 ### Target settings
 
 ```json
@@ -1333,8 +1289,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 ## Blade
 
-These fragments belong to the same `lintRunner.targets` entry.
-
 ### Target settings
 
 ```json
@@ -1371,8 +1325,6 @@ These fragments belong to the same `lintRunner.targets` entry.
 
 
 ## PHP
-
-These fragments belong to the same `lintRunner.targets` entry.
 
 ### Target settings
 
