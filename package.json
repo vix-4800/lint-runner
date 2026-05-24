@@ -1,29 +1,64 @@
 {
   "name": "lint-runner",
   "displayName": "LintRunner",
-  "description": "Run external CLI linters and show diagnostics in the editor.",
+  "description": "Run any CLI linter or formatter and publish results as VS Code diagnostics.",
+  "license": "MIT",
   "icon": "icon.png",
-  "version": "0.2.0",
-  "publisher": "vix",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/vix-4800/lint-runner"
+"galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
   },
-  "author": {
+  "version": "0.2.0",
+"qna": false,
+  "preview": true,
+  "pricing": "Free",
+  "publisher": "vix",
+    "author": {
     "name": "Anton VIX",
     "email": "Gordan.ei@protonmail.ch",
     "url": "https://github.com/vix-4800"
   },
+"homepage": "https://github.com/vix-4800/lint-runner#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vix-4800/lint-runner"
+  },
+  "bugs": {
+    "url": "https://github.com/vix-4800/lint-runner/issues"
+  },
   "engines": {
     "vscode": "^1.116.0"
   },
+"extensionKind": [
+    "workspace"
+  ],
   "categories": [
     "Programming Languages",
     "Linters",
     "Formatters"
   ],
   "keywords": [
-    "code quality"
+    "lint",
+    "linter",
+    "linting",
+    "formatter",
+    "formatting",
+    "diagnostics",
+    "problems",
+    "cli",
+    "code quality",
+    "phpstan",
+    "phpcs",
+    "php-cs-fixer",
+    "eslint",
+    "ruff",
+    "shellcheck",
+    "hadolint",
+    "yamllint",
+    "markdownlint",
+    "gitleaks",
+    "rector",
+    "mago"
   ],
   "activationEvents": [
     "onStartupFinished"
