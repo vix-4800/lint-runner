@@ -15,7 +15,9 @@ import {
     clearAllFileLinterDiagnostics,
     clearFileDiagnosticsCache,
     validateLintRunnerConfig,
+    getDoctorToolStatuses,
     type ConfigValidationIssues,
+    type DoctorToolStatus,
     type RunnerFailure,
     type RunnerOutput,
     type RunnableFixer,
@@ -142,6 +144,18 @@ export function isManualRunNotificationEnabled(
             ? vscode.workspace.getConfiguration('lintRunner', resourceOrConfig)
             : resourceOrConfig;
     return config.get<boolean>('showManualRunNotifications') !== false;
+}
+
+export function formatDoctorTable(rows: readonly DoctorToolStatus[]): string {
+    const headers = ['Tool', 'Found', 'Version', 'Used by'];
+    const cells = rows.map((row) => [row.tool, row.found, row.version, row.usedBy.join(', ')]);
+    const widths = headers.map((header, index) =>
+        Math.max(header.length, ...cells.map((row) => row[index]?.length ?? 0))
+    );
+    const formatRow = (row: readonly string[]): string =>
+        row.map((cell, index) => cell.padEnd(widths[index])).join('  ').trimEnd();
+
+    return [formatRow(headers), ...cells.map((row) => formatRow(row))].join('\n');
 }
 
 function uniqueLabels(labels: readonly string[]): string[] {
@@ -1126,6 +1140,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             configValid = await refreshConfigValidation(true);
             updateActionsStatusBar(actionsStatusBar);
             codeLensRefreshEmitter.fire();
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('lintRunner.doctor', async () => {
+            if (!canRunWorkspaceCommands(true)) {
+                return;
+            }
+
+            const rows = await getDoctorToolStatuses(vscode.window.activeTextEditor?.document.uri);
+            if (rows.length === 0) {
+                vscode.window.showInformationMessage('LintRunner: No configured tools found.');
+                return;
+            }
+
+            const document = await vscode.workspace.openTextDocument({
+                language: 'text',
+                content: formatDoctorTable(rows),
+            });
+            await vscode.window.showTextDocument(document, { preview: false });
         })
     );
 

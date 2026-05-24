@@ -60,6 +60,10 @@
       {
         "command": "lintRunner.validateConfig",
         "title": "LintRunner: Validate Config"
+      },
+      {
+        "command": "lintRunner.doctor",
+        "title": "LintRunner: Doctor"
       }
     ],
     "configuration": {

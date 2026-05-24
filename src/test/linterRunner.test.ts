@@ -8,6 +8,7 @@ import {
     cancelFileRun,
     clearAllFileLinterDiagnostics,
     clearDiagnosticsCache,
+    collectDoctorToolStatuses,
     runFixers,
     runLinters,
     runRunnableLinters,
@@ -40,6 +41,75 @@ async function assertCancelledProcess(completedMarkerPath: string, terminatedMar
 }
 
 suite('Linter Runner Test Suite', () => {
+    test('collectDoctorToolStatuses groups tools by target and resolves found/version state', async () => {
+        const statuses = await collectDoctorToolStatuses(
+            [
+                {
+                    name: 'PHP',
+                    filePatterns: [],
+                    languages: ['php'],
+                    preCommands: [],
+                    linters: [
+                        {
+                            name: 'phpstan',
+                            command: 'phpstan',
+                            args: ['analyse'],
+                            parser: { pattern: '(?<line>\\d+):(?<message>.+)' },
+                            filePatterns: [],
+                            languages: ['php'],
+                            run: 'manual',
+                        },
+                        {
+                            name: 'phpcs',
+                            command: 'phpcs',
+                            args: ['--report=emacs'],
+                            parser: { pattern: '(?<line>\\d+):(?<message>.+)' },
+                            filePatterns: [],
+                            languages: ['php'],
+                            run: 'manual',
+                            preCommands: [{ command: 'phpcs', args: ['--config-show'] }],
+                        },
+                    ],
+                    fixers: [{ name: 'mago', command: 'mago', args: ['fix'] }],
+                },
+                {
+                    name: 'Shell',
+                    filePatterns: [],
+                    languages: ['shellscript'],
+                    preCommands: [],
+                    linters: [
+                        {
+                            name: 'shellcheck',
+                            command: 'shellcheck',
+                            args: ['--format=gcc'],
+                            parser: { pattern: '(?<line>\\d+):(?<message>.+)' },
+                            filePatterns: [],
+                            languages: ['shellscript'],
+                            run: 'manual',
+                        },
+                    ],
+                    fixers: [],
+                },
+            ],
+            {
+                checkCommand: (command) => {
+                    if (command === 'mago') {
+                        return false;
+                    }
+                    return true;
+                },
+                detectVersion: async (command) => ({ phpcs: '3.10.2', phpstan: '2.1.18', shellcheck: '0.10.0' })[command],
+            }
+        );
+
+        assert.deepStrictEqual(statuses, [
+            { tool: 'mago', found: 'no', version: '-', usedBy: ['PHP'] },
+            { tool: 'phpcs', found: 'yes', version: '3.10.2', usedBy: ['PHP'] },
+            { tool: 'phpstan', found: 'yes', version: '2.1.18', usedBy: ['PHP'] },
+            { tool: 'shellcheck', found: 'yes', version: '0.10.0', usedBy: ['Shell'] },
+        ]);
+    });
+
     test('cancelFileRun stops active linter processes for the closed file', async function () {
         this.timeout(10_000);
 

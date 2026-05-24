@@ -152,6 +152,7 @@ export function clearFileDiagnosticsCache(filePath: string): void {
 }
 
 const SHELL_ENV_TIMEOUT_MS = 3000;
+const DOCTOR_VERSION_TIMEOUT_MS = 3000;
 const SHELL_PATH_PREFIX = 'LINT_RUNNER_PATH=';
 
 type RunMode = 'manual' | 'onSave' | 'onOpen';
@@ -302,6 +303,15 @@ export interface ValidateTargetScopesOptions {
 export interface ConfigValidationIssues {
     errors: string[];
     warnings: string[];
+}
+
+export type DoctorToolFoundStatus = 'yes' | 'no' | 'unknown';
+
+export interface DoctorToolStatus {
+    tool: string;
+    found: DoctorToolFoundStatus;
+    version: string;
+    usedBy: string[];
 }
 
 type WorkspaceConfigLike = Pick<vscode.WorkspaceConfiguration, 'get'>;
@@ -713,6 +723,187 @@ export async function validateLintRunnerConfig(resource?: vscode.Uri): Promise<C
     return validateTargetScopes(getScopedTargetPatches(resource), {
         knownLanguageIds,
         env,
+    });
+}
+
+function getDoctorResource(resource?: vscode.Uri): vscode.Uri | undefined {
+    return resource ?? vscode.window.activeTextEditor?.document.uri ?? vscode.workspace.workspaceFolders?.[0]?.uri;
+}
+
+function getDoctorTargets(resource?: vscode.Uri): ResolvedTargetConfig[] {
+    const scopedResource = getDoctorResource(resource);
+    const config =
+        scopedResource === undefined
+            ? vscode.workspace.getConfiguration('lintRunner')
+            : vscode.workspace.getConfiguration('lintRunner', scopedResource);
+    const inspectedTargets = config.inspect<TargetPatch[]>('targets');
+    const mergedGlobalTargets = mergeConfiguredTargets([], inspectedTargets?.globalValue ?? []);
+    const mergedWorkspaceTargets = mergeConfiguredTargets(
+        mergedGlobalTargets,
+        inspectedTargets?.workspaceValue ?? []
+    );
+
+    return resolveConfiguredTargets(
+        mergeConfiguredTargets(mergedWorkspaceTargets, inspectedTargets?.workspaceFolderValue ?? [])
+    );
+}
+
+function collectDoctorToolCommands(targets: readonly ResolvedTargetConfig[]): Map<string, Set<string>> {
+    const tools = new Map<string, Set<string>>();
+    const addTool = (command: string | undefined, targetName: string): void => {
+        const normalized = command?.trim();
+        if (normalized === undefined || normalized === '') {
+            return;
+        }
+
+        let usedBy = tools.get(normalized);
+        if (usedBy === undefined) {
+            usedBy = new Set<string>();
+            tools.set(normalized, usedBy);
+        }
+        usedBy.add(targetName);
+    };
+
+    for (const target of targets) {
+        for (const preCommand of target.preCommands) {
+            addTool(preCommand.command, target.name);
+        }
+        for (const linter of target.linters) {
+            addTool(linter.command, target.name);
+            for (const preCommand of linter.preCommands ?? []) {
+                addTool(preCommand.command, target.name);
+            }
+        }
+        for (const fixer of target.fixers) {
+            addTool(fixer.command, target.name);
+        }
+    }
+
+    return tools;
+}
+
+function extractCommandVersion(output: string): string | undefined {
+    const versionMatch = output.match(/\b\d+(?:\.\d+)+(?:[-+][^\s]+)?\b/);
+    return versionMatch?.[0];
+}
+
+async function detectCommandVersion(command: string, cwd: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
+    const versionArgsCandidates = [['--version'], ['-V'], ['version']];
+
+    for (const args of versionArgsCandidates) {
+        const result = await new Promise<CommandResult>((resolve) => {
+            let proc: cp.ChildProcess;
+            try {
+                proc = cp.spawn(command, args, {
+                    cwd,
+                    env,
+                    stdio: ['ignore', 'pipe', 'pipe'],
+                });
+            } catch (error) {
+                resolve({
+                    code: null,
+                    stdout: '',
+                    stderr: '',
+                    error: String(error),
+                });
+                return;
+            }
+
+            let stdout = '';
+            let stderr = '';
+            let done = false;
+            const timer = setTimeout(() => {
+                if (done) {
+                    return;
+                }
+                done = true;
+                proc.kill();
+                resolve({ code: null, stdout, stderr, error: 'timeout' });
+            }, DOCTOR_VERSION_TIMEOUT_MS);
+
+            proc.stdout?.on('data', (chunk: Buffer) => {
+                stdout += chunk.toString();
+            });
+            proc.stderr?.on('data', (chunk: Buffer) => {
+                stderr += chunk.toString();
+            });
+            proc.on('error', (error: Error) => {
+                if (done) {
+                    return;
+                }
+                done = true;
+                clearTimeout(timer);
+                resolve({ code: null, stdout, stderr, error: error.message });
+            });
+            proc.on('close', (code: number | null) => {
+                if (done) {
+                    return;
+                }
+                done = true;
+                clearTimeout(timer);
+                resolve({ code, stdout, stderr });
+            });
+        });
+
+        const stdout = result.stdout.trim();
+        const stderr = result.stderr.trim();
+        const version = extractCommandVersion(stdout) ?? extractCommandVersion(stderr);
+        if (version !== undefined) {
+            return version;
+        }
+    }
+
+    return undefined;
+}
+
+function getDoctorWorkingDirectory(resource?: vscode.Uri): string {
+    if (resource !== undefined) {
+        return vscode.workspace.getWorkspaceFolder(resource)?.uri.fsPath ?? process.cwd();
+    }
+
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+}
+
+export async function collectDoctorToolStatuses(
+    targets: readonly ResolvedTargetConfig[],
+    deps?: {
+        checkCommand?: (command: string) => boolean | undefined;
+        detectVersion?: (command: string) => Promise<string | undefined>;
+    }
+): Promise<DoctorToolStatus[]> {
+    const checkCommand = deps?.checkCommand ?? (() => undefined);
+    const detectVersion = deps?.detectVersion ?? (async () => undefined);
+    const tools = collectDoctorToolCommands(targets);
+    const statuses: DoctorToolStatus[] = [];
+
+    for (const [tool, usedBySet] of Array.from(tools.entries()).sort(([left], [right]) => left.localeCompare(right))) {
+        const exists = checkCommand(tool);
+        const found: DoctorToolFoundStatus = exists === true ? 'yes' : exists === false ? 'no' : 'unknown';
+        const version = found === 'yes' ? (await detectVersion(tool)) ?? '-' : '-';
+        statuses.push({
+            tool,
+            found,
+            version,
+            usedBy: Array.from(usedBySet).sort((left, right) => left.localeCompare(right)),
+        });
+    }
+
+    return statuses;
+}
+
+export async function getDoctorToolStatuses(resource?: vscode.Uri): Promise<DoctorToolStatus[]> {
+    const scopedResource = getDoctorResource(resource);
+    const env = await getCommandEnv();
+
+    return collectDoctorToolStatuses(getDoctorTargets(scopedResource), {
+        checkCommand: (command) => commandExistsForValidation(command, env, process.platform),
+        detectVersion: async (command) => {
+            if (!isCommandSafelyCheckable(command)) {
+                return undefined;
+            }
+
+            return detectCommandVersion(expandHome(command.trim()), getDoctorWorkingDirectory(scopedResource), env);
+        },
     });
 }
 

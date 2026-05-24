@@ -12,6 +12,7 @@ import {
     createManualCodeActions,
     createManualCodeLenses,
     getActionsStatusBarState,
+    formatDoctorTable,
     getManualRunNotificationTitle,
     handleClosedFileUri,
     handleClosedDocument,
@@ -123,6 +124,28 @@ suite('Extension Test Suite', () => {
                 seenDocumentUris
             ),
             []
+        );
+    });
+
+    test('formatDoctorTable aligns doctor rows into columns', () => {
+        assert.strictEqual(
+            formatDoctorTable([
+                {
+                    tool: 'phpcs',
+                    found: 'yes',
+                    version: '3.10.2',
+                    usedBy: ['PHP'],
+                },
+                {
+                    tool: 'mago',
+                    found: 'no',
+                    version: '-',
+                    usedBy: ['PHP'],
+                },
+            ]),
+            ['Tool   Found  Version  Used by', 'phpcs  yes    3.10.2   PHP', 'mago   no     -        PHP'].join(
+                '\n'
+            )
         );
     });
 
