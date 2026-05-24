@@ -1367,7 +1367,7 @@ function mergeCommandEnv(
     overrides: CommandEnv | undefined,
     filePath?: string
 ): NodeJS.ProcessEnv {
-    const env = Object.assign(Object.create(null), baseEnv) as NodeJS.ProcessEnv;
+    const env = Object.fromEntries(Object.entries(baseEnv)) as NodeJS.ProcessEnv;
     if (overrides === undefined) {
         return env;
     }
