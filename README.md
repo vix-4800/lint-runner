@@ -1,5 +1,10 @@
 # LintRunner
 
+[![Version](https://vsmarketplacebadges.dev/version/vix.lint-runner.svg)](https://marketplace.visualstudio.com/items?itemName=vix.lint-runner)
+[![Installs](https://vsmarketplacebadges.dev/installs-short/vix.lint-runner.svg)](https://marketplace.visualstudio.com/items?itemName=vix.lint-runner)
+[![Rating](https://vsmarketplacebadges.dev/rating-short/vix.lint-runner.svg)](https://marketplace.visualstudio.com/items?itemName=vix.lint-runner)
+![License](https://img.shields.io/github/license/vix-4800/lint-runner)
+
 VS Code extension for running external CLI linters and fixers, then publishing found issues as VS Code Problems.
 
 LintRunner is useful when a project already has command-line quality tools and you want them integrated into the editor without writing a custom extension for each tool.
