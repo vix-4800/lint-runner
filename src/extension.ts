@@ -34,7 +34,7 @@ const lastSavedContentHashes = new Map<string, string>();
 const CONFIG_VALIDATION_PREVIEW_LIMIT = 5;
 let deactivateCleanupResources: Omit<
     DeactivateCleanupDeps,
-    'clearPendingSaveDebounces' | 'clearRunnerRuntimeState' | 'skipFixersOnSaveSet' | 'savedContentHashes'
+    'clearPendingSaveDebounces' | 'clearRunnerRuntimeState' | 'savedContentHashes' | 'skipFixersOnSaveSet'
 > | undefined;
 
 export function computeContentHash(text: string): string {
@@ -53,20 +53,20 @@ export function isContentChanged(fileKey: string, newHash: string, hashMap: Map<
 }
 
 type OnOpenDocument = Pick<vscode.TextDocument, 'fileName' | 'isUntitled' | 'uri'>;
-type OnOpenEditor = {
+interface OnOpenEditor {
     readonly document: OnOpenDocument;
     readonly viewColumn?: vscode.ViewColumn;
-};
+}
 type OnOpenTab = Pick<vscode.Tab, 'input'>;
-type OnOpenTabGroup = {
+interface OnOpenTabGroup {
     readonly activeTab: OnOpenTab | undefined;
     readonly viewColumn: vscode.ViewColumn;
-};
+}
 type OutputChannelLike = Pick<vscode.OutputChannel, 'appendLine' | 'dispose'>;
 type StatusBarLike = Pick<vscode.StatusBarItem, 'dispose' | 'hide'>;
 type DiagnosticsLike = Pick<vscode.DiagnosticCollection, 'clear' | 'dispose'>;
 type DisposableLike = Pick<vscode.Disposable, 'dispose'>;
-type DeactivateCleanupDeps = {
+interface DeactivateCleanupDeps {
     clearPendingSaveDebounces?: () => void;
     clearRunnerRuntimeState?: () => void;
     skipFixersOnSaveSet?: Set<string>;
@@ -77,10 +77,10 @@ type DeactivateCleanupDeps = {
     actionsStatusBar?: StatusBarLike;
     output?: OutputChannelLike;
     codeLensRefreshEmitter?: DisposableLike;
-};
-type CollectVisibleFileNamesOptions = {
+}
+interface CollectVisibleFileNamesOptions {
     readonly includeSeen?: boolean;
-};
+}
 
 interface FixerQuickPickItem extends vscode.QuickPickItem {
     fixer: RunnableFixer;
@@ -156,7 +156,7 @@ export function isLoggingEnabled(
 }
 
 export function isManualRunNotificationEnabled(
-    resourceOrConfig: vscode.Uri | Pick<vscode.WorkspaceConfiguration, 'get'> =
+    resourceOrConfig: Pick<vscode.WorkspaceConfiguration, 'get'> | vscode.Uri =
         vscode.workspace.getConfiguration('lintRunner')
 ): boolean {
     const config =
@@ -237,7 +237,7 @@ export async function runDoctorWithNotification(
             title: 'LintRunner: Checking configured tools…',
             cancellable: false,
         },
-        async () => getStatuses(resource)
+        async () => await getStatuses(resource)
     );
 
     if (rows.length === 0) {
@@ -264,12 +264,12 @@ export async function runManualTaskWithNotification<T>(
     const resource = vscode.Uri.file(filePath);
     const isEnabled = deps.isEnabled ?? ((uri: vscode.Uri) => isManualRunNotificationEnabled(uri));
     if (!isEnabled(resource) || labels.length === 0) {
-        return task();
+        return await task();
     }
 
     const withProgress = deps.withProgress ?? vscode.window.withProgress.bind(vscode.window);
     const onCancel = deps.onCancel ?? cancelFileRun;
-    return withProgress(
+    return await withProgress(
         {
             location: vscode.ProgressLocation.Notification,
             title: getManualRunNotificationTitle(labels),
@@ -364,7 +364,7 @@ function showConfigValidationWarning(): void {
 async function collectConfigValidationIssues(): Promise<ConfigValidationIssues> {
     const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
     const resources = workspaceFolders.length === 0 ? [undefined] : workspaceFolders.map((folder) => folder.uri);
-    const results = await Promise.all(resources.map((resource) => validateLintRunnerConfig(resource)));
+    const results = await Promise.all(resources.map(async (resource) => await validateLintRunnerConfig(resource)));
     return {
         errors: [...new Set(results.flatMap((result) => result.errors))],
         warnings: [...new Set(results.flatMap((result) => result.warnings))],
@@ -849,7 +849,7 @@ export async function runManualFixersForEditor(
     const failures: RunnerFailure[] = [];
     const failureAwareOutput = createFailureAwareOutput(output, failures);
     await runWithManualNotification(fileName, getRunnableFixerLabels(selectedFixers), async () =>
-        runSelectedFixers(fileName, failureAwareOutput, statusBar, 'manual', selectedFixers)
+        await runSelectedFixers(fileName, failureAwareOutput, statusBar, 'manual', selectedFixers)
     );
     await showManualRunFailureWarning(failures, showWarningMessage);
     await refreshLinters(fileName, 'onSave', diagnostics, output, statusBar);
@@ -873,8 +873,8 @@ export async function runManualLintersForFile(
 
     await runWithManualNotification(fileName, getRunnableLinterLabels(manualLinters), async () =>
         linters === undefined
-            ? runAllLinters(fileName, 'manual', diagnostics, failureAwareOutput, statusBar)
-            : runSelectedLinters(fileName, diagnostics, failureAwareOutput, statusBar, manualLinters)
+            ? await runAllLinters(fileName, 'manual', diagnostics, failureAwareOutput, statusBar)
+            : await runSelectedLinters(fileName, diagnostics, failureAwareOutput, statusBar, manualLinters)
     );
     await showManualRunFailureWarning(failures, showWarningMessage);
 }

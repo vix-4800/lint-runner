@@ -167,7 +167,7 @@ const SHELL_ENV_TIMEOUT_MS = 3000;
 const DOCTOR_VERSION_TIMEOUT_MS = 3000;
 const SHELL_PATH_PREFIX = 'LINT_RUNNER_PATH=';
 
-type RunMode = 'manual' | 'onSave' | 'onOpen';
+type RunMode = 'manual' | 'onOpen' | 'onSave';
 type FixerRunMode = Extract<RunMode, 'manual' | 'onSave'>;
 type DiagnosticsHandler = (
     targetName: string,
@@ -329,7 +329,7 @@ export interface ConfigValidationIssues {
     warnings: string[];
 }
 
-export type DoctorToolFoundStatus = 'yes' | 'no' | 'unknown';
+export type DoctorToolFoundStatus = 'no' | 'unknown' | 'yes';
 
 export interface DoctorToolStatus {
     tool: string;
@@ -339,10 +339,10 @@ export interface DoctorToolStatus {
 }
 
 type WorkspaceConfigLike = Pick<vscode.WorkspaceConfiguration, 'get'>;
-type KnownTargetState = {
+interface KnownTargetState {
     linters: Set<string>;
     fixers: Set<string>;
-};
+}
 
 const REQUIRED_PARSER_GROUPS = ['line', 'message'] as const;
 const NAMED_CAPTURE_GROUP_RE = /(?<!\\)\(\?<([A-Za-z][A-Za-z0-9]*)>/g;
@@ -807,7 +807,7 @@ function collectDoctorToolCommands(targets: readonly ResolvedTargetConfig[]): Ma
 }
 
 function extractCommandVersion(output: string): string | undefined {
-    const versionMatch = output.match(/\b\d+(?:\.\d+)+(?:[-+][^\s]+)?\b/);
+    const versionMatch = /\b\d+(?:\.\d+)+(?:[-+][^\s]+)?\b/.exec(output);
     return versionMatch?.[0];
 }
 
@@ -919,14 +919,14 @@ export async function getDoctorToolStatuses(resource?: vscode.Uri): Promise<Doct
     const scopedResource = getDoctorResource(resource);
     const env = await getCommandEnv();
 
-    return collectDoctorToolStatuses(getDoctorTargets(scopedResource), {
+    return await collectDoctorToolStatuses(getDoctorTargets(scopedResource), {
         checkCommand: (command) => commandExistsForValidation(command, env, process.platform),
         detectVersion: async (command) => {
             if (!isCommandSafelyCheckable(command)) {
                 return undefined;
             }
 
-            return detectCommandVersion(expandHome(command.trim()), getDoctorWorkingDirectory(scopedResource), env);
+            return await detectCommandVersion(expandHome(command.trim()), getDoctorWorkingDirectory(scopedResource), env);
         },
     });
 }
@@ -1319,7 +1319,7 @@ export function mergeConfiguredTargets(
     return result;
 }
 
-function hasUniqueTargetNames(targets: readonly { name: string }[]): boolean {
+function hasUniqueTargetNames(targets: ReadonlyArray<{ name: string }>): boolean {
     return new Set(targets.map((target) => target.name)).size === targets.length;
 }
 
@@ -1412,13 +1412,13 @@ function getLoginShell(): string | undefined {
     return process.env.SHELL ?? os.userInfo().shell ?? undefined;
 }
 
-function resolveShellPath(): Promise<string | undefined> {
+async function resolveShellPath(): Promise<string | undefined> {
     const shell = getLoginShell();
     if (shell === undefined || process.platform === 'win32') {
-        return Promise.resolve(undefined);
+        return void await Promise.resolve(undefined);
     }
 
-    return new Promise((resolve) => {
+    return await new Promise((resolve) => {
         const proc = cp.spawn(shell, ['-lc', getShellPathCommand(shell)]);
         let stdout = '';
         let done = false;
@@ -1456,9 +1456,9 @@ function resolveShellPath(): Promise<string | undefined> {
     });
 }
 
-function getCommandEnv(): Promise<NodeJS.ProcessEnv> {
+async function getCommandEnv(): Promise<NodeJS.ProcessEnv> {
     commandEnvPromise ??= resolveShellPath().then(buildCommandEnv);
-    return commandEnvPromise;
+    return await commandEnvPromise;
 }
 
 export function resetCommandEnv(): void {
@@ -1634,7 +1634,7 @@ async function runCommand(
 ): Promise<CommandResult> {
     if (!vscode.workspace.isTrusted) {
         output.appendLine(`[${label}] skipped: workspace is not trusted`);
-        return Promise.resolve({
+        return await Promise.resolve({
             code: null,
             stdout: '',
             stderr: '',
@@ -1651,7 +1651,7 @@ async function runCommand(
     }
     output.appendLine(`[${label}] ${formatCommand(command, args)}`);
 
-    return new Promise((resolve) => {
+    return await new Promise((resolve) => {
         let proc: cp.ChildProcess;
         try {
             proc = cp.spawn(command, args, {
@@ -2083,7 +2083,7 @@ async function checkGitIgnore(filePath: string): Promise<boolean> {
     if (cwd === undefined) {
         return false;
     }
-    return new Promise<boolean>((resolve) => {
+    return await new Promise<boolean>((resolve) => {
         let done = false;
         // filePath is a VS Code file URI path (already validated by the editor).
         // It is passed as an argv element, not interpolated into a shell string,
@@ -2120,7 +2120,7 @@ async function shouldSkipFile(filePath: string): Promise<boolean> {
         return true;
     }
     if (config.get<boolean>('respectGitignore') === true) {
-        return checkGitIgnore(filePath);
+        return await checkGitIgnore(filePath);
     }
     return false;
 }
@@ -2172,7 +2172,7 @@ async function runRunnableFixer(
     statusBar: vscode.StatusBarItem,
     shouldContinue: () => boolean = () => true
 ): Promise<boolean> {
-    return runTargetFixer(fixer.targetName, fixer.fixer, filePath, output, statusBar, shouldContinue);
+    return await runTargetFixer(fixer.targetName, fixer.fixer, filePath, output, statusBar, shouldContinue);
 }
 
 export async function runLinters(
@@ -2215,9 +2215,9 @@ export async function runLinters(
         return;
     }
 
-    return Promise.all(
-        matching.map((target) =>
-            spawnTargetLinters(
+    return await Promise.all(
+        matching.map(async (target) =>
+            await spawnTargetLinters(
                 target,
                 filePath,
                 trigger,
