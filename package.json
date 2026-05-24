@@ -74,31 +74,45 @@
     "commands": [
       {
         "command": "lintRunner.run",
-        "title": "LintRunner: Run Linters"
+        "title": "Run Linters",
+        "category": "LintRunner",
+        "icon": "$(play)"
       },
       {
         "command": "lintRunner.fix",
-        "title": "LintRunner: Run Fixers"
+        "title": "Run Fixers",
+        "category": "LintRunner",
+        "icon": "$(tools)"
       },
       {
         "command": "lintRunner.clearDiagnostics",
-        "title": "LintRunner: Clear Diagnostics"
+        "title": "Clear Diagnostics",
+        "category": "LintRunner",
+        "icon": "$(clear-all)"
       },
       {
         "command": "lintRunner.actions",
-        "title": "LintRunner: Open Actions Menu"
+        "title": "Open Actions Menu",
+        "category": "LintRunner",
+        "icon": "$(wrench)"
       },
       {
         "command": "lintRunner.stopRunningTools",
-        "title": "LintRunner: Stop Running Tools"
+        "title": "Stop Running Tools",
+        "category": "LintRunner",
+        "icon": "$(debug-stop)"
       },
       {
         "command": "lintRunner.validateConfig",
-        "title": "LintRunner: Validate Config"
+        "title": "Validate Config",
+        "category": "LintRunner",
+        "icon": "$(check)"
       },
       {
         "command": "lintRunner.doctor",
-        "title": "LintRunner: Doctor"
+        "title": "Doctor",
+        "category": "LintRunner",
+        "icon": "$(pulse)"
       }
     ],
     "configuration": {
