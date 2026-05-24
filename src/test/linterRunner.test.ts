@@ -40,6 +40,10 @@ async function assertCancelledProcess(completedMarkerPath: string, terminatedMar
     await assert.rejects(fs.access(completedMarkerPath));
 }
 
+async function assertSamePath(actualPath: string, expectedPath: string): Promise<void> {
+    assert.strictEqual(await fs.realpath(actualPath), await fs.realpath(expectedPath));
+}
+
 suite('Linter Runner Test Suite', () => {
     test('collectDoctorToolStatuses groups tools by target and resolves found/version state', async () => {
         const statuses = await collectDoctorToolStatuses(
@@ -584,8 +588,8 @@ suite('Linter Runner Test Suite', () => {
             const lintersRun = await runRunnableLinters(filePath, diagnostics, output, statusBar, [runnable]);
 
             assert.strictEqual(lintersRun, 1);
-            assert.strictEqual(await fs.readFile(preCommandMarkerPath, 'utf8'), tmpDir);
-            assert.strictEqual(await fs.readFile(linterMarkerPath, 'utf8'), fileDir);
+            await assertSamePath(await fs.readFile(preCommandMarkerPath, 'utf8'), tmpDir);
+            await assertSamePath(await fs.readFile(linterMarkerPath, 'utf8'), fileDir);
         } finally {
             diagnostics.dispose();
             output.dispose();
@@ -826,7 +830,7 @@ suite('Linter Runner Test Suite', () => {
             const fixersRun = await runFixers(filePath, output, statusBar, 'manual', [fixer]);
 
             assert.strictEqual(fixersRun, 1);
-            assert.strictEqual(await fs.readFile(fixerMarkerPath, 'utf8'), fileDir);
+            await assertSamePath(await fs.readFile(fixerMarkerPath, 'utf8'), fileDir);
         } finally {
             output.dispose();
             statusBar.dispose();
