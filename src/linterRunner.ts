@@ -133,7 +133,6 @@ export function clearRunnerRuntimeState(): void {
     clearAllFileLinterDiagnostics();
     clearDiagnosticsCache();
     resetCommandEnv();
-    nextRunId = 0;
 }
 
 interface LinterCacheEntry {
