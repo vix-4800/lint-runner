@@ -32,7 +32,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
   - [Blade](#blade)
   - [PHP](#php)
 
-
 ## Top-level LintRunner settings
 
 ```json
@@ -54,7 +53,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
   "lintRunner.respectGitignore": true
 }
 ```
-
 
 ## GitLeaks
 
@@ -99,7 +97,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
   ]
 }
 ```
-
 
 ## Shell
 
@@ -154,7 +151,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 }
 ```
 
-
 ## Dockerfile
 
 ### Target settings
@@ -193,7 +189,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
   ]
 }
 ```
-
 
 ## Markdown
 
@@ -270,7 +265,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 }
 ```
 
-
 ## YAML
 
 ### Target settings
@@ -328,7 +322,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 }
 ```
 
-
 ## Ansible
 
 ### Target settings
@@ -375,7 +368,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
   ]
 }
 ```
-
 
 ## Python
 
@@ -451,7 +443,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 }
 ```
 
-
 ## Dotenv
 
 ### Target settings
@@ -512,7 +503,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 }
 ```
 
-
 ## INI
 
 ### Target settings
@@ -546,7 +536,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
   ]
 }
 ```
-
 
 ## Lua
 
@@ -604,7 +593,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 }
 ```
 
-
 ## TOML
 
 ### Target settings
@@ -657,7 +645,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 }
 ```
 
-
 ## Go
 
 ### Target settings
@@ -688,7 +675,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 }
 ```
 
-
 ## Fish
 
 ### Target settings
@@ -718,7 +704,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
   ]
 }
 ```
-
 
 ## JavaScript/TypeScript/Vue
 
@@ -800,7 +785,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 }
 ```
 
-
 ## Styles
 
 ### Target settings
@@ -879,7 +863,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 }
 ```
 
-
 ## HTML
 
 ### Target settings
@@ -899,14 +882,8 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 {
   "linters": [
     {
-      "args": [
-        "-lc",
-        "cd \"$1\" && linthtml --config ~/.linthtmlrc --no-color \"$2\"",
-        "linthtml",
-        "${fileDirname}",
-        "${fileBasename}"
-      ],
-      "command": "bash",
+      "args": ["--config", "~/.linthtmlrc", "--no-color", "${relativeFile}"],
+      "command": "linthtml",
       "name": "Lint HTML",
       "parser": {
         "flags": "gm",
@@ -959,7 +936,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
   ]
 }
 ```
-
 
 ## SQL
 
@@ -1022,7 +998,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 }
 ```
 
-
 ## Make
 
 ### Target settings
@@ -1059,7 +1034,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
   ]
 }
 ```
-
 
 ## Nginx
 
@@ -1126,7 +1100,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 }
 ```
 
-
 ## XML
 
 ### Target settings
@@ -1188,7 +1161,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 }
 ```
 
-
 ## JSON
 
 ### Target settings
@@ -1246,7 +1218,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 }
 ```
 
-
 ## GitHub Actions
 
 ### Target settings
@@ -1286,7 +1257,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
 }
 ```
 
-
 ## Blade
 
 ### Target settings
@@ -1322,7 +1292,6 @@ The first block shows top-level `lintRunner.*` settings. Each target section aft
   ]
 }
 ```
-
 
 ## PHP
 
