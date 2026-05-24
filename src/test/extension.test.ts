@@ -47,9 +47,9 @@ const CANCELLED_TIMER_DELAY_MS = 100;
 const TIMER_VERIFICATION_DELAY_MS = 15;
 
 async function waitForCondition(
-    predicate: () => boolean | Promise<boolean>,
-    timeoutMs: number = 5_000,
-    intervalMs: number = 25
+    predicate: () => Promise<boolean> | boolean,
+    timeoutMs = 5_000,
+    intervalMs = 25
 ): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -73,7 +73,7 @@ function createTestTarget(name: string): ResolvedTargetConfig {
     };
 }
 
-function createTestRunnableLinter(name: string, targetName: string, run: 'manual' | 'onSave' | 'onOpen'): RunnableLinter {
+function createTestRunnableLinter(name: string, targetName: string, run: 'manual' | 'onOpen' | 'onSave'): RunnableLinter {
     const target = createTestTarget(targetName);
     return {
         label: name,
@@ -441,7 +441,7 @@ suite('Extension Test Suite', () => {
                 isEnabled: () => true,
                 withProgress: async (options, task) => {
                     progressOptions = options;
-                    return task(
+                    return await task(
                         { report: () => {
                             // no-op
                         } },
@@ -509,7 +509,7 @@ suite('Extension Test Suite', () => {
             withProgress: async (options, task) => {
                 progressOptions = options;
                 assert.strictEqual(collected, false);
-                return task(
+                return await task(
                     { report: () => {
                         // no-op
                     } },
@@ -938,7 +938,7 @@ suite('Extension Test Suite', () => {
                 },
                 runWithManualNotification: async (filePath, labels, task) => {
                     calls.push(`notify:${filePath}:${labels.join(',')}`);
-                    return task();
+                    return await task();
                 },
                 runFixers: async (filePath, _output, _statusBar, trigger, selectedFixers) => {
                     calls.push(`fix:${filePath}:${trigger}:${selectedFixers.map((item) => item.label).join(',')}`);
@@ -1010,7 +1010,7 @@ suite('Extension Test Suite', () => {
             [fixer],
             {
                 saveDocumentBeforeManualFixers: async () => true,
-                runWithManualNotification: async (_filePath, _labels, task) => task(),
+                runWithManualNotification: async (_filePath, _labels, task) => await task(),
                 runFixers: async (_filePath, runOutput) => {
                     runOutput.reportFailure?.({
                         label: 'PHP:fix:php-cs-fixer',
@@ -1077,7 +1077,7 @@ suite('Extension Test Suite', () => {
             {
                 runWithManualNotification: async (_filePath, labels, task) => {
                     calls.push(`notify:${labels.join(',')}`);
-                    return task();
+                    return await task();
                 },
                 runRunnableLinters: async (_filePath, _diagnostics, runOutput) => {
                     runOutput.reportFailure?.({
