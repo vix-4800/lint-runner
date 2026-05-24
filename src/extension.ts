@@ -168,14 +168,11 @@ export function isManualRunNotificationEnabled(
 
 export function formatDoctorTable(rows: readonly DoctorToolStatus[]): string {
     const headers = ['Tool', 'Found', 'Version', 'Used by'];
+    const formatCell = (value: string): string => value.replaceAll('\\', '\\\\').replaceAll('|', '\\|').replaceAll('\n', ' ');
+    const formatRow = (row: readonly string[]): string => `| ${row.map(formatCell).join(' | ')} |`;
     const cells = rows.map((row) => [row.tool, row.found, row.version, row.usedBy.join(', ')]);
-    const widths = headers.map((header, index) =>
-        Math.max(header.length, ...cells.map((row) => row[index]?.length ?? 0))
-    );
-    const formatRow = (row: readonly string[]): string =>
-        row.map((cell, index) => cell.padEnd(widths[index])).join('  ').trimEnd();
 
-    return [formatRow(headers), ...cells.map((row) => formatRow(row))].join('\n');
+    return [formatRow(headers), formatRow(headers.map(() => '---')), ...cells.map((row) => formatRow(row))].join('\n');
 }
 
 function uniqueLabels(labels: readonly string[]): string[] {
@@ -207,6 +204,7 @@ interface DoctorNotificationDeps {
     withProgress?: WithProgressFn;
     openTextDocument?: typeof vscode.workspace.openTextDocument;
     showTextDocument?: typeof vscode.window.showTextDocument;
+    executeCommand?: (command: string, ...rest: unknown[]) => Thenable<unknown>;
     showInformationMessage?: typeof vscode.window.showInformationMessage;
 }
 
@@ -248,11 +246,13 @@ export async function runDoctorWithNotification(
 
     const openTextDocument = deps.openTextDocument ?? vscode.workspace.openTextDocument.bind(vscode.workspace);
     const showTextDocument = deps.showTextDocument ?? vscode.window.showTextDocument.bind(vscode.window);
+    const executeCommand = deps.executeCommand ?? vscode.commands.executeCommand.bind(vscode.commands);
     const document = await openTextDocument({
-        language: 'text',
+        language: 'markdown',
         content: formatDoctorTable(rows),
     });
     await showTextDocument(document, { preview: false });
+    await executeCommand('markdown.showPreview', document.uri);
 }
 
 export async function runManualTaskWithNotification<T>(

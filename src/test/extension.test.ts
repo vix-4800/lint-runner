@@ -157,7 +157,7 @@ suite('Extension Test Suite', () => {
         );
     });
 
-    test('formatDoctorTable aligns doctor rows into columns', () => {
+    test('formatDoctorTable formats doctor rows as a markdown table', () => {
         assert.strictEqual(
             formatDoctorTable([
                 {
@@ -173,9 +173,12 @@ suite('Extension Test Suite', () => {
                     usedBy: ['PHP'],
                 },
             ]),
-            ['Tool   Found  Version  Used by', 'phpcs  yes    3.10.2   PHP', 'mago   no     -        PHP'].join(
-                '\n'
-            )
+            [
+                '| Tool | Found | Version | Used by |',
+                '| --- | --- | --- | --- |',
+                '| phpcs | yes | 3.10.2 | PHP |',
+                '| mago | no | - | PHP |',
+            ].join('\n')
         );
     });
 
@@ -493,6 +496,10 @@ suite('Extension Test Suite', () => {
         let progressOptions: vscode.ProgressOptions | undefined;
         let collected = false;
         let openedContent: string | undefined;
+        let openedLanguage: string | undefined;
+        let shownUri: vscode.Uri | undefined;
+        let previewUri: vscode.Uri | undefined;
+        const doctorUri = vscode.Uri.parse('untitled:LintRunner Doctor.md');
 
         await runDoctorWithNotification(undefined, {
             getStatuses: async () => {
@@ -525,9 +532,18 @@ suite('Extension Test Suite', () => {
             },
             openTextDocument: async (options) => {
                 openedContent = typeof options === 'object' && 'content' in options ? options.content : undefined;
-                return {} as vscode.TextDocument;
+                openedLanguage = typeof options === 'object' && 'language' in options ? options.language : undefined;
+                return { uri: doctorUri } as vscode.TextDocument;
             },
-            showTextDocument: async () => ({}) as vscode.TextEditor,
+            showTextDocument: async (document: vscode.TextDocument | vscode.Uri) => {
+                shownUri = document instanceof vscode.Uri ? document : document.uri;
+                return {} as vscode.TextEditor;
+            },
+            executeCommand: async (command: string, uri: unknown) => {
+                assert.strictEqual(command, 'markdown.showPreview');
+                previewUri = uri as vscode.Uri;
+                return undefined;
+            },
             showInformationMessage: async () => undefined,
         });
 
@@ -535,7 +551,10 @@ suite('Extension Test Suite', () => {
         assert.strictEqual(progressOptions?.location, vscode.ProgressLocation.Notification);
         assert.strictEqual(progressOptions?.title, 'LintRunner: Checking configured tools…');
         assert.strictEqual(progressOptions?.cancellable, false);
-        assert.ok(openedContent?.includes('phpstan'));
+        assert.strictEqual(openedLanguage, 'markdown');
+        assert.ok(openedContent?.includes('| phpstan | yes | PHPStan 2.1.0 | PHP:phpstan |'));
+        assert.strictEqual(shownUri?.toString(), doctorUri.toString());
+        assert.strictEqual(previewUri?.toString(), doctorUri.toString());
     });
 
     test('openBundledExamples opens docs examples from the extension directory', async () => {
