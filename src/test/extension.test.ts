@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import {
     
+    cleanupExtensionRuntime,
     clearAllPendingSaveDebounces,
     collectClosedFileTabUris,
     collectNewVisibleFileNames,
@@ -680,6 +681,83 @@ suite('Extension Test Suite', () => {
 
         assert.strictEqual(timerTriggered, false);
         assert.strictEqual(timers.size, 0);
+    });
+
+    test('cleanupExtensionRuntime clears pending state and disposes active resources', () => {
+        const skipFixers = new Set(['file.ts']);
+        const savedContentHashes = new Map<string, string>([['file.ts', 'hash']]);
+        const seenOnOpenDocumentUris = new Set(['file:///workspace/file.ts']);
+        let clearedPendingSaveDebounces = false;
+        let clearedRunnerRuntimeState = false;
+        let clearedDiagnostics = false;
+        let disposedDiagnostics = false;
+        let hidRunningStatusBar = false;
+        let disposedRunningStatusBar = false;
+        let hidActionsStatusBar = false;
+        let disposedActionsStatusBar = false;
+        let disposedOutput = false;
+        let disposedCodeLensRefreshEmitter = false;
+
+        cleanupExtensionRuntime({
+            clearPendingSaveDebounces: () => {
+                clearedPendingSaveDebounces = true;
+            },
+            clearRunnerRuntimeState: () => {
+                clearedRunnerRuntimeState = true;
+            },
+            skipFixersOnSaveSet: skipFixers,
+            savedContentHashes,
+            seenOnOpenDocumentUris,
+            diagnostics: {
+                clear: () => {
+                    clearedDiagnostics = true;
+                },
+                dispose: () => {
+                    disposedDiagnostics = true;
+                },
+            },
+            runningStatusBar: {
+                hide: () => {
+                    hidRunningStatusBar = true;
+                },
+                dispose: () => {
+                    disposedRunningStatusBar = true;
+                },
+            },
+            actionsStatusBar: {
+                hide: () => {
+                    hidActionsStatusBar = true;
+                },
+                dispose: () => {
+                    disposedActionsStatusBar = true;
+                },
+            },
+            output: {
+                appendLine: () => undefined,
+                dispose: () => {
+                    disposedOutput = true;
+                },
+            },
+            codeLensRefreshEmitter: {
+                dispose: () => {
+                    disposedCodeLensRefreshEmitter = true;
+                },
+            },
+        });
+
+        assert.strictEqual(clearedPendingSaveDebounces, true);
+        assert.strictEqual(clearedRunnerRuntimeState, true);
+        assert.strictEqual(skipFixers.size, 0);
+        assert.strictEqual(savedContentHashes.size, 0);
+        assert.strictEqual(seenOnOpenDocumentUris.size, 0);
+        assert.strictEqual(clearedDiagnostics, true);
+        assert.strictEqual(disposedDiagnostics, true);
+        assert.strictEqual(hidRunningStatusBar, true);
+        assert.strictEqual(disposedRunningStatusBar, true);
+        assert.strictEqual(hidActionsStatusBar, true);
+        assert.strictEqual(disposedActionsStatusBar, true);
+        assert.strictEqual(disposedOutput, true);
+        assert.strictEqual(disposedCodeLensRefreshEmitter, true);
     });
 
     test('isManualCodeActionLinter and isManualCodeActionFixer correctly identify manual runnables', () => {

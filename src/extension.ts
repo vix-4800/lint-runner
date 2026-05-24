@@ -10,6 +10,7 @@ import {
     runLinters,
     runRunnableLinters,
     resetCommandEnv,
+    clearRunnerRuntimeState,
     clearDiagnosticsCache,
     clearFileLinterDiagnostics,
     clearAllFileLinterDiagnostics,
@@ -31,6 +32,10 @@ const skipFixersOnSave = new Set<string>();
 const saveDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const lastSavedContentHashes = new Map<string, string>();
 const CONFIG_VALIDATION_PREVIEW_LIMIT = 5;
+let deactivateCleanupResources: Omit<
+    DeactivateCleanupDeps,
+    'clearPendingSaveDebounces' | 'clearRunnerRuntimeState' | 'skipFixersOnSaveSet' | 'savedContentHashes'
+> | undefined;
 
 export function computeContentHash(text: string): string {
     return crypto.createHash('sha256').update(text).digest('hex');
@@ -58,6 +63,21 @@ type OnOpenTabGroup = {
     readonly viewColumn: vscode.ViewColumn;
 };
 type OutputChannelLike = Pick<vscode.OutputChannel, 'appendLine' | 'dispose'>;
+type StatusBarLike = Pick<vscode.StatusBarItem, 'dispose' | 'hide'>;
+type DiagnosticsLike = Pick<vscode.DiagnosticCollection, 'clear' | 'dispose'>;
+type DisposableLike = Pick<vscode.Disposable, 'dispose'>;
+type DeactivateCleanupDeps = {
+    clearPendingSaveDebounces?: () => void;
+    clearRunnerRuntimeState?: () => void;
+    skipFixersOnSaveSet?: Set<string>;
+    savedContentHashes?: Map<string, string>;
+    seenOnOpenDocumentUris?: Set<string>;
+    diagnostics?: DiagnosticsLike;
+    runningStatusBar?: StatusBarLike;
+    actionsStatusBar?: StatusBarLike;
+    output?: OutputChannelLike;
+    codeLensRefreshEmitter?: DisposableLike;
+};
 type CollectVisibleFileNamesOptions = {
     readonly includeSeen?: boolean;
 };
@@ -896,6 +916,42 @@ async function openActionsMenu(
     await selectedItem?.action?.();
 }
 
+export function cleanupExtensionRuntime(deps: DeactivateCleanupDeps = {}): void {
+    const cleanupResources = deactivateCleanupResources;
+    const {
+        clearPendingSaveDebounces = clearAllPendingSaveDebounces,
+        clearRunnerRuntimeState: clearRunnerRuntimeStateFn = clearRunnerRuntimeState,
+        skipFixersOnSaveSet = skipFixersOnSave,
+        savedContentHashes = lastSavedContentHashes,
+        seenOnOpenDocumentUris = cleanupResources?.seenOnOpenDocumentUris,
+        diagnostics = cleanupResources?.diagnostics,
+        runningStatusBar = cleanupResources?.runningStatusBar,
+        actionsStatusBar = cleanupResources?.actionsStatusBar,
+        output = cleanupResources?.output,
+        codeLensRefreshEmitter = cleanupResources?.codeLensRefreshEmitter,
+    } = deps;
+
+    clearPendingSaveDebounces();
+    clearRunnerRuntimeStateFn();
+    skipFixersOnSaveSet.clear();
+    savedContentHashes.clear();
+    seenOnOpenDocumentUris?.clear();
+    configValidationIssues = { errors: [], warnings: [] };
+    configValidationWarningShown = false;
+    untrustedWorkspaceWarningShown = false;
+    diagnostics?.clear();
+    runningStatusBar?.hide();
+    actionsStatusBar?.hide();
+    codeLensRefreshEmitter?.dispose();
+    actionsStatusBar?.dispose();
+    runningStatusBar?.dispose();
+    output?.dispose();
+    diagnostics?.dispose();
+    if (cleanupResources !== undefined) {
+        deactivateCleanupResources = undefined;
+    }
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const diagnostics = vscode.languages.createDiagnosticCollection('lintRunner');
     const output = new OutputChannelManager();
@@ -911,6 +967,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(diagnostics, output, runningStatusBar, actionsStatusBar, codeLensRefreshEmitter);
 
     const seenOnOpenDocumentUris = new Set<string>();
+    deactivateCleanupResources = {
+        seenOnOpenDocumentUris,
+        diagnostics,
+        runningStatusBar,
+        actionsStatusBar,
+        output,
+        codeLensRefreshEmitter,
+    };
     let lintRunnerEnabled = isLintRunnerEnabled();
     let configValid = await refreshConfigValidation();
     updateActionsStatusBar(actionsStatusBar);
@@ -1253,5 +1317,5 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export function deactivate(): void {
-    return;
+    cleanupExtensionRuntime();
 }
