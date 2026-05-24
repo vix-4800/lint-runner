@@ -784,14 +784,7 @@ function collectDoctorToolCommands(targets: readonly ResolvedTargetConfig[]): Ma
 
 function extractCommandVersion(output: string): string | undefined {
     const versionMatch = output.match(/\b\d+(?:\.\d+)+(?:[-+][^\s]+)?\b/);
-    if (versionMatch?.[0] !== undefined) {
-        return versionMatch[0];
-    }
-
-    return output
-        .split(/\r?\n/u)
-        .map((line) => line.trim())
-        .find((line) => line !== '');
+    return versionMatch?.[0];
 }
 
 async function detectCommandVersion(command: string, cwd: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
@@ -852,12 +845,9 @@ async function detectCommandVersion(command: string, cwd: string, env: NodeJS.Pr
             });
         });
 
-        const combinedOutput = `${result.stdout}\n${result.stderr}`.trim();
-        if (combinedOutput === '') {
-            continue;
-        }
-
-        const version = extractCommandVersion(combinedOutput);
+        const stdout = result.stdout.trim();
+        const stderr = result.stderr.trim();
+        const version = extractCommandVersion(stdout) ?? extractCommandVersion(stderr);
         if (version !== undefined) {
             return version;
         }
