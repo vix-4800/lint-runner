@@ -1805,7 +1805,7 @@ suite('Config validation', () => {
             }
         );
 
-        assert.deepStrictEqual(issues, []);
+        assert.deepStrictEqual(issues, { errors: [], warnings: [] });
     });
 
     test('reports duplicate target, linter, and fixer names in the same scope', () => {
@@ -1837,9 +1837,9 @@ suite('Config validation', () => {
             }
         );
 
-        assert.ok(issues.includes("Workspace settings: duplicate target name 'PHP'."));
-        assert.ok(issues.includes("Workspace settings: target 'PHP' has duplicate linter name 'phpstan'."));
-        assert.ok(issues.includes("Workspace settings: target 'PHP' has duplicate fixer name 'php-cs-fixer'."));
+        assert.ok(issues.errors.includes("Workspace settings: duplicate target name 'PHP'."));
+        assert.ok(issues.errors.includes("Workspace settings: target 'PHP' has duplicate linter name 'phpstan'."));
+        assert.ok(issues.errors.includes("Workspace settings: target 'PHP' has duplicate fixer name 'php-cs-fixer'."));
     });
 
     test('reports missing tool fields, invalid parser groups, and unknown language ids', () => {
@@ -1879,27 +1879,27 @@ suite('Config validation', () => {
         );
 
         assert.ok(
-            issues.includes(
+            issues.warnings.includes(
                 "Workspace settings: target 'Broken' contains unknown language id 'made-up-language'."
             )
         );
         assert.ok(
-            issues.includes(
+            issues.errors.includes(
                 "Workspace settings: target 'Broken' linter 'eslint' parser is missing required capture groups: message."
             )
         );
         assert.ok(
-            issues.includes(
+            issues.errors.includes(
                 "Workspace settings: target 'Broken' linter 'missing-linter' is missing command or args."
             )
         );
         assert.ok(
-            issues.includes(
+            issues.errors.includes(
                 "Workspace settings: target 'Broken' linter 'missing-linter' parser is missing pattern."
             )
         );
         assert.ok(
-            issues.includes(
+            issues.errors.includes(
                 "Workspace settings: target 'Broken' fixer 'missing-fixer' is missing command or args."
             )
         );
@@ -1963,7 +1963,7 @@ suite('Config validation', () => {
             }
         );
 
-        assert.deepStrictEqual(issues, []);
+        assert.deepStrictEqual(issues, { errors: [], warnings: [] });
     });
 
     test('reports invalid successExitCodes entries', () => {
@@ -2004,12 +2004,12 @@ suite('Config validation', () => {
         );
 
         assert.ok(
-            issues.includes(
+            issues.errors.includes(
                 "Workspace settings: target 'PHP' linter 'phpstan' successExitCodes must be an array of integers."
             )
         );
         assert.ok(
-            issues.includes(
+            issues.errors.includes(
                 "Workspace settings: target 'PHP' fixer 'php-cs-fixer' successExitCodes must be an array of integers."
             )
         );
@@ -2063,15 +2063,16 @@ suite('Config validation', () => {
             );
 
             assert.ok(
-                issues.includes(
+                issues.warnings.includes(
                     "Workspace settings: target 'PHP' linter 'missing' command 'missing-command' was not found."
                 )
             );
             assert.ok(
-                !issues.some((issue) =>
-                    issue.includes("target 'PHP' fixer 'templated' command '${workspaceFolder}/vendor/bin/pint'")
+                issues.warnings.includes(
+                    "Workspace settings: target 'PHP' fixer 'templated' command '${workspaceFolder}/vendor/bin/pint' cannot be checked because it contains variables."
                 )
             );
+            assert.deepStrictEqual(issues.errors, []);
         } finally {
             fs.rmSync(tempDir, { recursive: true, force: true });
         }

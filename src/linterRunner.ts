@@ -299,6 +299,11 @@ export interface ValidateTargetScopesOptions {
     platform?: NodeJS.Platform;
 }
 
+export interface ConfigValidationIssues {
+    errors: string[];
+    warnings: string[];
+}
+
 type WorkspaceConfigLike = Pick<vscode.WorkspaceConfiguration, 'get'>;
 type KnownTargetState = {
     linters: Set<string>;
@@ -320,6 +325,22 @@ export function isLintRunnerEnabled(
 
 function pushValidationIssue(issues: string[], scopeLabel: string, message: string): void {
     issues.push(`${scopeLabel}: ${message}`);
+}
+
+function pushValidationError(
+    issues: ConfigValidationIssues,
+    scopeLabel: string,
+    message: string
+): void {
+    pushValidationIssue(issues.errors, scopeLabel, message);
+}
+
+function pushValidationWarning(
+    issues: ConfigValidationIssues,
+    scopeLabel: string,
+    message: string
+): void {
+    pushValidationIssue(issues.warnings, scopeLabel, message);
 }
 
 function collectNamedCaptureGroups(pattern: string): Set<string> {
@@ -350,10 +371,10 @@ function validateParserConfig(
     scopeLabel: string,
     ownerLabel: string,
     parser: RegexParserConfig | undefined,
-    issues: string[]
+    issues: ConfigValidationIssues
 ): boolean {
     if (parser === undefined || typeof parser.pattern !== 'string' || parser.pattern.length === 0) {
-        pushValidationIssue(issues, scopeLabel, `${ownerLabel} parser is missing pattern.`);
+        pushValidationError(issues, scopeLabel, `${ownerLabel} parser is missing pattern.`);
         return false;
     }
 
@@ -362,13 +383,13 @@ function validateParserConfig(
     try {
         new RegExp(parser.pattern, normalizedFlags);
     } catch {
-        pushValidationIssue(issues, scopeLabel, `${ownerLabel} parser has an invalid regex pattern.`);
+        pushValidationError(issues, scopeLabel, `${ownerLabel} parser has an invalid regex pattern.`);
         return false;
     }
 
     const { valid, missingGroups } = hasRequiredParserGroups(parser);
     if (!valid) {
-        pushValidationIssue(
+        pushValidationError(
             issues,
             scopeLabel,
             `${ownerLabel} parser is missing required capture groups: ${missingGroups.join(', ')}.`
@@ -439,15 +460,24 @@ function validateCommandAvailability(
     command: string | undefined,
     env: NodeJS.ProcessEnv,
     platform: NodeJS.Platform,
-    issues: string[]
+    issues: ConfigValidationIssues
 ): void {
     if (command === undefined || command.trim() === '') {
         return;
     }
 
+    if (!isCommandSafelyCheckable(command)) {
+        pushValidationWarning(
+            issues,
+            scopeLabel,
+            `${ownerLabel} command '${command}' cannot be checked because it contains variables.`
+        );
+        return;
+    }
+
     const exists = commandExistsForValidation(command, env, platform);
     if (exists === false) {
-        pushValidationIssue(
+        pushValidationWarning(
             issues,
             scopeLabel,
             `${ownerLabel} command '${command}' was not found.`
@@ -461,12 +491,12 @@ function validateCommandConfigs(
     commands: CommandConfig[] | undefined,
     env: NodeJS.ProcessEnv,
     platform: NodeJS.Platform,
-    issues: string[]
+    issues: ConfigValidationIssues
 ): void {
     for (const [index, commandConfig] of (commands ?? []).entries()) {
         const commandLabel = `${ownerLabel} pre-command #${index + 1}`;
         if (!hasCommandAndArgs(commandConfig.command, commandConfig.args)) {
-            pushValidationIssue(issues, scopeLabel, `${commandLabel} is missing command or args.`);
+            pushValidationError(issues, scopeLabel, `${commandLabel} is missing command or args.`);
             continue;
         }
 
@@ -485,7 +515,7 @@ function validateSuccessExitCodes(
     scopeLabel: string,
     ownerLabel: string,
     successExitCodes: unknown,
-    issues: string[]
+    issues: ConfigValidationIssues
 ): void {
     if (successExitCodes === undefined) {
         return;
@@ -495,7 +525,7 @@ function validateSuccessExitCodes(
         !Array.isArray(successExitCodes) ||
         successExitCodes.some((code) => typeof code !== 'number' || !Number.isInteger(code))
     ) {
-        pushValidationIssue(issues, scopeLabel, `${ownerLabel} successExitCodes must be an array of integers.`);
+        pushValidationError(issues, scopeLabel, `${ownerLabel} successExitCodes must be an array of integers.`);
     }
 }
 
@@ -526,8 +556,11 @@ function getScopedTargetPatches(resource?: vscode.Uri): TargetValidationScope[] 
 export function validateTargetScopes(
     scopes: readonly TargetValidationScope[],
     options: ValidateTargetScopesOptions = {}
-): string[] {
-    const issues: string[] = [];
+): ConfigValidationIssues {
+    const issues: ConfigValidationIssues = {
+        errors: [],
+        warnings: [],
+    };
     const knownLanguageIds = new Set(options.knownLanguageIds ?? []);
     const env = options.env ?? process.env;
     const platform = options.platform ?? process.platform;
@@ -538,7 +571,7 @@ export function validateTargetScopes(
 
         for (const target of scope.targets) {
             if (seenTargetNames.has(target.name)) {
-                pushValidationIssue(issues, scope.label, `duplicate target name '${target.name}'.`);
+                pushValidationError(issues, scope.label, `duplicate target name '${target.name}'.`);
             } else {
                 seenTargetNames.add(target.name);
             }
@@ -551,7 +584,7 @@ export function validateTargetScopes(
 
             if (target.languages === undefined || target.languages.length === 0) {
                 if (existingTarget === undefined) {
-                    pushValidationIssue(
+                    pushValidationError(
                         issues,
                         scope.label,
                         `target '${target.name}' is missing languages.`
@@ -560,7 +593,7 @@ export function validateTargetScopes(
             } else {
                 for (const languageId of target.languages) {
                     if (languageId !== '*' && !knownLanguageIds.has(languageId)) {
-                        pushValidationIssue(
+                        pushValidationWarning(
                             issues,
                             scope.label,
                             `target '${target.name}' contains unknown language id '${languageId}'.`
@@ -582,7 +615,7 @@ export function validateTargetScopes(
             for (const linter of target.linters ?? []) {
                 const linterLabel = `target '${target.name}' linter '${linter.name}'`;
                 if (seenLinterNames.has(linter.name)) {
-                    pushValidationIssue(
+                    pushValidationError(
                         issues,
                         scope.label,
                         `target '${target.name}' has duplicate linter name '${linter.name}'.`
@@ -594,7 +627,7 @@ export function validateTargetScopes(
                 const isExistingLinter = nextTargetState.linters.has(linter.name);
                 if (linter.enabled !== false) {
                     if (!isExistingLinter && !hasCommandAndArgs(linter.command, linter.args)) {
-                        pushValidationIssue(issues, scope.label, `${linterLabel} is missing command or args.`);
+                        pushValidationError(issues, scope.label, `${linterLabel} is missing command or args.`);
                     }
 
                     if (!isExistingLinter || linter.parser !== undefined) {
@@ -631,7 +664,7 @@ export function validateTargetScopes(
 
                 if (fixer.name !== undefined) {
                     if (seenFixerNames.has(fixer.name)) {
-                        pushValidationIssue(
+                        pushValidationError(
                             issues,
                             scope.label,
                             `target '${target.name}' has duplicate fixer name '${fixer.name}'.`
@@ -645,7 +678,7 @@ export function validateTargetScopes(
                     fixer.name !== undefined && nextTargetState.fixers.has(fixer.name);
                 if (fixer.enabled !== false) {
                     if (!isExistingFixer && !hasCommandAndArgs(fixer.command, fixer.args)) {
-                        pushValidationIssue(issues, scope.label, `${fixerLabel} is missing command or args.`);
+                        pushValidationError(issues, scope.label, `${fixerLabel} is missing command or args.`);
                     }
 
                     validateCommandAvailability(
@@ -671,7 +704,7 @@ export function validateTargetScopes(
     return issues;
 }
 
-export async function validateLintRunnerConfig(resource?: vscode.Uri): Promise<string[]> {
+export async function validateLintRunnerConfig(resource?: vscode.Uri): Promise<ConfigValidationIssues> {
     const [knownLanguageIds, env] = await Promise.all([
         vscode.languages.getLanguages(),
         getCommandEnv(),
