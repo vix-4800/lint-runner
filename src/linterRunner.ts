@@ -168,6 +168,7 @@ export interface CommandConfig {
     name?: string;
     command: string;
     args: string[];
+    cwd?: string;
 }
 
 export interface FixerConfig extends CommandConfig {
@@ -185,6 +186,7 @@ export interface TargetLinterConfig {
     name: string;
     command: string;
     args: string[];
+    cwd?: string;
     parser: RegexParserConfig;
     run?: RunMode;
     enabled?: boolean;
@@ -205,6 +207,7 @@ export interface TargetConfig {
     filePatterns?: string[];
     languages?: string[];
     run?: RunMode;
+    cwd?: string;
     preCommands?: CommandConfig[];
     linters?: TargetLinterConfig[];
     fixers?: FixerConfig[];
@@ -216,6 +219,7 @@ export interface LinterPatch {
     name: string;
     command?: string;
     args?: string[];
+    cwd?: string;
     parser?: RegexParserConfig;
     run?: RunMode;
     enabled?: boolean;
@@ -231,6 +235,7 @@ export interface FixerPatch {
     name?: string;
     command?: string;
     args?: string[];
+    cwd?: string;
     run?: FixerRunMode;
     enabled?: boolean;
     timeout?: number;
@@ -243,6 +248,7 @@ export interface TargetPatch {
     filePatterns?: string[];
     languages?: string[];
     run?: RunMode;
+    cwd?: string;
     preCommands?: CommandConfig[];
     linters?: LinterPatch[];
     fixers?: FixerPatch[];
@@ -1060,20 +1066,28 @@ function matchesTarget(filePath: string, target: ResolvedTargetConfig): boolean 
 
 function normalizeTargetConfig(target: TargetConfig): ResolvedTargetConfig {
     const targetRun = target.run ?? 'onSave';
+    const targetCwd = target.cwd;
     const linters = (target.linters ?? []).map((linter) => ({
-        ...linter,
+        ...cloneLinterConfig(linter),
+        cwd: linter.cwd ?? targetCwd,
         filePatterns: target.filePatterns ?? [],
         languages: target.languages ?? [],
         run: linter.run ?? targetRun,
+        preCommands: (linter.preCommands ?? []).map((preCommand) =>
+            inheritCommandCwd(preCommand, linter.cwd ?? targetCwd)
+        ),
     }));
 
     return {
         name: target.name,
         filePatterns: target.filePatterns ?? [],
         languages: target.languages ?? [],
-        preCommands: target.preCommands ?? [],
+        preCommands: (target.preCommands ?? []).map((preCommand) => inheritCommandCwd(preCommand, targetCwd)),
         linters,
-        fixers: target.fixers ?? [],
+        fixers: (target.fixers ?? []).map((fixer) => ({
+            ...cloneFixerConfig(fixer),
+            cwd: fixer.cwd ?? targetCwd,
+        })),
     };
 }
 
@@ -1085,6 +1099,13 @@ function cloneCommandConfig(command: CommandConfig): CommandConfig {
     return {
         ...command,
         args: [...(command.args ?? [])],
+    };
+}
+
+function inheritCommandCwd(command: CommandConfig, inheritedCwd: string | undefined): CommandConfig {
+    return {
+        ...cloneCommandConfig(command),
+        cwd: command.cwd ?? inheritedCwd,
     };
 }
 
@@ -1456,6 +1477,24 @@ function buildArgs(args: string[], filePath: string): string[] {
     return args.map((arg) => expandHome(applyCommandTemplate(arg, filePath)));
 }
 
+function buildCommandCwd(commandConfig: CommandConfig, filePath: string): string | undefined {
+    const defaultCwd = resolveWorkingDirectory(filePath);
+    if (commandConfig.cwd === undefined) {
+        return defaultCwd;
+    }
+
+    const cwd = expandHome(applyCommandTemplate(commandConfig.cwd, filePath)).trim();
+    if (cwd === '') {
+        return defaultCwd;
+    }
+
+    if (path.isAbsolute(cwd)) {
+        return cwd;
+    }
+
+    return path.resolve(defaultCwd ?? path.dirname(filePath), cwd);
+}
+
 function formatCommandPart(value: string): string {
     return /\s/.test(value) ? JSON.stringify(value) : value;
 }
@@ -1561,7 +1600,7 @@ async function runCommand(
 
     const command = expandHome(applyCommandTemplate(commandConfig.command, filePath));
     const args = buildArgs(commandConfig.args, filePath);
-    const cwd = resolveWorkingDirectory(filePath);
+    const cwd = buildCommandCwd(commandConfig, filePath);
     const env = await getCommandEnv();
     if (!shouldContinue()) {
         return { code: null, stdout: '', stderr: '', error: 'cancelled' };

@@ -156,6 +156,10 @@
                 ],
                 "description": "Default run mode for linters in this target. 'onOpen' runs when a file opens and again on save."
               },
+              "cwd": {
+                "type": "string",
+                "description": "Default working directory for this target's commands. Supports ~ and command variables."
+              },
               "preCommands": {
                 "type": "array",
                 "default": [],
@@ -175,6 +179,10 @@
                     "command": {
                       "type": "string",
                       "description": "Executable to invoke before target linters. Must be on PATH or an absolute path. Supports ~ and command variables."
+                    },
+                    "cwd": {
+                      "type": "string",
+                      "description": "Working directory for the pre-command. Defaults to the target `cwd` or the file's workspace folder. Supports ~ and command variables."
                     },
                     "args": {
                       "type": "array",
@@ -210,6 +218,10 @@
                       "type": "string",
                       "description": "Executable to invoke. Must be on PATH or an absolute path. Supports ~ and command variables. Required when defining a new linter."
                     },
+                    "cwd": {
+                      "type": "string",
+                      "description": "Working directory for this linter. Defaults to the target `cwd` or the file's workspace folder. Supports ~ and command variables."
+                    },
                     "args": {
                       "type": "array",
                       "items": {
@@ -236,6 +248,10 @@
                           "command": {
                             "type": "string",
                             "description": "Executable to invoke before this linter. Must be on PATH or an absolute path. Supports ~ and command variables."
+                          },
+                          "cwd": {
+                            "type": "string",
+                            "description": "Working directory for the pre-command. Defaults to the linter `cwd`, target `cwd`, or the file's workspace folder. Supports ~ and command variables."
                           },
                           "args": {
                             "type": "array",
@@ -343,6 +359,10 @@
                     "command": {
                       "type": "string",
                       "description": "Executable to invoke for auto-fixing. Must be on PATH or an absolute path. Supports ~ and command variables. Required when defining a new fixer."
+                    },
+                    "cwd": {
+                      "type": "string",
+                      "description": "Working directory for this fixer. Defaults to the target `cwd` or the file's workspace folder. Supports ~ and command variables."
                     },
                     "args": {
                       "type": "array",
