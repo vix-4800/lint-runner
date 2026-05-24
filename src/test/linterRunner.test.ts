@@ -35,7 +35,7 @@ async function waitForFile(filePath: string, timeoutMs: number): Promise<void> {
 
 async function assertCancelledProcess(completedMarkerPath: string, terminatedMarkerPath?: string): Promise<void> {
     if (terminatedMarkerPath !== undefined && process.platform !== 'win32') {
-        await fs.access(terminatedMarkerPath);
+        await waitForFile(terminatedMarkerPath, 1_000);
     }
     await assert.rejects(fs.access(completedMarkerPath));
 }
