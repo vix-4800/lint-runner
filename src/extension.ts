@@ -202,6 +202,44 @@ interface ManualRunNotificationDeps {
     onCancel?: (filePath: string) => void;
 }
 
+interface DoctorNotificationDeps {
+    getStatuses?: (resource?: vscode.Uri) => Promise<DoctorToolStatus[]>;
+    withProgress?: WithProgressFn;
+    openTextDocument?: typeof vscode.workspace.openTextDocument;
+    showTextDocument?: typeof vscode.window.showTextDocument;
+    showInformationMessage?: typeof vscode.window.showInformationMessage;
+}
+
+export async function runDoctorWithNotification(
+    resource?: vscode.Uri,
+    deps: DoctorNotificationDeps = {}
+): Promise<void> {
+    const getStatuses = deps.getStatuses ?? getDoctorToolStatuses;
+    const withProgress = deps.withProgress ?? vscode.window.withProgress.bind(vscode.window);
+    const rows = await withProgress(
+        {
+            location: vscode.ProgressLocation.Notification,
+            title: 'LintRunner: Checking configured tools…',
+            cancellable: false,
+        },
+        async () => getStatuses(resource)
+    );
+
+    if (rows.length === 0) {
+        const showInformationMessage = deps.showInformationMessage ?? vscode.window.showInformationMessage.bind(vscode.window);
+        await showInformationMessage('LintRunner: No configured tools found.');
+        return;
+    }
+
+    const openTextDocument = deps.openTextDocument ?? vscode.workspace.openTextDocument.bind(vscode.workspace);
+    const showTextDocument = deps.showTextDocument ?? vscode.window.showTextDocument.bind(vscode.window);
+    const document = await openTextDocument({
+        language: 'text',
+        content: formatDoctorTable(rows),
+    });
+    await showTextDocument(document, { preview: false });
+}
+
 export async function runManualTaskWithNotification<T>(
     filePath: string,
     labels: readonly string[],
@@ -1214,17 +1252,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 return;
             }
 
-            const rows = await getDoctorToolStatuses(vscode.window.activeTextEditor?.document.uri);
-            if (rows.length === 0) {
-                vscode.window.showInformationMessage('LintRunner: No configured tools found.');
-                return;
-            }
-
-            const document = await vscode.workspace.openTextDocument({
-                language: 'text',
-                content: formatDoctorTable(rows),
-            });
-            await vscode.window.showTextDocument(document, { preview: false });
+            await runDoctorWithNotification(vscode.window.activeTextEditor?.document.uri);
         })
     );
 

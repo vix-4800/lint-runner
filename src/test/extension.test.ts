@@ -28,6 +28,7 @@ import {
     isContentChanged,
     OutputChannelManager,
     runOnOpenLintersForVisibleEditors,
+    runDoctorWithNotification,
     runManualTaskWithNotification,
     runManualFixersForEditor,
     runManualLintersForFile,
@@ -485,6 +486,55 @@ suite('Extension Test Suite', () => {
 
         assert.strictEqual(result, 11);
         assert.strictEqual(withProgressCalled, false);
+    });
+
+    test('runDoctorWithNotification shows progress while collecting tool statuses', async () => {
+        let progressOptions: vscode.ProgressOptions | undefined;
+        let collected = false;
+        let openedContent: string | undefined;
+
+        await runDoctorWithNotification(undefined, {
+            getStatuses: async () => {
+                collected = true;
+                return [
+                    {
+                        tool: 'phpstan',
+                        found: 'yes',
+                        version: 'PHPStan 2.1.0',
+                        usedBy: ['PHP:phpstan'],
+                    },
+                ];
+            },
+            withProgress: async (options, task) => {
+                progressOptions = options;
+                assert.strictEqual(collected, false);
+                return task(
+                    { report: () => {
+                        // no-op
+                    } },
+                    {
+                        isCancellationRequested: false,
+                        onCancellationRequested() {
+                            return { dispose: () => {
+                                // no-op
+                            } };
+                        },
+                    } as vscode.CancellationToken
+                );
+            },
+            openTextDocument: async (options) => {
+                openedContent = typeof options === 'object' && 'content' in options ? options.content : undefined;
+                return {} as vscode.TextDocument;
+            },
+            showTextDocument: async () => ({}) as vscode.TextEditor,
+            showInformationMessage: async () => undefined,
+        });
+
+        assert.strictEqual(collected, true);
+        assert.strictEqual(progressOptions?.location, vscode.ProgressLocation.Notification);
+        assert.strictEqual(progressOptions?.title, 'LintRunner: Checking configured tools…');
+        assert.strictEqual(progressOptions?.cancellable, false);
+        assert.ok(openedContent?.includes('phpstan'));
     });
 
     test('OutputChannelManager creates, forwards, and disposes the output channel based on setting', () => {
