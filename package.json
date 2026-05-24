@@ -4,21 +4,21 @@
   "description": "Run any CLI linter or formatter and publish results as VS Code diagnostics.",
   "license": "MIT",
   "icon": "icon.png",
-"galleryBanner": {
+  "galleryBanner": {
     "color": "#1e1e1e",
     "theme": "dark"
   },
   "version": "0.2.0",
-"qna": false,
+  "qna": false,
   "preview": true,
   "pricing": "Free",
   "publisher": "vix",
-    "author": {
+  "author": {
     "name": "Anton VIX",
     "email": "Gordan.ei@protonmail.ch",
     "url": "https://github.com/vix-4800"
   },
-"homepage": "https://github.com/vix-4800/lint-runner#readme",
+  "homepage": "https://github.com/vix-4800/lint-runner#readme",
   "repository": {
     "type": "git",
     "url": "https://github.com/vix-4800/lint-runner"
@@ -29,7 +29,7 @@
   "engines": {
     "vscode": "^1.116.0"
   },
-"extensionKind": [
+  "extensionKind": [
     "workspace"
   ],
   "categories": [
@@ -121,36 +121,42 @@
         "lintRunner.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable or disable the LintRunner extension and all of its commands, automatic runs, code actions, and CodeLens entries."
+          "description": "Enable or disable the LintRunner extension and all of its commands, automatic runs, code actions, and CodeLens entries.",
+          "order": 1
         },
         "lintRunner.debounceMs": {
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "description": "Delay in milliseconds before running linters and fixers after a file is saved. Useful when auto-save is enabled with a short interval. Set to 0 to disable debouncing."
+          "description": "Delay in milliseconds before running linters and fixers after a file is saved. Useful when auto-save is enabled with a short interval. Set to 0 to disable debouncing.",
+          "order": 2
         },
         "lintRunner.enableLogging": {
           "type": "boolean",
           "default": true,
-          "description": "Enable LintRunner output logging. When disabled, no log lines are written and the LintRunner tab is hidden from the Output panel."
+          "description": "Enable LintRunner output logging. When disabled, no log lines are written and the LintRunner tab is hidden from the Output panel.",
+          "order": 3
         },
         "lintRunner.enableCodeActions": {
           "type": "boolean",
           "default": false,
           "scope": "resource",
-          "description": "Show one source code action per manual linter and manual fixer for matching files. Linters/fixers that already run on open or save are not listed."
+          "description": "Show one source code action per manual linter and manual fixer for matching files. Linters/fixers that already run on open or save are not listed.",
+          "order": 4
         },
         "lintRunner.enableCodeLens": {
           "type": "boolean",
           "default": false,
           "scope": "resource",
-          "description": "Show one CodeLens per manual linter and manual fixer at the top of matching files. Linters/fixers that already run on open or save are not listed."
+          "description": "Show one CodeLens per manual linter and manual fixer at the top of matching files. Linters/fixers that already run on open or save are not listed.",
+          "order": 5
         },
         "lintRunner.showManualRunNotifications": {
           "type": "boolean",
           "default": true,
           "scope": "resource",
-          "description": "Show a cancellable notification for manual linter and fixer runs. Automatic runs on open or save never show this notification."
+          "description": "Show a cancellable notification for manual linter and fixer runs. Automatic runs on open or save never show this notification.",
+          "order": 6
         },
         "lintRunner.ignorePatterns": {
           "type": "array",
@@ -158,12 +164,14 @@
           "items": {
             "type": "string"
           },
-          "description": "Glob patterns for files to skip. Checked against the file name, workspace-relative path, and full path. Files matching any pattern are not linted or fixed."
+          "description": "Glob patterns for files to skip. Checked against the file name, workspace-relative path, and full path. Files matching any pattern are not linted or fixed.",
+          "order": 7
         },
         "lintRunner.respectGitignore": {
           "type": "boolean",
           "default": false,
-          "description": "Skip files ignored by .gitignore. Requires git to be available on PATH. The file's workspace folder is used as the working directory for git check-ignore."
+          "description": "Skip files ignored by .gitignore. Requires git to be available on PATH. The file's workspace folder is used as the working directory for git check-ignore.",
+          "order": 8
         },
         "lintRunner.targets": {
           "type": "array",
@@ -474,7 +482,8 @@
                 }
               }
             }
-          }
+          },
+          "order": 100
         }
       }
     }
