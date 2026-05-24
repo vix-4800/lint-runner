@@ -172,6 +172,33 @@ suite('Linter Runner', () => {
         assert.strictEqual(targets[0].fixers[0].run, 'onSave');
     });
 
+    test('applies target cwd defaults to nested commands', () => {
+        const targets = resolveConfiguredTargets([
+            {
+                name: 'HTML',
+                languages: ['html'],
+                cwd: '${workspaceFolder}/tools',
+                preCommands: [{ command: 'prepare-html', args: ['--check'] }],
+                linters: [
+                    {
+                        name: 'linthtml',
+                        command: 'linthtml',
+                        args: ['${fileBasename}'],
+                        cwd: '${fileDirname}',
+                        preCommands: [{ command: 'before-lint', args: ['--warm-up'] }],
+                        parser: TEST_REGEX_PARSER,
+                    },
+                ],
+                fixers: [{ command: 'html-beautify', args: ['${file}'] }],
+            },
+        ]);
+
+        assert.strictEqual(targets[0].preCommands[0].cwd, '${workspaceFolder}/tools');
+        assert.strictEqual(targets[0].linters[0].cwd, '${fileDirname}');
+        assert.strictEqual(targets[0].linters[0].preCommands?.[0].cwd, '${fileDirname}');
+        assert.strictEqual(targets[0].fixers[0].cwd, '${workspaceFolder}/tools');
+    });
+
     test('resolves onOpen run mode', () => {
         const targets = resolveConfiguredTargets([
             {

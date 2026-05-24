@@ -40,6 +40,10 @@ async function assertCancelledProcess(completedMarkerPath: string, terminatedMar
     await assert.rejects(fs.access(completedMarkerPath));
 }
 
+async function assertSamePath(actualPath: string, expectedPath: string): Promise<void> {
+    assert.strictEqual(await fs.realpath(actualPath), await fs.realpath(expectedPath));
+}
+
 suite('Linter Runner Test Suite', () => {
     test('collectDoctorToolStatuses groups tools by target and resolves found/version state', async () => {
         const statuses = await collectDoctorToolStatuses(
@@ -523,6 +527,77 @@ suite('Linter Runner Test Suite', () => {
         }
     });
 
+    test('runRunnableLinters uses configured cwd for linter commands and pre-commands', async function () {
+        this.timeout(10_000);
+
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-linter-cwd-'));
+        const fileDir = path.join(tmpDir, 'nested');
+        const filePath = path.join(fileDir, 'test.ts');
+        const scriptPath = path.join(tmpDir, 'record-cwd.js');
+        const preCommandMarkerPath = path.join(tmpDir, 'pre-command-cwd.txt');
+        const linterMarkerPath = path.join(tmpDir, 'linter-cwd.txt');
+        await fs.mkdir(fileDir, { recursive: true });
+        await fs.writeFile(filePath, 'const value = 1;\n');
+        await fs.writeFile(
+            scriptPath,
+            [
+                "const fs = require('node:fs');",
+                'const [markerPath] = process.argv.slice(2);',
+                'fs.writeFileSync(markerPath, process.cwd());',
+                'process.exit(0);',
+                '',
+            ].join('\n')
+        );
+
+        const diagnostics = vscode.languages.createDiagnosticCollection('lintRunner-linter-cwd-test');
+        const output = vscode.window.createOutputChannel('LintRunner Linter Cwd Test');
+        const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+        const target: ResolvedTargetConfig = {
+            name: 'TypeScript',
+            filePatterns: [],
+            languages: ['typescript'],
+            preCommands: [],
+            linters: [],
+            fixers: [],
+        };
+        const runnable: RunnableLinter = {
+            label: 'cwd-linter',
+            description: target.name,
+            detail: process.execPath,
+            target,
+            linter: {
+                name: 'cwd-linter',
+                command: process.execPath,
+                args: [scriptPath, linterMarkerPath],
+                cwd: '${fileDirname}',
+                parser: {
+                    pattern: '(?<line>\\d+):(?<message>.+)',
+                },
+                preCommands: [
+                    {
+                        command: process.execPath,
+                        args: [scriptPath, preCommandMarkerPath],
+                        cwd: tmpDir,
+                    },
+                ],
+                run: 'manual',
+            },
+        };
+
+        try {
+            const lintersRun = await runRunnableLinters(filePath, diagnostics, output, statusBar, [runnable]);
+
+            assert.strictEqual(lintersRun, 1);
+            await assertSamePath(await fs.readFile(preCommandMarkerPath, 'utf8'), tmpDir);
+            await assertSamePath(await fs.readFile(linterMarkerPath, 'utf8'), fileDir);
+        } finally {
+            diagnostics.dispose();
+            output.dispose();
+            statusBar.dispose();
+            await fs.rm(tmpDir, { recursive: true, force: true });
+        }
+    });
+
     test('runFixers shows the active fixer name in the status bar', async function () {
         this.timeout(10_000);
 
@@ -710,6 +785,54 @@ suite('Linter Runner Test Suite', () => {
                 },
             ]);
         } finally {
+            statusBar.dispose();
+            await fs.rm(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    test('runFixers uses configured cwd for fixer commands', async function () {
+        this.timeout(10_000);
+
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-fixer-cwd-'));
+        const fileDir = path.join(tmpDir, 'nested');
+        const filePath = path.join(fileDir, 'test.ts');
+        const scriptPath = path.join(tmpDir, 'record-cwd.js');
+        const fixerMarkerPath = path.join(tmpDir, 'fixer-cwd.txt');
+        await fs.mkdir(fileDir, { recursive: true });
+        await fs.writeFile(filePath, 'const value = 1;\n');
+        await fs.writeFile(
+            scriptPath,
+            [
+                "const fs = require('node:fs');",
+                'const [markerPath] = process.argv.slice(2);',
+                'fs.writeFileSync(markerPath, process.cwd());',
+                'process.exit(0);',
+                '',
+            ].join('\n')
+        );
+
+        const output = vscode.window.createOutputChannel('LintRunner Fixer Cwd Test');
+        const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+        const fixer: RunnableFixer = {
+            label: 'cwd-fixer',
+            description: 'TypeScript',
+            detail: process.execPath,
+            targetName: 'TypeScript',
+            fixer: {
+                name: 'cwd-fixer',
+                command: process.execPath,
+                args: [scriptPath, fixerMarkerPath],
+                cwd: '${fileDirname}',
+            },
+        };
+
+        try {
+            const fixersRun = await runFixers(filePath, output, statusBar, 'manual', [fixer]);
+
+            assert.strictEqual(fixersRun, 1);
+            await assertSamePath(await fs.readFile(fixerMarkerPath, 'utf8'), fileDir);
+        } finally {
+            output.dispose();
             statusBar.dispose();
             await fs.rm(tmpDir, { recursive: true, force: true });
         }

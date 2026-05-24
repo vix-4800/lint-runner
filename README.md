@@ -58,6 +58,7 @@ is optional and further narrows the match.
 | `languages`    | `string[]`                         | yes      | VS Code language ids this target applies to. Use `["*"]` to match all detected language ids.                   |
 | `filePatterns` | `string[]`                         | no       | Optional glob patterns that further narrow matching files.                                                     |
 | `run`          | `"onOpen" \| "onSave" \| "manual"` | no       | Default run mode for linters. Defaults to `onSave`. `onOpen` also runs on save.                                |
+| `cwd`          | `string`                           | no       | Default working directory for this target's commands. Defaults to the file's workspace folder.                 |
 | `preCommands`  | `CommandConfig[]`                  | no       | Commands executed once before target linters.                                                                  |
 | `linters`      | `TargetLinterConfig[]`             | no       | Linter commands for the target.                                                                                |
 | `fixers`       | `FixerConfig[]`                    | no       | Auto-fixer commands. By default they run via `LintRunner: Run Fixers`; `run: "onSave"` also runs them on save. |
@@ -76,6 +77,7 @@ fixer you want to override from a lower scope a unique `name`.
 | `name`        | `string`                           | yes      | Source name in Problems.                                                                   |
 | `enabled`     | `boolean`                          | no       | Enables or disables this linter. Defaults to `true`.                                       |
 | `command`     | `string`                           | yes      | Linter command. Must be in `PATH` or an absolute path. Supports `~` and command variables. |
+| `cwd`         | `string`                           | no       | Working directory for this linter. Defaults to target `cwd` or the file's workspace folder. |
 | `args`        | `string[]`                         | yes      | Command arguments. Supports `~` and command variables.                                     |
 | `parser`      | `RegexParserConfig`                | yes      | Regex parser config.                                                                       |
 | `run`         | `"onOpen" \| "onSave" \| "manual"` | no       | Overrides target `run`. `onOpen` also runs on save.                                        |
@@ -98,6 +100,7 @@ does not run.
 | --------- | ---------- | -------- | ---------------------------------------------------- |
 | `name`    | `string`   | no       | Command name in LintRunner output.                   |
 | `command` | `string`   | yes      | Executable file. Supports `~` and command variables. |
+| `cwd`     | `string`   | no       | Working directory. Defaults to the owner `cwd` or the file's workspace folder. |
 | `args`    | `string[]` | yes      | Arguments. Supports `~` and command variables.       |
 
 ### Fixer Config
@@ -113,8 +116,8 @@ Other fields are the same as `CommandConfig`.
 
 ## Command Variables
 
-LintRunner substitutes variables in `command`, `args`, `preCommands[*].command`, `preCommands[*].args`,
-`fixers[*].command`, and `fixers[*].args`.
+LintRunner substitutes variables in `command`, `cwd`, `args`, `preCommands[*].command`, `preCommands[*].cwd`,
+`preCommands[*].args`, `fixers[*].command`, `fixers[*].cwd`, and `fixers[*].args`.
 
 | Variable                     | Value                                                                                     |
 | ---------------------------- | ----------------------------------------------------------------------------------------- |
