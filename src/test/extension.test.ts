@@ -1,9 +1,13 @@
 import * as assert from 'assert';
+import * as fs from 'fs/promises';
+import * as os from 'os';
+import * as path from 'path';
 
 // You can import and use all API from the 'vscode' module
 // as well as import your extension to test it
 import * as vscode from 'vscode';
 import {
+    
     clearAllPendingSaveDebounces,
     collectClosedFileTabUris,
     collectNewVisibleFileNames,
@@ -25,11 +29,34 @@ import {
     runManualTaskWithNotification,
     runManualFixersForEditor,
     runManualLintersForFile,
+
 } from '../extension.js';
-import type { ResolvedTargetConfig, RunnableFixer, RunnableLinter } from '../linterRunner.js';
+import {
+    clearAllFileLinterDiagnostics,
+    clearDiagnosticsCache,
+    type ResolvedTargetConfig,
+    type RunnableFixer,
+    type RunnableLinter,
+} from '../linterRunner.js';
 
 const CANCELLED_TIMER_DELAY_MS = 100;
 const TIMER_VERIFICATION_DELAY_MS = 15;
+
+async function waitForCondition(
+    predicate: () => boolean | Promise<boolean>,
+    timeoutMs: number = 5_000,
+    intervalMs: number = 25
+): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        if (await predicate()) {
+            return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+
+    throw new Error('Timed out waiting for condition');
+}
 
 function createTestTarget(name: string): ResolvedTargetConfig {
     return {
@@ -898,5 +925,102 @@ suite('Extension Test Suite', () => {
             'notify:PHP:phpstan',
             'warn:LintRunner: PHP:phpstan failed: spawn ENOENT',
         ]);
+    });
+
+    test('config changes clear diagnostics from removed targets before the next publish', async function () {
+        this.timeout(15_000);
+
+        const extension = vscode.extensions.getExtension('vix.lint-runner');
+        assert.ok(extension);
+        await extension.activate();
+
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-config-change-'));
+        const filePath = path.join(tmpDir, 'test.ts');
+        const scriptPath = path.join(tmpDir, 'emit-diagnostic.js');
+        await fs.writeFile(filePath, 'const value = 1;\n');
+        await fs.writeFile(
+            scriptPath,
+            [
+                'const [message] = process.argv.slice(2);',
+                "process.stdout.write(`1:${message}\\n`);",
+                '',
+            ].join('\n')
+        );
+
+        const config = vscode.workspace.getConfiguration('lintRunner');
+        const previousTargets = config.inspect<unknown[]>('targets')?.globalValue;
+        const document = await vscode.workspace.openTextDocument(filePath);
+        await vscode.window.showTextDocument(document);
+        const uri = document.uri;
+
+        try {
+            clearAllFileLinterDiagnostics();
+            clearDiagnosticsCache();
+            await vscode.commands.executeCommand('lintRunner.clearDiagnostics');
+
+            await config.update(
+                'targets',
+                [
+                    {
+                        name: 'backend',
+                        languages: ['typescript'],
+                        linters: [
+                            {
+                                name: 'shared-linter',
+                                command: process.execPath,
+                                args: [scriptPath, 'backend issue'],
+                                parser: {
+                                    pattern: '(?<line>\\d+):(?<message>.+)',
+                                },
+                                run: 'manual',
+                            },
+                        ],
+                    },
+                ],
+                vscode.ConfigurationTarget.Global
+            );
+
+            await waitForCondition(() => vscode.languages.getDiagnostics(uri).length === 0);
+            await vscode.commands.executeCommand('lintRunner.run');
+            assert.deepStrictEqual(
+                vscode.languages.getDiagnostics(uri).map((diagnostic) => diagnostic.message),
+                ['backend issue']
+            );
+
+            await config.update(
+                'targets',
+                [
+                    {
+                        name: 'frontend',
+                        languages: ['typescript'],
+                        linters: [
+                            {
+                                name: 'shared-linter',
+                                command: process.execPath,
+                                args: [scriptPath, 'frontend issue'],
+                                parser: {
+                                    pattern: '(?<line>\\d+):(?<message>.+)',
+                                },
+                                run: 'manual',
+                            },
+                        ],
+                    },
+                ],
+                vscode.ConfigurationTarget.Global
+            );
+
+            await waitForCondition(() => vscode.languages.getDiagnostics(uri).length === 0);
+            await vscode.commands.executeCommand('lintRunner.run');
+            assert.deepStrictEqual(
+                vscode.languages.getDiagnostics(uri).map((diagnostic) => diagnostic.message),
+                ['frontend issue']
+            );
+        } finally {
+            clearAllFileLinterDiagnostics();
+            clearDiagnosticsCache();
+            await vscode.commands.executeCommand('lintRunner.clearDiagnostics');
+            await config.update('targets', previousTargets, vscode.ConfigurationTarget.Global);
+            await fs.rm(tmpDir, { recursive: true, force: true });
+        }
     });
 });
