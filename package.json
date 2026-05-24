@@ -184,6 +184,13 @@
                       "type": "string",
                       "description": "Working directory for the pre-command. Defaults to the target `cwd` or the file's workspace folder. Supports ~ and command variables."
                     },
+                    "env": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "Environment variables for the pre-command. They are merged into the spawned process environment and support ~ and command variables in values."
+                    },
                     "args": {
                       "type": "array",
                       "items": {
@@ -222,6 +229,13 @@
                       "type": "string",
                       "description": "Working directory for this linter. Defaults to the target `cwd` or the file's workspace folder. Supports ~ and command variables."
                     },
+                    "env": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "Environment variables for this linter. They are merged into the spawned process environment and support ~ and command variables in values."
+                    },
                     "args": {
                       "type": "array",
                       "items": {
@@ -252,6 +266,13 @@
                           "cwd": {
                             "type": "string",
                             "description": "Working directory for the pre-command. Defaults to the linter `cwd`, target `cwd`, or the file's workspace folder. Supports ~ and command variables."
+                          },
+                          "env": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "description": "Environment variables for the pre-command. They are merged into the spawned process environment and support ~ and command variables in values."
                           },
                           "args": {
                             "type": "array",
@@ -363,6 +384,13 @@
                     "cwd": {
                       "type": "string",
                       "description": "Working directory for this fixer. Defaults to the target `cwd` or the file's workspace folder. Supports ~ and command variables."
+                    },
+                    "env": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "Environment variables for this fixer. They are merged into the spawned process environment and support ~ and command variables in values."
                     },
                     "args": {
                       "type": "array",

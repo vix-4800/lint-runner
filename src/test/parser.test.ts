@@ -172,31 +172,54 @@ suite('Linter Runner', () => {
         assert.strictEqual(targets[0].fixers[0].run, 'onSave');
     });
 
-    test('applies target cwd defaults to nested commands', () => {
+    test('applies target cwd defaults to nested commands and keeps env settings', () => {
         const targets = resolveConfiguredTargets([
             {
                 name: 'HTML',
                 languages: ['html'],
                 cwd: '${workspaceFolder}/tools',
-                preCommands: [{ command: 'prepare-html', args: ['--check'] }],
+                preCommands: [
+                    {
+                        command: 'prepare-html',
+                        args: ['--check'],
+                        env: { NODE_OPTIONS: '--max-old-space-size=4096' },
+                    },
+                ],
                 linters: [
                     {
                         name: 'linthtml',
                         command: 'linthtml',
                         args: ['${fileBasename}'],
                         cwd: '${fileDirname}',
-                        preCommands: [{ command: 'before-lint', args: ['--warm-up'] }],
+                        env: { PATH: '/custom/bin' },
+                        preCommands: [
+                            {
+                                command: 'before-lint',
+                                args: ['--warm-up'],
+                                env: { PHP_CS_FIXER_IGNORE_ENV: '1' },
+                            },
+                        ],
                         parser: TEST_REGEX_PARSER,
                     },
                 ],
-                fixers: [{ command: 'html-beautify', args: ['${file}'] }],
+                fixers: [
+                    {
+                        command: 'html-beautify',
+                        args: ['${file}'],
+                        env: { COMPOSER_MEMORY_LIMIT: '-1' },
+                    },
+                ],
             },
         ]);
 
         assert.strictEqual(targets[0].preCommands[0].cwd, '${workspaceFolder}/tools');
+        assert.deepStrictEqual(targets[0].preCommands[0].env, { NODE_OPTIONS: '--max-old-space-size=4096' });
         assert.strictEqual(targets[0].linters[0].cwd, '${fileDirname}');
+        assert.deepStrictEqual(targets[0].linters[0].env, { PATH: '/custom/bin' });
         assert.strictEqual(targets[0].linters[0].preCommands?.[0].cwd, '${fileDirname}');
+        assert.deepStrictEqual(targets[0].linters[0].preCommands?.[0].env, { PHP_CS_FIXER_IGNORE_ENV: '1' });
         assert.strictEqual(targets[0].fixers[0].cwd, '${workspaceFolder}/tools');
+        assert.deepStrictEqual(targets[0].fixers[0].env, { COMPOSER_MEMORY_LIMIT: '-1' });
     });
 
     test('resolves onOpen run mode', () => {
@@ -1582,6 +1605,29 @@ suite('mergeConfiguredTargets', () => {
         assert.deepStrictEqual(linters[0].successExitCodes, [0, 1]);
     });
 
+    test('patches linter env by name', () => {
+        const global = [
+            {
+                name: 'PHP',
+                languages: ['php'],
+                linters: [
+                    { name: 'phpstan', command: 'phpstan', args: ['${file}'], env: { PATH: '/usr/bin' }, parser: BASE_PARSER },
+                ],
+            },
+        ];
+        const patches: TargetPatch[] = [
+            {
+                name: 'PHP',
+                linters: [
+                    { name: 'phpstan', env: { COMPOSER_MEMORY_LIMIT: '-1' } },
+                ],
+            },
+        ];
+        const result = mergeConfiguredTargets(global, patches);
+        const linters = result[0].linters ?? [];
+        assert.deepStrictEqual(linters[0].env, { COMPOSER_MEMORY_LIMIT: '-1' });
+    });
+
     test('appends new linter to existing target when name does not match', () => {
         const global = [
             {
@@ -1770,6 +1816,29 @@ suite('mergeConfiguredTargets', () => {
         const result = mergeConfiguredTargets(global, patches);
         const fixers = result[0].fixers ?? [];
         assert.deepStrictEqual(fixers[0].successExitCodes, [0, 8]);
+    });
+
+    test('patches fixer env by name', () => {
+        const global = [
+            {
+                name: 'PHP',
+                languages: ['php'],
+                fixers: [
+                    { name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix', '${file}'], env: { PATH: '/usr/bin' } },
+                ],
+            },
+        ];
+        const patches: TargetPatch[] = [
+            {
+                name: 'PHP',
+                fixers: [
+                    { name: 'php-cs-fixer', env: { PHP_CS_FIXER_IGNORE_ENV: '1' } },
+                ],
+            },
+        ];
+        const result = mergeConfiguredTargets(global, patches);
+        const fixers = result[0].fixers ?? [];
+        assert.deepStrictEqual(fixers[0].env, { PHP_CS_FIXER_IGNORE_ENV: '1' });
     });
 
     test('duplicate target names in the same source merge rather than duplicate', () => {
@@ -2100,6 +2169,48 @@ suite('Config validation', () => {
                 )
             );
             assert.deepStrictEqual(issues.errors, []);
+        } finally {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+
+    test('respects command env PATH during command validation', () => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-runner-validate-env-'));
+        const existingCommand = path.join(tempDir, 'existing-command');
+        fs.writeFileSync(existingCommand, '#!/bin/sh\nexit 0\n', 'utf8');
+        fs.chmodSync(existingCommand, 0o755);
+
+        try {
+            const issues = validateTargetScopes(
+                [
+                    {
+                        label: 'Workspace settings',
+                        targets: [
+                            {
+                                name: 'PHP',
+                                languages: ['php'],
+                                linters: [
+                                    {
+                                        name: 'phpstan',
+                                        command: 'existing-command',
+                                        args: ['${file}'],
+                                        env: { PATH: tempDir },
+                                        parser: BASE_PARSER,
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+                {
+                    knownLanguageIds: ['php'],
+                    env: { PATH: '' },
+                    platform: 'linux',
+                }
+            );
+
+            assert.deepStrictEqual(issues.errors, []);
+            assert.deepStrictEqual(issues.warnings, []);
         } finally {
             fs.rmSync(tempDir, { recursive: true, force: true });
         }

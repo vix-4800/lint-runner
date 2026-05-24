@@ -987,6 +987,9 @@ The first block shows top-level `lintRunner.*` settings. Each target block after
         "${file}"
       ],
       "command": "php-cs-fixer",
+      "env": {
+        "PHP_CS_FIXER_IGNORE_ENV": "1"
+      },
       "name": "PHP CS Fixer"
     },
     {
@@ -1079,6 +1082,9 @@ The first block shows top-level `lintRunner.*` settings. Each target block after
         "${file}"
       ],
       "command": "phpstan",
+      "env": {
+        "COMPOSER_MEMORY_LIMIT": "-1"
+      },
       "name": "PHPStan",
       "parser": {
         "defaultSeverity": "error",
