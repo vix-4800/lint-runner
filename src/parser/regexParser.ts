@@ -4,9 +4,9 @@ import { createDiagnostic } from './diagnostic.js';
 export interface RegexParserConfig {
     pattern: string;
     flags?: string;
-    output?: 'stdout' | 'stderr' | 'both';
-    defaultSeverity?: 'error' | 'warning' | 'info' | 'information';
-    messageFormat?: 'plain' | 'json';
+    output?: 'both' | 'stderr' | 'stdout';
+    defaultSeverity?: 'error' | 'info' | 'information' | 'warning';
+    messageFormat?: 'json' | 'plain';
 }
 
 const invalidRegexWarned = new Set<string>();
@@ -98,13 +98,13 @@ export function parseRegexOutput(
         const isZeroWidthMatch = match[0] === '';
         const groups = match.groups ?? {};
 
-        const rawLine = groups['line'];
-        const rawMessage = groups['message'];
+        const rawLine = groups.line;
+        const rawMessage = groups.message;
 
         if (rawLine !== undefined && rawMessage !== undefined) {
-            const rawCol = groups['col'];
-            const rawEndLine = groups['endLine'];
-            const rawEndCol = groups['endCol'];
+            const rawCol = groups.col;
+            const rawEndLine = groups.endLine;
+            const rawEndCol = groups.endCol;
             const lineNumber = parseIntegerGroup(rawLine);
             const colNumber = parseIntegerGroup(rawCol);
             const endLineNumber = parseIntegerGroup(rawEndLine);
@@ -129,9 +129,9 @@ export function parseRegexOutput(
             const col = colNumber !== undefined ? Math.max(0, colNumber - 1) : undefined;
             const endLine = endLineNumber !== undefined ? Math.max(0, endLineNumber - 1) : undefined;
             const endCol = endColNumber !== undefined ? Math.max(0, endColNumber - 1) : undefined;
-            const severity = parseSeverity(groups['severity'], config.defaultSeverity);
+            const severity = parseSeverity(groups.severity, config.defaultSeverity);
             const message = formatMessage(rawMessage, config.messageFormat);
-            const code = groups['code'];
+            const code = groups.code;
 
             const diagnostic = createDiagnostic(line, col, message, severity, endLine, endCol);
             diagnostic.source = source;
