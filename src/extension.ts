@@ -1091,6 +1091,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 const wasConfigValid = configValid;
                 resetCommandEnv();
                 clearDiagnosticsCache();
+                clearAllFileLinterDiagnostics();
                 clearAllPendingSaveDebounces();
                 cancelAllFileRuns();
                 diagnostics.clear();
