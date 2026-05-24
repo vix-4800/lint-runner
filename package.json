@@ -113,6 +113,12 @@
         "title": "Doctor",
         "category": "LintRunner",
         "icon": "$(pulse)"
+      },
+      {
+        "command": "lintRunner.openExamples",
+        "title": "Open Configuration Examples",
+        "category": "LintRunner",
+        "icon": "$(book)"
       }
     ],
     "configuration": {
@@ -486,7 +492,32 @@
           "order": 100
         }
       }
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "lintRunner.gettingStarted",
+        "title": "Get Started with LintRunner",
+        "description": "Configure your first CLI linter and fixer.",
+        "steps": [
+          {
+            "id": "lintRunner.openExamples",
+            "title": "Open configuration examples",
+            "description": "Start from real-world examples for PHP, Shell, Python, YAML, JavaScript, and more.",
+            "completionEvents": [
+              "onCommand:lintRunner.openExamples"
+            ]
+          },
+          {
+            "id": "lintRunner.runDoctor",
+            "title": "Check installed tools",
+            "description": "Run Doctor to see which configured CLI tools are available.",
+            "completionEvents": [
+              "onCommand:lintRunner.doctor"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

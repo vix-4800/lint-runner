@@ -210,6 +210,21 @@ interface DoctorNotificationDeps {
     showInformationMessage?: typeof vscode.window.showInformationMessage;
 }
 
+interface OpenBundledExamplesDeps {
+    openTextDocument?: typeof vscode.workspace.openTextDocument;
+    showTextDocument?: typeof vscode.window.showTextDocument;
+}
+
+export async function openBundledExamples(
+    extensionUri: vscode.Uri,
+    deps: OpenBundledExamplesDeps = {}
+): Promise<void> {
+    const openTextDocument = deps.openTextDocument ?? vscode.workspace.openTextDocument.bind(vscode.workspace);
+    const showTextDocument = deps.showTextDocument ?? vscode.window.showTextDocument.bind(vscode.window);
+    const document = await openTextDocument(vscode.Uri.joinPath(extensionUri, 'docs', 'examples.md'));
+    await showTextDocument(document, { preview: false });
+}
+
 export async function runDoctorWithNotification(
     resource?: vscode.Uri,
     deps: DoctorNotificationDeps = {}
@@ -1243,6 +1258,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             configValid = await refreshConfigValidation(true);
             updateActionsStatusBar(actionsStatusBar);
             codeLensRefreshEmitter.fire();
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('lintRunner.openExamples', async () => {
+            await openBundledExamples(context.extensionUri);
         })
     );
 

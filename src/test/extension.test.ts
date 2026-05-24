@@ -7,7 +7,7 @@ import * as path from 'path';
 // as well as import your extension to test it
 import * as vscode from 'vscode';
 import {
-    
+
     cleanupExtensionRuntime,
     clearAllPendingSaveDebounces,
     collectClosedFileTabUris,
@@ -26,6 +26,7 @@ import {
     isManualCodeActionFixer,
     isManualCodeActionLinter,
     isContentChanged,
+    openBundledExamples,
     OutputChannelManager,
     runOnOpenLintersForVisibleEditors,
     runDoctorWithNotification,
@@ -535,6 +536,26 @@ suite('Extension Test Suite', () => {
         assert.strictEqual(progressOptions?.title, 'LintRunner: Checking configured tools…');
         assert.strictEqual(progressOptions?.cancellable, false);
         assert.ok(openedContent?.includes('phpstan'));
+    });
+
+    test('openBundledExamples opens docs examples from the extension directory', async () => {
+        const extensionUri = vscode.Uri.file('/tmp/lint-runner-extension');
+        let openedUri: vscode.Uri | undefined;
+        let shownDocument: vscode.TextDocument | undefined;
+
+        await openBundledExamples(extensionUri, {
+            openTextDocument: async (uri) => {
+                openedUri = uri as vscode.Uri;
+                return { uri: openedUri } as vscode.TextDocument;
+            },
+            showTextDocument: async (document) => {
+                shownDocument = document as vscode.TextDocument;
+                return {} as vscode.TextEditor;
+            },
+        });
+
+        assert.strictEqual(openedUri?.fsPath, '/tmp/lint-runner-extension/docs/examples.md');
+        assert.strictEqual(shownDocument?.uri.fsPath, openedUri?.fsPath);
     });
 
     test('OutputChannelManager creates, forwards, and disposes the output channel based on setting', () => {
