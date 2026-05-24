@@ -795,7 +795,7 @@ function extractCommandVersion(output: string): string | undefined {
 }
 
 async function detectCommandVersion(command: string, cwd: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
-    const versionArgsCandidates = [['--version'], ['-V'], ['version'], ['-v']];
+    const versionArgsCandidates = [['--version'], ['-V'], ['version']];
 
     for (const args of versionArgsCandidates) {
         const result = await new Promise<CommandResult>((resolve) => {
@@ -853,13 +853,25 @@ async function detectCommandVersion(command: string, cwd: string, env: NodeJS.Pr
         });
 
         const combinedOutput = `${result.stdout}\n${result.stderr}`.trim();
+        if (combinedOutput === '') {
+            continue;
+        }
+
         const version = extractCommandVersion(combinedOutput);
-        if (version !== undefined && combinedOutput !== '') {
+        if (version !== undefined) {
             return version;
         }
     }
 
     return undefined;
+}
+
+function getDoctorWorkingDirectory(resource?: vscode.Uri): string {
+    if (resource !== undefined) {
+        return vscode.workspace.getWorkspaceFolder(resource)?.uri.fsPath ?? process.cwd();
+    }
+
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
 }
 
 export async function collectDoctorToolStatuses(
@@ -891,10 +903,6 @@ export async function collectDoctorToolStatuses(
 
 export async function getDoctorToolStatuses(resource?: vscode.Uri): Promise<DoctorToolStatus[]> {
     const scopedResource = getDoctorResource(resource);
-    const cwd =
-        (scopedResource === undefined ? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath : undefined) ??
-        (scopedResource === undefined ? undefined : vscode.workspace.getWorkspaceFolder(scopedResource)?.uri.fsPath) ??
-        process.cwd();
     const env = await getCommandEnv();
 
     return collectDoctorToolStatuses(getDoctorTargets(scopedResource), {
@@ -904,7 +912,7 @@ export async function getDoctorToolStatuses(resource?: vscode.Uri): Promise<Doct
                 return undefined;
             }
 
-            return detectCommandVersion(expandHome(command.trim()), cwd, env);
+            return detectCommandVersion(expandHome(command.trim()), getDoctorWorkingDirectory(scopedResource), env);
         },
     });
 }
