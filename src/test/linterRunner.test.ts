@@ -57,6 +57,7 @@ suite('Linter Runner Test Suite', () => {
                             parser: { pattern: '(?<line>\\d+):(?<message>.+)' },
                             filePatterns: [],
                             languages: ['php'],
+                            run: 'manual',
                         },
                         {
                             name: 'phpcs',
@@ -65,6 +66,7 @@ suite('Linter Runner Test Suite', () => {
                             parser: { pattern: '(?<line>\\d+):(?<message>.+)' },
                             filePatterns: [],
                             languages: ['php'],
+                            run: 'manual',
                             preCommands: [{ command: 'phpcs', args: ['--config-show'] }],
                         },
                     ],
@@ -83,6 +85,7 @@ suite('Linter Runner Test Suite', () => {
                             parser: { pattern: '(?<line>\\d+):(?<message>.+)' },
                             filePatterns: [],
                             languages: ['shellscript'],
+                            run: 'manual',
                         },
                     ],
                     fixers: [],

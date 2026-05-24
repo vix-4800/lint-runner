@@ -769,7 +769,7 @@ function collectDoctorToolCommands(targets: readonly ResolvedTargetConfig[]): Ma
         }
         for (const linter of target.linters) {
             addTool(linter.command, target.name);
-            for (const preCommand of linter.preCommands) {
+            for (const preCommand of linter.preCommands ?? []) {
                 addTool(preCommand.command, target.name);
             }
         }
