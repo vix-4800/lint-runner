@@ -1471,6 +1471,9 @@ These fragments belong to the same `lintRunner.targets` entry.
         "${file}"
       ],
       "command": "phpstan",
+      "env": {
+        "COMPOSER_MEMORY_LIMIT": "-1"
+      },
       "name": "PHPStan",
       "parser": {
         "defaultSeverity": "error",
@@ -1578,6 +1581,9 @@ These fragments belong to the same `lintRunner.targets` entry.
         "${file}"
       ],
       "command": "php-cs-fixer",
+      "env": {
+        "PHP_CS_FIXER_IGNORE_ENV": "1"
+      },
       "name": "PHP CS Fixer"
     }
   ]

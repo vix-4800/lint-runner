@@ -21,6 +21,7 @@ VS Code extension for running external CLI linters and reporting found issues in
 - substitute command variables in commands and arguments;
 - support `~` in command and argument paths;
 - resolve commands through the user's login shell `PATH`;
+- override environment variables per command;
 - pre-commands before the main linter;
 - hide diagnostic rule codes in Problems;
 - status bar with active tool names and click-to-stop cancellation;
@@ -78,6 +79,7 @@ fixer you want to override from a lower scope a unique `name`.
 | `enabled`     | `boolean`                          | no       | Enables or disables this linter. Defaults to `true`.                                       |
 | `command`     | `string`                           | yes      | Linter command. Must be in `PATH` or an absolute path. Supports `~` and command variables. |
 | `cwd`         | `string`                           | no       | Working directory for this linter. Defaults to target `cwd` or the file's workspace folder. |
+| `env`         | `Record<string, string>`           | no       | Environment variables merged into the spawned process environment. Values support `~` and command variables. |
 | `args`        | `string[]`                         | yes      | Command arguments. Supports `~` and command variables.                                     |
 | `parser`      | `RegexParserConfig`                | yes      | Regex parser config.                                                                       |
 | `run`         | `"onOpen" \| "onSave" \| "manual"` | no       | Overrides target `run`. `onOpen` also runs on save.                                        |
@@ -96,12 +98,13 @@ does not run.
 
 ### Command Config
 
-| Field     | Type       | Required | Description                                          |
-| --------- | ---------- | -------- | ---------------------------------------------------- |
-| `name`    | `string`   | no       | Command name in LintRunner output.                   |
-| `command` | `string`   | yes      | Executable file. Supports `~` and command variables. |
-| `cwd`     | `string`   | no       | Working directory. Defaults to the owner `cwd` or the file's workspace folder. |
-| `args`    | `string[]` | yes      | Arguments. Supports `~` and command variables.       |
+| Field     | Type                     | Required | Description                                                                 |
+| --------- | ------------------------ | -------- | --------------------------------------------------------------------------- |
+| `name`    | `string`                 | no       | Command name in LintRunner output.                                          |
+| `command` | `string`                 | yes      | Executable file. Supports `~` and command variables.                        |
+| `cwd`     | `string`                 | no       | Working directory. Defaults to the owner `cwd` or the file's workspace folder. |
+| `env`     | `Record<string, string>` | no       | Environment variables merged into the spawned process environment. Values support `~` and command variables. |
+| `args`    | `string[]`               | yes      | Arguments. Supports `~` and command variables.                              |
 
 ### Fixer Config
 
@@ -116,8 +119,9 @@ Other fields are the same as `CommandConfig`.
 
 ## Command Variables
 
-LintRunner substitutes variables in `command`, `cwd`, `args`, `preCommands[*].command`, `preCommands[*].cwd`,
-`preCommands[*].args`, `fixers[*].command`, `fixers[*].cwd`, and `fixers[*].args`.
+LintRunner substitutes variables in `command`, `cwd`, `args`, `env` values, `preCommands[*].command`,
+`preCommands[*].cwd`, `preCommands[*].env` values, `preCommands[*].args`, `fixers[*].command`,
+`fixers[*].cwd`, `fixers[*].env` values, and `fixers[*].args`.
 
 | Variable                     | Value                                                                                     |
 | ---------------------------- | ----------------------------------------------------------------------------------------- |
