@@ -344,6 +344,87 @@ interface KnownTargetState {
     fixers: Set<string>;
 }
 
+export type ToolKind = 'diagnostic' | 'write';
+export type PipelineStrategy = 'parallel' | 'sequence';
+
+export interface ToolConfig extends CommandConfig {
+    kind: ToolKind;
+    enabled?: boolean;
+    parser?: RegexParserConfig;
+    timeout?: number;
+    maxFileSize?: number;
+    successExitCodes?: number[];
+}
+
+export type ToolPatch = Partial<Omit<ToolConfig, 'kind'>> & {
+    kind?: ToolKind;
+};
+
+export interface TargetMatchConfig {
+    languages?: string[];
+    files?: string[];
+    exclude?: string[];
+}
+
+export interface PipelineConfig {
+    strategy: PipelineStrategy;
+    tools: string[];
+}
+
+export interface ToolTargetConfig {
+    name: string;
+    match?: TargetMatchConfig;
+    manual?: PipelineConfig;
+    onSave?: PipelineConfig;
+    onOpen?: PipelineConfig;
+}
+
+export type ToolTargetPatch = Partial<Omit<ToolTargetConfig, 'name'>> & {
+    name: string;
+    [key: string]: unknown;
+};
+
+export interface ToolConfigurationPatch {
+    vars?: Record<string, string>;
+    tools?: Record<string, ToolPatch>;
+    targets?: ToolTargetPatch[];
+}
+
+export interface ToolValidationScope {
+    label: string;
+    config: ToolConfigurationPatch;
+}
+
+export interface ResolvedToolConfiguration {
+    vars: Record<string, string>;
+    tools: Record<string, ToolConfig>;
+    targets: ToolTargetConfig[];
+}
+
+export interface RunnableTool {
+    label: string;
+    description: string;
+    detail: string;
+    targetName: string;
+    pipelineName: RunMode;
+    toolName: string;
+    tool: ToolConfig;
+    vars?: Record<string, string>;
+}
+
+export interface RunnablePipeline {
+    label: string;
+    description: string;
+    detail: string;
+    target: ToolTargetConfig;
+    pipelineName: RunMode;
+    pipeline: PipelineConfig;
+    tools: RunnableTool[];
+}
+
+const PIPELINE_NAMES: RunMode[] = ['manual', 'onOpen', 'onSave'];
+const DEPRECATED_TARGET_KEYS = ['filePatterns', 'fixers', 'languages', 'linters', 'preCommands', 'run'] as const;
+
 const REQUIRED_PARSER_GROUPS = ['line', 'message'] as const;
 const NAMED_CAPTURE_GROUP_RE = /(?<!\\)\(\?<([A-Za-z][A-Za-z0-9]*)>/g;
 
@@ -563,6 +644,414 @@ function validateSuccessExitCodes(
     }
 }
 
+function cloneToolPatch(tool: ToolPatch): ToolPatch {
+    return {
+        ...tool,
+        args: tool.args !== undefined ? [...tool.args] : undefined,
+        env: tool.env !== undefined ? { ...tool.env } : undefined,
+        parser: tool.parser !== undefined ? { ...tool.parser } : undefined,
+        successExitCodes: tool.successExitCodes !== undefined ? [...tool.successExitCodes] : undefined,
+    };
+}
+
+function clonePipelineConfig(pipeline: PipelineConfig | undefined): PipelineConfig | undefined {
+    return pipeline === undefined || !isPipelineConfig(pipeline)
+        ? undefined
+        : {
+            strategy: pipeline.strategy,
+            tools: [...pipeline.tools],
+        };
+}
+
+function cloneToolTargetPatch(target: ToolTargetPatch): ToolTargetPatch {
+    return {
+        ...target,
+        match: target.match !== undefined
+            ? {
+                languages: target.match.languages !== undefined ? [...target.match.languages] : undefined,
+                files: target.match.files !== undefined ? [...target.match.files] : undefined,
+                exclude: target.match.exclude !== undefined ? [...target.match.exclude] : undefined,
+            }
+            : undefined,
+        manual: clonePipelineConfig(target.manual),
+        onOpen: clonePipelineConfig(target.onOpen),
+        onSave: clonePipelineConfig(target.onSave),
+    };
+}
+
+export function mergeToolConfiguration(
+    base: ToolConfigurationPatch,
+    patch: ToolConfigurationPatch
+): ToolConfigurationPatch {
+    const mergedTargets = (base.targets ?? []).map(cloneToolTargetPatch);
+
+    for (const targetPatch of patch.targets ?? []) {
+        const existingIndex = mergedTargets.findIndex((target) => target.name === targetPatch.name);
+        if (existingIndex === -1) {
+            mergedTargets.push(cloneToolTargetPatch(targetPatch));
+            continue;
+        }
+
+        const existing = mergedTargets[existingIndex];
+        mergedTargets[existingIndex] = {
+            ...existing,
+            ...cloneToolTargetPatch(targetPatch),
+            match:
+                targetPatch.match === undefined
+                    ? existing.match
+                    : {
+                        ...existing.match,
+                        ...cloneToolTargetPatch(targetPatch).match,
+                    },
+            manual: targetPatch.manual === undefined ? existing.manual : clonePipelineConfig(targetPatch.manual),
+            onOpen: targetPatch.onOpen === undefined ? existing.onOpen : clonePipelineConfig(targetPatch.onOpen),
+            onSave: targetPatch.onSave === undefined ? existing.onSave : clonePipelineConfig(targetPatch.onSave),
+        };
+    }
+
+    const tools: Record<string, ToolPatch> = {};
+    for (const [name, tool] of Object.entries(base.tools ?? {})) {
+        tools[name] = cloneToolPatch(tool);
+    }
+    for (const [name, tool] of Object.entries(patch.tools ?? {})) {
+        tools[name] = {
+            ...(tools[name] ?? {}),
+            ...cloneToolPatch(tool),
+            env: tool.env === undefined ? tools[name]?.env : { ...tool.env },
+            parser: tool.parser === undefined ? tools[name]?.parser : { ...tool.parser },
+            args: tool.args === undefined ? tools[name]?.args : [...tool.args],
+            successExitCodes:
+                tool.successExitCodes === undefined
+                    ? tools[name]?.successExitCodes
+                    : [...tool.successExitCodes],
+        };
+    }
+
+    return {
+        vars: {
+            ...(base.vars ?? {}),
+            ...(patch.vars ?? {}),
+        },
+        tools,
+        targets: mergedTargets,
+    };
+}
+
+export function resolveToolConfiguration(config: ToolConfigurationPatch): ResolvedToolConfiguration {
+    const tools: Record<string, ToolConfig> = {};
+    for (const [name, tool] of Object.entries(config.tools ?? {})) {
+        if (
+            tool.kind !== undefined &&
+            typeof tool.command === 'string' &&
+            Array.isArray(tool.args)
+        ) {
+            tools[name] = {
+                ...cloneToolPatch(tool),
+                kind: tool.kind,
+                command: tool.command,
+                args: [...tool.args],
+                cwd: tool.cwd ?? '${workspaceFolder}',
+                successExitCodes: tool.successExitCodes !== undefined ? [...tool.successExitCodes] : [0],
+            };
+        }
+    }
+
+    return {
+        vars: { ...(config.vars ?? {}) },
+        tools,
+        targets: (config.targets ?? []).map((target) => ({
+            name: target.name,
+            match: target.match,
+            manual: clonePipelineConfig(target.manual),
+            onOpen: clonePipelineConfig(target.onOpen),
+            onSave: clonePipelineConfig(target.onSave),
+        })),
+    };
+}
+
+function validateVars(scopeLabel: string, vars: Record<string, string> | undefined, issues: ConfigValidationIssues): void {
+    if (vars === undefined) {
+        return;
+    }
+
+    const visiting = new Set<string>();
+    const visited = new Set<string>();
+    const visit = (name: string): void => {
+        if (visited.has(name)) {
+            return;
+        }
+        if (visiting.has(name)) {
+            pushValidationError(issues, scopeLabel, `var '${name}' contains a circular reference.`);
+            return;
+        }
+        visiting.add(name);
+        const value = vars[name] ?? '';
+        for (const match of value.matchAll(/\$\{(\w+)}/g)) {
+            const ref = match[1];
+            if (ref !== undefined && Object.hasOwn(vars, ref)) {
+                visit(ref);
+            }
+        }
+        visiting.delete(name);
+        visited.add(name);
+    };
+
+    for (const [name, value] of Object.entries(vars)) {
+        if (typeof value !== 'string') {
+            pushValidationError(issues, scopeLabel, `var '${name}' must be a string.`);
+            continue;
+        }
+        visit(name);
+    }
+}
+
+function isPipelineConfig(value: unknown): value is PipelineConfig {
+    if (value === undefined || typeof value !== 'object' || value === null || Array.isArray(value)) {
+        return false;
+    }
+    const candidate = value as Partial<PipelineConfig>;
+    return (
+        (candidate.strategy === 'parallel' || candidate.strategy === 'sequence') &&
+        Array.isArray(candidate.tools) &&
+        candidate.tools.every((tool) => typeof tool === 'string' && tool.trim() !== '')
+    );
+}
+
+export function validateToolConfigScopes(
+    scopes: readonly ToolValidationScope[],
+    options: ValidateTargetScopesOptions = {}
+): ConfigValidationIssues {
+    const issues: ConfigValidationIssues = { errors: [], warnings: [] };
+    const knownLanguageIds = new Set(options.knownLanguageIds ?? []);
+    const env = options.env ?? process.env;
+    const platform = options.platform ?? process.platform;
+    let merged: ToolConfigurationPatch = {};
+
+    for (const scope of scopes) {
+        const config = scope.config;
+        validateVars(scope.label, config.vars, issues);
+
+        const toolsAfterScope = {
+            ...(merged.tools ?? {}),
+            ...(config.tools ?? {}),
+        };
+
+        for (const [toolName, tool] of Object.entries(config.tools ?? {})) {
+            const mergedTool = { ...(merged.tools?.[toolName] ?? {}), ...tool };
+            const label = `tool '${toolName}'`;
+            if (mergedTool.enabled === false) {
+                continue;
+            }
+            if (mergedTool.kind !== 'diagnostic' && mergedTool.kind !== 'write') {
+                pushValidationError(issues, scope.label, `${label} kind must be 'diagnostic' or 'write'.`);
+            }
+            if (!hasCommandAndArgs(mergedTool.command, mergedTool.args)) {
+                pushValidationError(issues, scope.label, `${label} is missing command or args.`);
+            }
+            if (mergedTool.kind === 'diagnostic') {
+                validateParserConfig(scope.label, label, mergedTool.parser, issues);
+            }
+            if (mergedTool.kind === 'write' && mergedTool.parser !== undefined) {
+                pushValidationError(issues, scope.label, `${label} with kind 'write' must not define parser.`);
+            }
+            validateCommandAvailability(
+                scope.label,
+                label,
+                mergedTool.command,
+                mergeCommandEnv(env, mergedTool.env),
+                platform,
+                issues
+            );
+            validateSuccessExitCodes(scope.label, label, mergedTool.successExitCodes, issues);
+        }
+
+        const seenTargetNames = new Set<string>();
+        for (const target of config.targets ?? []) {
+            const targetLabel = `target '${target.name}'`;
+            if (seenTargetNames.has(target.name)) {
+                pushValidationError(issues, scope.label, `duplicate target name '${target.name}'.`);
+            }
+            seenTargetNames.add(target.name);
+
+            for (const key of DEPRECATED_TARGET_KEYS) {
+                if (Object.hasOwn(target, key)) {
+                    pushValidationError(issues, scope.label, `${targetLabel} contains deprecated key '${key}'.`);
+                }
+            }
+
+            for (const languageId of target.match?.languages ?? []) {
+                if (languageId !== '*' && !knownLanguageIds.has(languageId)) {
+                    pushValidationWarning(issues, scope.label, `${targetLabel} contains unknown language id '${languageId}'.`);
+                }
+            }
+
+            for (const pipelineName of PIPELINE_NAMES) {
+                const rawPipeline = target[pipelineName];
+                if (rawPipeline === undefined) {
+                    continue;
+                }
+                if (!isPipelineConfig(rawPipeline)) {
+                    pushValidationError(
+                        issues,
+                        scope.label,
+                        `${targetLabel} pipeline '${pipelineName}' must be an object with strategy and tools.`
+                    );
+                    continue;
+                }
+                for (const toolRef of rawPipeline.tools) {
+                    if (toolsAfterScope[toolRef] === undefined) {
+                        pushValidationError(
+                            issues,
+                            scope.label,
+                            `${targetLabel} pipeline '${pipelineName}' references unknown tool '${toolRef}'.`
+                        );
+                    }
+                }
+            }
+        }
+
+        merged = mergeToolConfiguration(merged, config);
+    }
+
+    return issues;
+}
+
+function getScopedToolConfigPatches(resource?: vscode.Uri): ToolValidationScope[] {
+    const config =
+        resource === undefined
+            ? vscode.workspace.getConfiguration('lintRunner')
+            : vscode.workspace.getConfiguration('lintRunner', resource);
+    const inspectedVars = config.inspect<Record<string, string>>('vars');
+    const inspectedTools = config.inspect<Record<string, ToolPatch>>('tools');
+    const inspectedTargets = config.inspect<ToolTargetPatch[]>('targets');
+    const folderName = resource === undefined ? undefined : vscode.workspace.getWorkspaceFolder(resource)?.name;
+
+    return [
+        {
+            label: 'User settings',
+            config: {
+                vars: inspectedVars?.globalValue,
+                tools: inspectedTools?.globalValue,
+                targets: inspectedTargets?.globalValue,
+            },
+        },
+        {
+            label: 'Workspace settings',
+            config: {
+                vars: inspectedVars?.workspaceValue,
+                tools: inspectedTools?.workspaceValue,
+                targets: inspectedTargets?.workspaceValue,
+            },
+        },
+        {
+            label: folderName === undefined ? 'Folder settings' : `Folder settings (${folderName})`,
+            config: {
+                vars: inspectedVars?.workspaceFolderValue,
+                tools: inspectedTools?.workspaceFolderValue,
+                targets: inspectedTargets?.workspaceFolderValue,
+            },
+        },
+    ].filter((scope) =>
+        scope.config.vars !== undefined ||
+        scope.config.tools !== undefined ||
+        scope.config.targets !== undefined
+    );
+}
+
+function mergeToolConfigScopes(scopes: readonly ToolValidationScope[]): ToolConfigurationPatch {
+    let merged: ToolConfigurationPatch = {};
+    for (const scope of scopes) {
+        merged = mergeToolConfiguration(merged, scope.config);
+    }
+    return merged;
+}
+
+export function getConfiguredToolConfiguration(resource?: vscode.Uri): ResolvedToolConfiguration {
+    return resolveToolConfiguration(mergeToolConfigScopes(getScopedToolConfigPatches(resource)));
+}
+
+export function getRunnablePipelines(filePath: string, trigger: RunMode = 'manual'): RunnablePipeline[] {
+    return collectRunnablePipelines(getConfiguredToolConfiguration(vscode.Uri.file(filePath)), filePath, trigger);
+}
+
+export function getRunnableTools(filePath: string, trigger: RunMode = 'manual'): RunnableTool[] {
+    return getRunnablePipelines(filePath, trigger).flatMap((pipeline) => pipeline.tools);
+}
+
+function matchesToolTarget(filePath: string, target: ToolTargetConfig): boolean {
+    const match = target.match;
+    if (match?.exclude !== undefined && matchesPatterns(filePath, match.exclude)) {
+        return false;
+    }
+    if (match?.languages !== undefined && match.languages.length > 0) {
+        const languageId = getDocumentLanguageId(filePath);
+        if (!matchesLanguageId(match.languages, languageId)) {
+            return false;
+        }
+    }
+    if (match?.files !== undefined && match.files.length > 0) {
+        return matchesPatterns(filePath, match.files);
+    }
+    return true;
+}
+
+function runnableToolFromConfig(
+    config: ResolvedToolConfiguration,
+    target: ToolTargetConfig,
+    pipelineName: RunMode,
+    toolName: string,
+    tool: ToolConfig
+): RunnableTool {
+    return {
+        label: toolName,
+        description: `${target.name} / ${pipelineName}`,
+        detail: `${tool.kind}: ${tool.command} ${tool.args.join(' ')}`,
+        targetName: target.name,
+        pipelineName,
+        toolName,
+        tool,
+        vars: config.vars,
+    };
+}
+
+export function collectRunnablePipelines(
+    config: ResolvedToolConfiguration,
+    filePath: string,
+    trigger: RunMode
+): RunnablePipeline[] {
+    const result: RunnablePipeline[] = [];
+    for (const target of config.targets) {
+        if (!matchesToolTarget(filePath, target)) {
+            continue;
+        }
+        const pipeline = target[trigger] ?? (trigger === 'onSave' ? target.onOpen : undefined);
+        if (pipeline === undefined) {
+            continue;
+        }
+        const tools = pipeline.tools
+            .map((toolName) => {
+                const tool = config.tools[toolName];
+                return tool === undefined || tool.enabled === false
+                    ? undefined
+                    : runnableToolFromConfig(config, target, trigger, toolName, tool);
+            })
+            .filter((tool): tool is RunnableTool => tool !== undefined);
+        if (tools.length === 0) {
+            continue;
+        }
+        result.push({
+            label: `${target.name}: ${trigger}`,
+            description: `${pipeline.strategy}, ${tools.length} tool(s)`,
+            detail: tools.map((tool) => tool.toolName).join(', '),
+            target,
+            pipelineName: trigger,
+            pipeline,
+            tools,
+        });
+    }
+    return result;
+}
+
 function getScopedTargetPatches(resource?: vscode.Uri): TargetValidationScope[] {
     const config =
         resource === undefined
@@ -744,7 +1233,7 @@ export async function validateLintRunnerConfig(resource?: vscode.Uri): Promise<C
         getCommandEnv(),
     ]);
 
-    return validateTargetScopes(getScopedTargetPatches(resource), {
+    return validateToolConfigScopes(getScopedToolConfigPatches(resource), {
         knownLanguageIds,
         env,
     });
@@ -915,11 +1404,56 @@ export async function collectDoctorToolStatuses(
     return statuses;
 }
 
+export async function collectDoctorPipelineToolStatuses(
+    config: ResolvedToolConfiguration,
+    deps?: {
+        checkCommand?: (command: string) => boolean | undefined;
+        detectVersion?: (command: string) => Promise<string | undefined>;
+    }
+): Promise<DoctorToolStatus[]> {
+    const checkCommand = deps?.checkCommand ?? (() => undefined);
+    const detectVersion = deps?.detectVersion ?? (async () => undefined);
+    const tools = new Map<string, Set<string>>();
+
+    for (const target of config.targets) {
+        for (const pipelineName of PIPELINE_NAMES) {
+            const pipeline = target[pipelineName];
+            if (pipeline === undefined) {
+                continue;
+            }
+            for (const toolName of pipeline.tools) {
+                const tool = config.tools[toolName];
+                if (tool === undefined || tool.enabled === false) {
+                    continue;
+                }
+                const usedBy = tools.get(tool.command) ?? new Set<string>();
+                usedBy.add(`${target.name} / ${pipelineName} / ${toolName}`);
+                tools.set(tool.command, usedBy);
+            }
+        }
+    }
+
+    const statuses: DoctorToolStatus[] = [];
+    for (const [tool, usedBySet] of Array.from(tools.entries()).sort(([left], [right]) => left.localeCompare(right))) {
+        const exists = checkCommand(tool);
+        const found: DoctorToolFoundStatus = exists === true ? 'yes' : exists === false ? 'no' : 'unknown';
+        const version = found === 'yes' ? (await detectVersion(tool)) ?? '-' : '-';
+        statuses.push({
+            tool,
+            found,
+            version,
+            usedBy: Array.from(usedBySet).sort((left, right) => left.localeCompare(right)),
+        });
+    }
+
+    return statuses;
+}
+
 export async function getDoctorToolStatuses(resource?: vscode.Uri): Promise<DoctorToolStatus[]> {
     const scopedResource = getDoctorResource(resource);
     const env = await getCommandEnv();
 
-    return await collectDoctorToolStatuses(getDoctorTargets(scopedResource), {
+    return await collectDoctorPipelineToolStatuses(getConfiguredToolConfiguration(scopedResource), {
         checkCommand: (command) => commandExistsForValidation(command, env, process.platform),
         detectVersion: async (command) => {
             if (!isCommandSafelyCheckable(command)) {
@@ -1377,7 +1911,8 @@ export function buildCommandEnv(shellPath?: string): NodeJS.ProcessEnv {
 function mergeCommandEnv(
     baseEnv: NodeJS.ProcessEnv,
     overrides: CommandEnv | undefined,
-    filePath?: string
+    filePath?: string,
+    vars: Record<string, string> = {}
 ): NodeJS.ProcessEnv {
     const env = Object.fromEntries(Object.entries(baseEnv)) as NodeJS.ProcessEnv;
     if (overrides === undefined) {
@@ -1385,7 +1920,7 @@ function mergeCommandEnv(
     }
 
     for (const [key, value] of Object.entries(overrides)) {
-        env[key] = filePath === undefined ? value : expandHome(applyCommandTemplate(value, filePath));
+        env[key] = filePath === undefined ? value : expandHome(applyCommandTemplate(value, filePath, vars));
     }
 
     return env;
@@ -1506,28 +2041,53 @@ function buildCommandTemplateValues(filePath: string): CommandTemplateValues {
     };
 }
 
-export function applyCommandTemplate(value: string, filePath: string): string {
+function resolveTemplateVar(
+    key: string,
+    builtIns: CommandTemplateValues,
+    vars: Record<string, string>,
+    seen: Set<string>
+): string | undefined {
+    if (Object.hasOwn(builtIns, key)) {
+        return builtIns[key as keyof CommandTemplateValues];
+    }
+
+    const value = vars[key];
+    if (value === undefined || seen.has(key)) {
+        return undefined;
+    }
+
+    seen.add(key);
+    return value.replace(/\$\{(\w+)\}/g, (match, nestedKey: string) =>
+        resolveTemplateVar(nestedKey, builtIns, vars, seen) ?? match
+    );
+}
+
+export function applyCommandTemplate(
+    value: string,
+    filePath: string,
+    vars: Record<string, string> = {}
+): string {
     const values = buildCommandTemplateValues(filePath);
     return value.replace(/\$\{(\w+)\}/g, (match, key: string) => {
-        if (Object.hasOwn(values, key)) {
-            return values[key as keyof CommandTemplateValues];
-        }
-
-        return match;
+        return resolveTemplateVar(key, values, vars, new Set()) ?? match;
     });
 }
 
-function buildArgs(args: string[], filePath: string): string[] {
-    return args.map((arg) => expandHome(applyCommandTemplate(arg, filePath)));
+function buildArgs(args: string[], filePath: string, vars: Record<string, string> = {}): string[] {
+    return args.map((arg) => expandHome(applyCommandTemplate(arg, filePath, vars)));
 }
 
-function buildCommandCwd(commandConfig: CommandConfig, filePath: string): string | undefined {
+function buildCommandCwd(
+    commandConfig: CommandConfig,
+    filePath: string,
+    vars: Record<string, string> = {}
+): string | undefined {
     const defaultCwd = resolveWorkingDirectory(filePath);
     if (commandConfig.cwd === undefined) {
         return defaultCwd;
     }
 
-    const cwd = expandHome(applyCommandTemplate(commandConfig.cwd, filePath)).trim();
+    const cwd = expandHome(applyCommandTemplate(commandConfig.cwd, filePath, vars)).trim();
     if (cwd === '') {
         return defaultCwd;
     }
@@ -1630,7 +2190,8 @@ async function runCommand(
     filePath: string,
     output: RunnerOutput,
     shouldContinue: () => boolean = () => true,
-    timeoutMs: number = TIMEOUT_MS
+    timeoutMs: number = TIMEOUT_MS,
+    vars: Record<string, string> = {}
 ): Promise<CommandResult> {
     if (!vscode.workspace.isTrusted) {
         output.appendLine(`[${label}] skipped: workspace is not trusted`);
@@ -1642,10 +2203,10 @@ async function runCommand(
         });
     }
 
-    const command = expandHome(applyCommandTemplate(commandConfig.command, filePath));
-    const args = buildArgs(commandConfig.args, filePath);
-    const cwd = buildCommandCwd(commandConfig, filePath);
-    const env = mergeCommandEnv(await getCommandEnv(), commandConfig.env, filePath);
+    const command = expandHome(applyCommandTemplate(commandConfig.command, filePath, vars));
+    const args = buildArgs(commandConfig.args, filePath, vars);
+    const cwd = buildCommandCwd(commandConfig, filePath, vars);
+    const env = mergeCommandEnv(await getCommandEnv(), commandConfig.env, filePath, vars);
     if (!shouldContinue()) {
         return { code: null, stdout: '', stderr: '', error: 'cancelled' };
     }
@@ -2266,6 +2827,140 @@ export async function runFixers(
         }
 
         return fixersRun;
+    } finally {
+        finishFileRun(filePath, runId);
+    }
+}
+
+async function runRunnableTool(
+    filePath: string,
+    runnable: RunnableTool,
+    output: RunnerOutput,
+    statusBar: vscode.StatusBarItem,
+    diagnostics: vscode.DiagnosticCollection | undefined,
+    shouldContinue: () => boolean
+): Promise<boolean> {
+    const tool = runnable.tool;
+    const statusName = `${runnable.targetName}: ${runnable.toolName}`;
+    startLinterStatus(statusName, statusBar);
+    try {
+        if (
+            tool.kind === 'diagnostic' &&
+            tool.maxFileSize !== undefined &&
+            runnable.pipelineName !== 'manual'
+        ) {
+            const fileStat = await fs.promises.stat(filePath);
+            if (!shouldProcessLinterFile(fileStat.size, tool.maxFileSize)) {
+                output.appendLine(
+                    `[${runnable.toolName}] skipped: file size ${fileStat.size} exceeds maxFileSize ${tool.maxFileSize}`
+                );
+                return true;
+            }
+        }
+
+        const result = await runCommand(
+            runnable.toolName,
+            tool,
+            filePath,
+            output,
+            shouldContinue,
+            tool.timeout ?? TIMEOUT_MS,
+            runnable.vars ?? {}
+        );
+        logCommandResult(runnable.toolName, result, output);
+        if (!isAcceptedExitCode(result, tool.successExitCodes)) {
+            const failureMessage = formatExitCodePolicyFailure(result, tool.successExitCodes);
+            output.appendLine(`[${runnable.toolName}] failed: ${failureMessage}`);
+            reportCommandFailure(output, runnable.toolName, failureMessage);
+            return false;
+        }
+
+        if (tool.kind === 'diagnostic' && tool.parser !== undefined && diagnostics !== undefined) {
+            const parsedDiagnostics = parseRegexOutput(
+                tool.parser.output === 'stdout'
+                    ? result.stdout
+                    : tool.parser.output === 'stderr'
+                        ? result.stderr
+                        : `${result.stdout}\n${result.stderr}`,
+                tool.parser,
+                runnable.toolName
+            );
+            await normalizeDiagnosticRanges(filePath, parsedDiagnostics);
+            const uri = vscode.Uri.file(filePath);
+            const linterMap = getOrCreateLinterMap(uri.toString());
+            linterMap.set(targetLinterKey(runnable.targetName, runnable.toolName), parsedDiagnostics);
+            republishMergedDiagnostics(uri, linterMap, diagnostics);
+        }
+
+        return true;
+    } finally {
+        stopLinterStatus(statusName, statusBar);
+    }
+}
+
+function diagnosticToolsAfterWrite(pipeline: RunnablePipeline, lastWriteIndex: number): RunnableTool[] {
+    const afterWrite = pipeline.tools.slice(lastWriteIndex + 1).filter((tool) => tool.tool.kind === 'diagnostic');
+    if (afterWrite.length > 0) {
+        return [];
+    }
+    return pipeline.tools.filter((tool) => tool.tool.kind === 'diagnostic');
+}
+
+export async function runPipeline(
+    filePath: string,
+    pipeline: RunnablePipeline,
+    output: RunnerOutput,
+    statusBar: vscode.StatusBarItem,
+    diagnostics?: vscode.DiagnosticCollection
+): Promise<number> {
+    const runId = startFileRun(filePath);
+    const shouldContinue = (): boolean => isActiveFileRun(filePath, runId);
+    let successfulTools = 0;
+    let lastSuccessfulWriteIndex = -1;
+
+    try {
+        if (await shouldSkipFile(filePath)) {
+            return 0;
+        }
+
+        if (pipeline.pipeline.strategy === 'parallel') {
+            const results = await Promise.all(
+                pipeline.tools.map(async (tool, index) => {
+                    const success = await runRunnableTool(filePath, tool, output, statusBar, diagnostics, shouldContinue);
+                    return { index, success, kind: tool.tool.kind };
+                })
+            );
+            successfulTools = results.filter((result) => result.success).length;
+            const writeIndexes = results
+                .filter((result) => result.success && result.kind === 'write')
+                .map((result) => result.index);
+            lastSuccessfulWriteIndex = writeIndexes.length === 0 ? -1 : Math.max(...writeIndexes);
+        } else {
+            for (const [index, tool] of pipeline.tools.entries()) {
+                if (!shouldContinue()) {
+                    break;
+                }
+                const success = await runRunnableTool(filePath, tool, output, statusBar, diagnostics, shouldContinue);
+                if (!success) {
+                    break;
+                }
+                successfulTools++;
+                if (tool.tool.kind === 'write') {
+                    lastSuccessfulWriteIndex = index;
+                }
+            }
+        }
+
+        if (lastSuccessfulWriteIndex >= 0 && shouldContinue()) {
+            for (const diagnosticTool of diagnosticToolsAfterWrite(pipeline, lastSuccessfulWriteIndex)) {
+                if (!shouldContinue()) {
+                    break;
+                }
+                await runRunnableTool(filePath, diagnosticTool, output, statusBar, diagnostics, shouldContinue);
+            }
+        }
+
+        return successfulTools;
     } finally {
         finishFileRun(filePath, runId);
     }
