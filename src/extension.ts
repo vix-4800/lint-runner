@@ -3,9 +3,13 @@ import * as vscode from 'vscode';
 import {
     cancelAllFileRuns,
     cancelFileRun,
+    collectRunnablePipelines,
     getRunnableFixers,
     getRunnableLinters,
+    getRunnablePipelines,
+    getRunnableTools,
     isLintRunnerEnabled,
+    runPipeline,
     runFixers,
     runLinters,
     runRunnableLinters,
@@ -19,6 +23,8 @@ import {
     getDoctorToolStatuses,
     type ConfigValidationIssues,
     type DoctorToolStatus,
+    type RunnablePipeline,
+    type RunnableTool,
     type RunnerFailure,
     type RunnerOutput,
     type RunnableFixer,
@@ -592,7 +598,13 @@ export function runOnOpenLintersForVisibleEditors(
     statusBar: vscode.StatusBarItem,
     tabGroups: readonly OnOpenTabGroup[] = vscode.window.tabGroups.all,
     options: CollectVisibleFileNamesOptions = {},
-    onRunLinters: typeof runLinters = runLinters
+    onRunPipelines: (
+        fileName: string,
+        trigger: 'manual' | 'onOpen' | 'onSave',
+        diagnostics: vscode.DiagnosticCollection,
+        output: RunnerOutput,
+        statusBar: vscode.StatusBarItem
+    ) => unknown = runPipelinesForFile
 ): void {
     const diffDocumentUrisByColumn = collectVisibleDiffDocumentUrisByColumn(tabGroups);
     for (const fileName of collectNewVisibleFileNames(
@@ -601,7 +613,7 @@ export function runOnOpenLintersForVisibleEditors(
         diffDocumentUrisByColumn,
         options
     )) {
-        void onRunLinters(fileName, 'onOpen', diagnostics, output, statusBar);
+        void onRunPipelines(fileName, 'onOpen', diagnostics, output, statusBar);
     }
 }
 
@@ -664,7 +676,7 @@ async function selectManualFixers(fileName: string): Promise<readonly RunnableFi
     const selectedItems = await vscode.window.showQuickPick(items, {
         canPickMany: true,
         placeHolder: 'Select fixers to run',
-        title: 'LintRunner: Run Fixers',
+        title: 'LintRunner: Run Tools',
     });
 
     if (selectedItems === undefined || selectedItems.length === 0) {
@@ -695,7 +707,7 @@ export function getActionsStatusBarState(
     return {
         text: '$(wrench)',
         tooltip:
-            `LintRunner: ${linters.length} linter(s), ${fixers.length} fixer(s) for ${vscode.workspace.asRelativePath(editor.document.fileName)}`,
+            `LintRunner: ${linters.length} diagnostic tool(s), ${fixers.length} write tool(s) for ${vscode.workspace.asRelativePath(editor.document.fileName)}`,
     };
 }
 
@@ -723,6 +735,65 @@ function getRunnableLinterLabels(linters: readonly RunnableLinter[]): string[] {
 
 function getRunnableFixerLabels(fixers: readonly RunnableFixer[]): string[] {
     return fixers.map((fixer) => `${fixer.targetName}:fix:${fixer.label}`);
+}
+
+function getRunnablePipelineLabels(pipelines: readonly RunnablePipeline[]): string[] {
+    return uniqueLabels(pipelines.map((pipeline) => pipeline.label));
+}
+
+async function runPipelinesForFile(
+    fileName: string,
+    trigger: 'manual' | 'onOpen' | 'onSave',
+    diagnostics: vscode.DiagnosticCollection,
+    output: RunnerOutput,
+    statusBar: vscode.StatusBarItem,
+    pipelines: readonly RunnablePipeline[] = getRunnablePipelines(fileName, trigger)
+): Promise<number> {
+    let count = 0;
+    for (const pipeline of pipelines) {
+        count += await runPipeline(fileName, pipeline, output, statusBar, diagnostics);
+    }
+    return count;
+}
+
+async function runManualPipelinesForFile(
+    fileName: string,
+    diagnostics: vscode.DiagnosticCollection,
+    output: RunnerOutput,
+    statusBar: vscode.StatusBarItem,
+    pipelines?: readonly RunnablePipeline[]
+): Promise<void> {
+    const selectedPipelines = pipelines ?? getRunnablePipelines(fileName, 'manual');
+    if (selectedPipelines.length === 0) {
+        await vscode.window.showWarningMessage('LintRunner: No matching manual pipeline.');
+        return;
+    }
+
+    const failures: RunnerFailure[] = [];
+    const failureAwareOutput = createFailureAwareOutput(output, failures);
+    await runManualTaskWithNotification(fileName, getRunnablePipelineLabels(selectedPipelines), async () =>
+        await runPipelinesForFile(fileName, 'manual', diagnostics, failureAwareOutput, statusBar, selectedPipelines)
+    );
+    await showManualRunFailureWarning(failures, vscode.window.showWarningMessage);
+}
+
+async function runManualToolForFile(
+    fileName: string,
+    tool: RunnableTool,
+    diagnostics: vscode.DiagnosticCollection,
+    output: RunnerOutput,
+    statusBar: vscode.StatusBarItem
+): Promise<void> {
+    const pipeline: RunnablePipeline = {
+        label: tool.label,
+        description: tool.description,
+        detail: tool.detail,
+        target: { name: tool.targetName },
+        pipelineName: 'manual',
+        pipeline: { strategy: 'sequence', tools: [tool.toolName] },
+        tools: [tool],
+    };
+    await runManualPipelinesForFile(fileName, diagnostics, output, statusBar, [pipeline]);
 }
 
 async function saveDocumentBeforeManualFixers(document: vscode.TextDocument): Promise<boolean> {
@@ -774,6 +845,38 @@ export function createManualCodeActions(
     return actions;
 }
 
+function createManualPipelineCodeActions(
+    documentUri: vscode.Uri,
+    pipelines: readonly RunnablePipeline[],
+    tools: readonly RunnableTool[]
+): vscode.CodeAction[] {
+    const actions: vscode.CodeAction[] = [];
+
+    for (const pipeline of pipelines) {
+        const title = `Run pipeline: ${pipeline.label}`;
+        const action = new vscode.CodeAction(title, manualLinterCodeActionKind);
+        action.command = {
+            title,
+            command: 'lintRunner.runManualPipelineCodeAction',
+            arguments: [documentUri, pipeline],
+        };
+        actions.push(action);
+    }
+
+    for (const tool of tools) {
+        const title = `Run tool: ${tool.label} (${tool.description})`;
+        const action = new vscode.CodeAction(title, manualFixerCodeActionKind);
+        action.command = {
+            title,
+            command: 'lintRunner.runManualToolCodeAction',
+            arguments: [documentUri, tool],
+        };
+        actions.push(action);
+    }
+
+    return actions;
+}
+
 export function createManualCodeLenses(
     documentUri: vscode.Uri,
     linters: readonly RunnableLinter[],
@@ -802,6 +905,35 @@ export function createManualCodeLenses(
                 arguments: [documentUri, fixer],
             })
         );
+    }
+
+    return codeLenses;
+}
+
+function createManualPipelineCodeLenses(
+    documentUri: vscode.Uri,
+    pipelines: readonly RunnablePipeline[],
+    tools: readonly RunnableTool[]
+): vscode.CodeLens[] {
+    const range = new vscode.Range(0, 0, 0, 0);
+    const codeLenses: vscode.CodeLens[] = [];
+
+    for (const pipeline of pipelines) {
+        const title = `Run pipeline: ${pipeline.label}`;
+        codeLenses.push(new vscode.CodeLens(range, {
+            title,
+            command: 'lintRunner.runManualPipelineCodeAction',
+            arguments: [documentUri, pipeline],
+        }));
+    }
+
+    for (const tool of tools) {
+        const title = `Run tool: ${tool.label} (${tool.description})`;
+        codeLenses.push(new vscode.CodeLens(range, {
+            title,
+            command: 'lintRunner.runManualToolCodeAction',
+            arguments: [documentUri, tool],
+        }));
     }
 
     return codeLenses;
@@ -893,76 +1025,70 @@ async function openActionsMenu(
     }
 
     const fileName = editor.document.fileName;
-    const linters = getRunnableLinters(fileName, 'manual');
-    const fixers = getRunnableFixers(fileName, 'manual');
-    if (linters.length === 0 && fixers.length === 0) {
-        vscode.window.showWarningMessage('LintRunner: No matching linter or fix command.');
+    const pipelines = getRunnablePipelines(fileName, 'manual');
+    const tools = getRunnableTools(fileName, 'manual');
+    if (pipelines.length === 0 && tools.length === 0) {
+        vscode.window.showWarningMessage('LintRunner: No matching pipeline or tool.');
         return;
     }
 
     const items: ActionQuickPickItem[] = [];
-    if (linters.length > 0) {
+    if (pipelines.length > 0) {
         items.push({
-            label: '$(play) Run all linters',
-            description: `${linters.length} command(s)`,
+            label: '$(play) Run all pipelines',
+            description: `${pipelines.length} pipeline(s)`,
             action: async () => {
-                await runManualLintersForFile(fileName, diagnostics, output, runningStatusBar);
+                await runManualPipelinesForFile(fileName, diagnostics, output, runningStatusBar, pipelines);
             },
         });
         items.push({
             kind: vscode.QuickPickItemKind.Separator,
-            label: 'Linters',
+            label: 'Pipelines',
         });
         items.push(
-            ...linters.map((linter) => ({
-                label: `$(play) ${linter.label}`,
-                description: linter.description,
-                detail: linter.detail,
+            ...pipelines.map((pipeline) => ({
+                label: `$(play) ${pipeline.label}`,
+                description: pipeline.description,
+                detail: pipeline.detail,
                 action: async () => {
-                    await runManualLintersForFile(fileName, diagnostics, output, runningStatusBar, [linter]);
+                    await runManualPipelinesForFile(fileName, diagnostics, output, runningStatusBar, [pipeline]);
                 },
             }))
         );
     }
 
-    if (fixers.length > 0) {
+    if (tools.length > 0) {
         items.push({
-            label: '$(wrench) Run all fixers',
-            description: `${fixers.length} command(s)`,
+            label: '$(wrench) Run tool',
+            description: `${tools.length} tool(s)`,
             action: async () => {
-                await runManualFixersForEditor(
-                    editor,
-                    diagnostics,
-                    output,
-                    runningStatusBar,
-                    fixers
-                );
+                const selectedTool = await vscode.window.showQuickPick(tools, {
+                    placeHolder: 'Select tool for active file',
+                    title: 'LintRunner: Run Tool',
+                });
+                if (selectedTool !== undefined) {
+                    await runManualToolForFile(fileName, selectedTool, diagnostics, output, runningStatusBar);
+                }
             },
         });
         items.push({
             kind: vscode.QuickPickItemKind.Separator,
-            label: 'Fixers',
+            label: 'Tools',
         });
         items.push(
-            ...fixers.map((fixer) => ({
-                label: `$(wrench) ${fixer.label}`,
-                description: fixer.description,
-                detail: fixer.detail,
+            ...tools.map((tool) => ({
+                label: `$(wrench) ${tool.label}`,
+                description: tool.description,
+                detail: tool.detail,
                 action: async () => {
-                    await runManualFixersForEditor(
-                        editor,
-                        diagnostics,
-                        output,
-                        runningStatusBar,
-                        [fixer]
-                    );
+                    await runManualToolForFile(fileName, tool, diagnostics, output, runningStatusBar);
                 },
             }))
         );
     }
 
     const selectedItem = await vscode.window.showQuickPick(items, {
-        placeHolder: 'Run linter or fixer for active file',
+        placeHolder: 'Run pipeline or tool for active file',
         title: 'LintRunner Actions',
     });
 
@@ -1011,7 +1137,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     output.sync(shouldEnableOutputChannel());
     const runningStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
     runningStatusBar.name = 'LintRunner';
-    runningStatusBar.command = 'lintRunner.stopRunningTools';
+    runningStatusBar.command = 'lintRunner.stop';
     const actionsStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     const codeLensRefreshEmitter = new vscode.EventEmitter<void>();
     actionsStatusBar.name = 'LintRunner Actions';
@@ -1063,10 +1189,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 }
 
                 const fileName = document.fileName;
-                return createManualCodeLenses(
+                return createManualPipelineCodeLenses(
                     document.uri,
-                    getRunnableLinters(fileName, 'manual').filter(isManualCodeActionLinter),
-                    getRunnableFixers(fileName, 'manual').filter(isManualCodeActionFixer)
+                    getRunnablePipelines(fileName, 'manual'),
+                    getRunnableTools(fileName, 'manual')
                 );
             },
         })
@@ -1088,10 +1214,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     }
 
                     const fileName = document.fileName;
-                    return createManualCodeActions(
+                    return createManualPipelineCodeActions(
                         document.uri,
-                        getRunnableLinters(fileName, 'manual').filter(isManualCodeActionLinter),
-                        getRunnableFixers(fileName, 'manual').filter(isManualCodeActionFixer)
+                        getRunnablePipelines(fileName, 'manual'),
+                        getRunnableTools(fileName, 'manual')
                     );
                 },
             },
@@ -1172,9 +1298,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const doRun = async (): Promise<void> => {
                 saveDebounceTimers.delete(doc.fileName);
                 if (!skipFixer) {
-                    await runFixers(doc.fileName, output, runningStatusBar, 'onSave');
+                    await runPipelinesForFile(doc.fileName, 'onSave', diagnostics, output, runningStatusBar);
                 }
-                runLinters(doc.fileName, 'onSave', diagnostics, output, runningStatusBar);
                 updateActionsStatusBar(actionsStatusBar);
             };
 
@@ -1254,14 +1379,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('lintRunner.validateConfig', async () => {
-            configValid = await refreshConfigValidation(true);
-            updateActionsStatusBar(actionsStatusBar);
-            codeLensRefreshEmitter.fire();
-        })
-    );
-
-    context.subscriptions.push(
         vscode.commands.registerCommand('lintRunner.openExamples', async () => {
             await openBundledExamples(context.extensionUri);
         })
@@ -1278,7 +1395,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('lintRunner.run', async () => {
+        vscode.commands.registerCommand('lintRunner.runPipeline', async () => {
             const editor = getActiveFileEditor();
             if (editor === undefined) {
                 vscode.window.showWarningMessage('LintRunner: No active file editor.');
@@ -1288,12 +1405,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 return;
             }
             const fileName = editor.document.fileName;
-            await runManualLintersForFile(fileName, diagnostics, output, runningStatusBar);
+            const pipelines = getRunnablePipelines(fileName, 'manual');
+            if (pipelines.length === 0) {
+                vscode.window.showWarningMessage('LintRunner: No matching manual pipeline.');
+                return;
+            }
+            const selected = pipelines.length === 1
+                ? pipelines[0]
+                : await vscode.window.showQuickPick(pipelines, {
+                    placeHolder: 'Select pipeline for active file',
+                    title: 'LintRunner: Run Pipeline',
+                });
+            if (selected !== undefined) {
+                await runManualPipelinesForFile(fileName, diagnostics, output, runningStatusBar, [selected]);
+            }
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('lintRunner.fix', async () => {
+        vscode.commands.registerCommand('lintRunner.runTool', async () => {
             const editor = getActiveFileEditor();
             if (editor === undefined) {
                 vscode.window.showWarningMessage('LintRunner: No active file editor.');
@@ -1302,39 +1432,85 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (!canRunWorkspaceCommands(true)) {
                 return;
             }
+            const fileName = editor.document.fileName;
+            const tools = getRunnableTools(fileName, 'manual');
+            if (tools.length === 0) {
+                vscode.window.showWarningMessage('LintRunner: No matching manual tool.');
+                return;
+            }
+            const selected = tools.length === 1
+                ? tools[0]
+                : await vscode.window.showQuickPick(tools, {
+                    placeHolder: 'Select tool for active file',
+                    title: 'LintRunner: Run Tool',
+                });
+            if (selected !== undefined) {
+                await runManualToolForFile(fileName, selected, diagnostics, output, runningStatusBar);
+            }
+        })
+    );
 
-            await runManualFixersForEditor(editor, diagnostics, output, runningStatusBar);
+    context.subscriptions.push(
+        vscode.commands.registerCommand('lintRunner.inspectCurrentFile', async () => {
+            const editor = getActiveFileEditor();
+            if (editor === undefined) {
+                vscode.window.showWarningMessage('LintRunner: No active file editor.');
+                return;
+            }
+            const fileName = editor.document.fileName;
+            const pipelines = getRunnablePipelines(fileName, 'manual');
+            const tools = getRunnableTools(fileName, 'manual');
+            const lines = [
+                '# LintRunner Inspect Current File',
+                '',
+                `File: ${fileName}`,
+                '',
+                '## Manual Pipelines',
+                ...(pipelines.length === 0
+                    ? ['- none']
+                    : pipelines.map((pipeline) => `- ${pipeline.label}: ${pipeline.detail}`)),
+                '',
+                '## Manual Tools',
+                ...(tools.length === 0
+                    ? ['- none']
+                    : tools.map((tool) => `- ${tool.label}: ${tool.detail}`)),
+            ];
+            const document = await vscode.workspace.openTextDocument({
+                content: lines.join('\n'),
+                language: 'markdown',
+            });
+            await vscode.window.showTextDocument(document, { preview: true });
         })
     );
 
     context.subscriptions.push(
         vscode.commands.registerCommand(
-            'lintRunner.runManualLinterCodeAction',
-            async (uri: vscode.Uri, linter: RunnableLinter) => {
+            'lintRunner.runManualPipelineCodeAction',
+            async (uri: vscode.Uri, pipeline: RunnablePipeline) => {
                 if (!canRunWorkspaceCommands(true)) {
                     return;
                 }
 
-                await runManualLintersForFile(uri.fsPath, diagnostics, output, runningStatusBar, [linter]);
+                await runManualPipelinesForFile(uri.fsPath, diagnostics, output, runningStatusBar, [pipeline]);
             }
         )
     );
 
     context.subscriptions.push(
         vscode.commands.registerCommand(
-            'lintRunner.runManualFixerCodeAction',
-            async (uri: vscode.Uri, fixer: RunnableFixer) => {
+            'lintRunner.runManualToolCodeAction',
+            async (uri: vscode.Uri, tool: RunnableTool) => {
                 if (!canRunWorkspaceCommands(true)) {
                     return;
                 }
 
-                await runManualFixersForEditor(uri, diagnostics, output, runningStatusBar, [fixer]);
+                await runManualToolForFile(uri.fsPath, tool, diagnostics, output, runningStatusBar);
             }
         )
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('lintRunner.stopRunningTools', () => {
+        vscode.commands.registerCommand('lintRunner.stop', () => {
             cancelAllFileRuns();
         })
     );
