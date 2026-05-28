@@ -358,7 +358,7 @@ suite('Extension Test Suite', () => {
             } as Pick<vscode.TextDocument, 'fileName' | 'isUntitled' | 'uri'>,
         } as Pick<vscode.TextEditor, 'document'>), {
             text: '$(wrench)',
-            tooltip: `LintRunner: 0 linter(s), 0 fixer(s) for ${vscode.workspace.asRelativePath(fileUri.fsPath)}`,
+            tooltip: `LintRunner: 0 diagnostic tool(s), 0 write tool(s) for ${vscode.workspace.asRelativePath(fileUri.fsPath)}`,
         });
     });
 
@@ -1140,6 +1140,7 @@ suite('Extension Test Suite', () => {
 
         const config = vscode.workspace.getConfiguration('lintRunner');
         const previousTargets = config.inspect<unknown[]>('targets')?.globalValue;
+        const previousTools = config.inspect<unknown>('tools')?.globalValue;
         const document = await vscode.workspace.openTextDocument(filePath);
         await vscode.window.showTextDocument(document);
         const uri = document.uri;
@@ -1150,32 +1151,52 @@ suite('Extension Test Suite', () => {
             await vscode.commands.executeCommand('lintRunner.clearDiagnostics');
 
             await config.update(
+                'tools',
+                {
+                    'shared-tool': {
+                        kind: 'diagnostic',
+                        command: process.execPath,
+                        args: [scriptPath, 'backend issue'],
+                        parser: {
+                            pattern: '(?<line>\\d+):(?<message>.+)',
+                        },
+                    },
+                },
+                vscode.ConfigurationTarget.Global
+            );
+
+            await config.update(
                 'targets',
                 [
                     {
                         name: 'backend',
-                        languages: ['typescript'],
-                        linters: [
-                            {
-                                name: 'shared-linter',
-                                command: process.execPath,
-                                args: [scriptPath, 'backend issue'],
-                                parser: {
-                                    pattern: '(?<line>\\d+):(?<message>.+)',
-                                },
-                                run: 'manual',
-                            },
-                        ],
+                        match: { languages: ['typescript'] },
+                        manual: { strategy: 'sequence', tools: ['shared-tool'] },
                     },
                 ],
                 vscode.ConfigurationTarget.Global
             );
 
             await waitForCondition(() => vscode.languages.getDiagnostics(uri).length === 0);
-            await vscode.commands.executeCommand('lintRunner.run');
+            await vscode.commands.executeCommand('lintRunner.runPipeline');
             assert.deepStrictEqual(
                 vscode.languages.getDiagnostics(uri).map((diagnostic) => diagnostic.message),
                 ['backend issue']
+            );
+
+            await config.update(
+                'tools',
+                {
+                    'shared-tool': {
+                        kind: 'diagnostic',
+                        command: process.execPath,
+                        args: [scriptPath, 'frontend issue'],
+                        parser: {
+                            pattern: '(?<line>\\d+):(?<message>.+)',
+                        },
+                    },
+                },
+                vscode.ConfigurationTarget.Global
             );
 
             await config.update(
@@ -1183,25 +1204,15 @@ suite('Extension Test Suite', () => {
                 [
                     {
                         name: 'frontend',
-                        languages: ['typescript'],
-                        linters: [
-                            {
-                                name: 'shared-linter',
-                                command: process.execPath,
-                                args: [scriptPath, 'frontend issue'],
-                                parser: {
-                                    pattern: '(?<line>\\d+):(?<message>.+)',
-                                },
-                                run: 'manual',
-                            },
-                        ],
+                        match: { languages: ['typescript'] },
+                        manual: { strategy: 'sequence', tools: ['shared-tool'] },
                     },
                 ],
                 vscode.ConfigurationTarget.Global
             );
 
             await waitForCondition(() => vscode.languages.getDiagnostics(uri).length === 0);
-            await vscode.commands.executeCommand('lintRunner.run');
+            await vscode.commands.executeCommand('lintRunner.runPipeline');
             assert.deepStrictEqual(
                 vscode.languages.getDiagnostics(uri).map((diagnostic) => diagnostic.message),
                 ['frontend issue']
@@ -1211,6 +1222,7 @@ suite('Extension Test Suite', () => {
             clearDiagnosticsCache();
             await vscode.commands.executeCommand('lintRunner.clearDiagnostics');
             await config.update('targets', previousTargets, vscode.ConfigurationTarget.Global);
+            await config.update('tools', previousTools, vscode.ConfigurationTarget.Global);
             await fs.rm(tmpDir, { recursive: true, force: true });
         }
     });

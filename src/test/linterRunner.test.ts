@@ -9,9 +9,11 @@ import {
     clearAllFileLinterDiagnostics,
     clearDiagnosticsCache,
     collectDoctorToolStatuses,
+    runPipeline,
     runFixers,
     runLinters,
     runRunnableLinters,
+    type RunnablePipeline,
     type RunnableFixer,
     type ResolvedTargetConfig,
     type RunnableLinter,
@@ -45,6 +47,119 @@ async function assertSamePath(actualPath: string, expectedPath: string): Promise
 }
 
 suite('Linter Runner Test Suite', () => {
+    test('runPipeline sequence stops after a failed tool', async () => {
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-pipeline-'));
+        const markerPath = path.join(tmpDir, 'should-not-exist');
+        const filePath = path.join(tmpDir, 'file.js');
+        await fs.writeFile(filePath, 'const a = 1;');
+        const outputLines: string[] = [];
+        const pipeline: RunnablePipeline = {
+            label: 'JS: manual',
+            description: 'sequence',
+            detail: 'fail, later',
+            target: { name: 'JS', match: { files: ['*.js'] } },
+            pipelineName: 'manual',
+            pipeline: { strategy: 'sequence', tools: ['fail', 'later'] },
+            tools: [
+                {
+                    label: 'fail',
+                    description: 'JS / manual',
+                    detail: 'write',
+                    targetName: 'JS',
+                    pipelineName: 'manual',
+                    toolName: 'fail',
+                    tool: {
+                        kind: 'write',
+                        command: process.execPath,
+                        args: ['-e', 'process.exit(7)'],
+                        successExitCodes: [0],
+                    },
+                },
+                {
+                    label: 'later',
+                    description: 'JS / manual',
+                    detail: 'write',
+                    targetName: 'JS',
+                    pipelineName: 'manual',
+                    toolName: 'later',
+                    tool: {
+                        kind: 'write',
+                        command: process.execPath,
+                        args: ['-e', `require('fs').writeFileSync(${JSON.stringify(markerPath)}, 'ran')`],
+                    },
+                },
+            ],
+        };
+
+        const statusBar = { text: '', show() { /* test stub */ }, hide() { /* test stub */ } } as vscode.StatusBarItem;
+        const runCount = await runPipeline(
+            filePath,
+            pipeline,
+            { appendLine: (line: string) => outputLines.push(line) },
+            statusBar
+        );
+
+        assert.strictEqual(runCount, 0);
+        await assert.rejects(fs.access(markerPath));
+        assert.match(outputLines.join('\n'), /exit 7 is not in successExitCodes/);
+    });
+
+    test('runPipeline parses diagnostic tool output', async () => {
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-diagnostic-'));
+        const filePath = path.join(tmpDir, 'file.js');
+        await fs.writeFile(filePath, 'const a = 1;');
+        const diagnostics = {
+            entries: new Map<string, vscode.Diagnostic[]>(),
+            set(uri: vscode.Uri, values: vscode.Diagnostic[]) {
+                this.entries.set(uri.toString(), values);
+            },
+            delete(uri: vscode.Uri) {
+                this.entries.delete(uri.toString());
+            },
+        };
+        const pipeline: RunnablePipeline = {
+            label: 'JS: manual',
+            description: 'sequence',
+            detail: 'eslint',
+            target: { name: 'JS' },
+            pipelineName: 'manual',
+            pipeline: { strategy: 'sequence', tools: ['eslint'] },
+            tools: [
+                {
+                    label: 'eslint',
+                    description: 'JS / manual',
+                    detail: 'diagnostic',
+                    targetName: 'JS',
+                    pipelineName: 'manual',
+                    toolName: 'eslint',
+                    tool: {
+                        kind: 'diagnostic',
+                        command: process.execPath,
+                        args: ['-e', 'console.log("2:3:error:Bad rule-id")'],
+                        parser: {
+                            pattern: '(?<line>\\d+):(?<col>\\d+):(?<severity>\\w+):(?<message>.+?) (?<code>\\S+)',
+                        },
+                    },
+                },
+            ],
+        };
+
+        const statusBar = { text: '', show() { /* test stub */ }, hide() { /* test stub */ } } as vscode.StatusBarItem;
+        const runCount = await runPipeline(
+            filePath,
+            pipeline,
+            { appendLine() { /* test stub */ } },
+            statusBar,
+            diagnostics as unknown as vscode.DiagnosticCollection
+        );
+
+        const published = diagnostics.entries.get(vscode.Uri.file(filePath).toString()) ?? [];
+        assert.strictEqual(runCount, 1);
+        assert.strictEqual(published.length, 1);
+        assert.strictEqual(published[0]?.source, 'eslint');
+        assert.strictEqual(published[0]?.code, 'rule-id');
+    });
+
     test('collectDoctorToolStatuses groups tools by target and resolves found/version state', async () => {
         const statuses = await collectDoctorToolStatuses(
             [

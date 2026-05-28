@@ -17,10 +17,15 @@ import {
     shouldProcessLinterFile,
     shouldRunLinter,
     validateTargetScopes,
+    validateToolConfigScopes,
+    mergeToolConfiguration,
+    resolveToolConfiguration,
+    collectRunnablePipelines,
     type TargetPatch,
     type LinterConfig,
     type RegexParserConfig,
     type TargetConfig,
+    type ToolConfigurationPatch,
 } from '../linterRunner.js';
 
 const TEST_REGEX_PARSER: RegexParserConfig = {
@@ -684,6 +689,140 @@ suite('Linter Runner', () => {
             0,
             'file not open (no languageId) → should not match even if filePatterns matches'
         );
+    });
+});
+
+suite('Tool configuration', () => {
+    test('merges vars tools and targets by key or name across scopes', () => {
+        const base: ToolConfigurationPatch = {
+            vars: {
+                composerBin: '${workspaceFolder}/vendor/bin',
+                phpBin: '/usr/bin',
+            },
+            tools: {
+                phpstan: {
+                    kind: 'diagnostic',
+                    command: '${composerBin}/phpstan',
+                    args: ['analyse', '${file}'],
+                    parser: { pattern: '(?<line>\\d+):(?<message>.+)' },
+                },
+            },
+            targets: [
+                {
+                    name: 'PHP',
+                    match: { languages: ['php'], files: ['**/*.php'] },
+                    manual: { strategy: 'sequence', tools: ['phpstan'] },
+                },
+            ],
+        };
+
+        const result = mergeToolConfiguration(base, {
+            vars: { phpBin: '/opt/php/bin' },
+            tools: {
+                phpstan: {
+                    args: ['analyse', '--memory-limit=1G', '${file}'],
+                    successExitCodes: [0, 1],
+                },
+            },
+            targets: [
+                {
+                    name: 'PHP',
+                    onSave: { strategy: 'parallel', tools: ['phpstan'] },
+                },
+            ],
+        });
+
+        assert.deepStrictEqual(result.vars, {
+            composerBin: '${workspaceFolder}/vendor/bin',
+            phpBin: '/opt/php/bin',
+        });
+        assert.deepStrictEqual(result.tools?.phpstan?.args, ['analyse', '--memory-limit=1G', '${file}']);
+        assert.deepStrictEqual(result.tools?.phpstan?.successExitCodes, [0, 1]);
+        assert.deepStrictEqual(result.targets?.[0]?.manual, { strategy: 'sequence', tools: ['phpstan'] });
+        assert.deepStrictEqual(result.targets?.[0]?.onSave, { strategy: 'parallel', tools: ['phpstan'] });
+    });
+
+    test('validates new tool config and rejects old config keys and array pipeline shorthand', () => {
+        const issues = validateToolConfigScopes(
+            [
+                {
+                    label: 'Workspace settings',
+                    config: {
+                        vars: {
+                            a: '${b}',
+                            b: '${a}',
+                        },
+                        tools: {
+                            eslint: {
+                                kind: 'diagnostic',
+                                command: 'eslint',
+                                args: ['${file}'],
+                            },
+                            prettier: {
+                                kind: 'write',
+                                command: 'prettier',
+                                args: ['--write', '${file}'],
+                                parser: { pattern: '(?<line>\\d+):(?<message>.+)' },
+                            },
+                        },
+                        targets: [
+                            {
+                                name: 'JS',
+                                languages: ['javascript'],
+                                linters: [],
+                                match: { languages: ['javascript'], files: ['**/*.js'] },
+                                manual: ['prettier', 'missing-tool'] as unknown as never,
+                            },
+                        ],
+                    },
+                },
+            ],
+            {
+                knownLanguageIds: ['javascript'],
+                env: { PATH: process.env.PATH ?? '' },
+                platform: process.platform,
+            }
+        );
+
+        assert.match(issues.errors.join('\n'), /var 'a' contains a circular reference/);
+        assert.match(issues.errors.join('\n'), /tool 'eslint' parser is missing pattern/);
+        assert.match(issues.errors.join('\n'), /tool 'prettier' with kind 'write' must not define parser/);
+        assert.match(issues.errors.join('\n'), /target 'JS' contains deprecated key 'linters'/);
+        assert.match(issues.errors.join('\n'), /target 'JS' contains deprecated key 'languages'/);
+        assert.match(issues.errors.join('\n'), /target 'JS' pipeline 'manual' must be an object/);
+    });
+
+    test('collects runnable pipelines using target match languages files and exclude', async () => {
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        const phpFilePath = path.join(workspaceRoot, 'lint-test', 'test.php');
+        const vendorFilePath = path.join(workspaceRoot, 'lint-test', 'vendor', 'Package.php');
+        const jsFilePath = path.join(workspaceRoot, 'lint-test', 'test.js');
+        const phpDocument = await vscode.workspace.openTextDocument(vscode.Uri.file(phpFilePath));
+        const jsDocument = await vscode.workspace.openTextDocument(vscode.Uri.file(jsFilePath));
+        assert.strictEqual(phpDocument.fileName, phpFilePath);
+        assert.strictEqual(jsDocument.languageId, 'javascript');
+
+        const config = resolveToolConfiguration({
+            tools: {
+                phpstan: {
+                    kind: 'diagnostic',
+                    command: 'phpstan',
+                    args: ['analyse', '${file}'],
+                    parser: { pattern: '(?<line>\\d+):(?<message>.+)' },
+                },
+            },
+            targets: [
+                {
+                    name: 'PHP',
+                    match: { languages: ['php'], files: ['**/*.php'], exclude: ['**/vendor/**'] },
+                    manual: { strategy: 'sequence', tools: ['phpstan'] },
+                },
+            ],
+        });
+
+        assert.strictEqual(collectRunnablePipelines(config, phpFilePath, 'manual').length, 1);
+        assert.strictEqual(collectRunnablePipelines(config, vendorFilePath, 'manual').length, 0);
+        assert.strictEqual(collectRunnablePipelines(config, jsFilePath, 'manual').length, 0);
     });
 });
 
