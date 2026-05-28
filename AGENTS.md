@@ -22,7 +22,14 @@ Guidance for coding agents working in this repository.
 - Lint: `npm run lint`
 - Test: `npm test`
 
-Run `npm run lint` and `npm run compile` after changes. Run `npm test` when behavior changes.
+Run `npm run lint` and `npm run compile` after changes.
+
+## Workflow
+
+- Work in TDD only: write or update test first, then code, then verify.
+- All tests must pass before task is done.
+- Local test runs by agent must be unit-only. Integration part may fail because of `vscode` environment.
+- If full `npm test` results are needed, ask user and let user run or provide output separately.
 
 ## Architecture
 
@@ -72,7 +79,8 @@ Run `npm run lint` and `npm run compile` after changes. Run `npm test` when beha
 
 - Code compiles with `npm run compile`.
 - Lint passes with `npm run lint`.
-- Relevant tests pass with `npm test` when behavior was changed.
+- Relevant unit tests pass when behavior was changed.
+- Full test suite status is confirmed separately with user when needed.
 - No regressions in:
 - parser selection and parsing;
 - run mode routing (`manual`, `onSave`, `onOpen`);
