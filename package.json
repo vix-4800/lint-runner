@@ -1,14 +1,14 @@
 {
   "name": "lint-runner",
   "displayName": "LintRunner",
-  "description": "Run any CLI linter or formatter and publish results as VS Code diagnostics.",
+  "description": "Run CLI tools as pipelines and publish diagnostics from parsed output.",
   "license": "MIT",
   "icon": "icon.png",
   "galleryBanner": {
     "color": "#1e1e1e",
     "theme": "dark"
   },
-  "version": "0.3.0",
+  "version": "0.4.0",
   "qna": false,
   "preview": true,
   "pricing": "Free",
@@ -67,50 +67,44 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "LintRunner loads in untrusted workspaces, but configured commands are disabled until the workspace is trusted."
+      "description": "LintRunner loads in untrusted workspaces, but configured tools are disabled until the workspace is trusted."
     },
     "virtualWorkspaces": {
       "supported": false,
-      "description": "LintRunner needs filesystem access and trusted workspace commands to run external linters and fixers."
+      "description": "LintRunner needs filesystem access and trusted workspace commands to run external tools."
     }
   },
   "contributes": {
     "commands": [
       {
-        "command": "lintRunner.run",
-        "title": "Run Linters",
+        "command": "lintRunner.runPipeline",
+        "title": "Run Pipeline",
         "category": "LintRunner",
         "icon": "$(play)"
       },
       {
-        "command": "lintRunner.fix",
-        "title": "Run Fixers",
+        "command": "lintRunner.runTool",
+        "title": "Run Tool",
         "category": "LintRunner",
         "icon": "$(tools)"
+      },
+      {
+        "command": "lintRunner.inspectCurrentFile",
+        "title": "Inspect Current File",
+        "category": "LintRunner",
+        "icon": "$(inspect)"
+      },
+      {
+        "command": "lintRunner.stop",
+        "title": "Stop",
+        "category": "LintRunner",
+        "icon": "$(debug-stop)"
       },
       {
         "command": "lintRunner.clearDiagnostics",
         "title": "Clear Diagnostics",
         "category": "LintRunner",
         "icon": "$(clear-all)"
-      },
-      {
-        "command": "lintRunner.actions",
-        "title": "Open Actions Menu",
-        "category": "LintRunner",
-        "icon": "$(wrench)"
-      },
-      {
-        "command": "lintRunner.stopRunningTools",
-        "title": "Stop Running Tools",
-        "category": "LintRunner",
-        "icon": "$(debug-stop)"
-      },
-      {
-        "command": "lintRunner.validateConfig",
-        "title": "Validate Config",
-        "category": "LintRunner",
-        "icon": "$(check)"
       },
       {
         "command": "lintRunner.doctor",
@@ -138,7 +132,7 @@
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "description": "Delay in milliseconds before running linters and fixers after a file is saved. Useful when auto-save is enabled with a short interval. Set to 0 to disable debouncing.",
+          "description": "Delay in milliseconds before running pipelines after a file is saved. Useful when auto-save is enabled with a short interval. Set to 0 to disable debouncing.",
           "order": 2
         },
         "lintRunner.enableLogging": {
@@ -151,21 +145,21 @@
           "type": "boolean",
           "default": false,
           "scope": "resource",
-          "description": "Show one source code action per manual linter and manual fixer for matching files. Linters/fixers that already run on open or save are not listed.",
+          "description": "Show source code actions for matching manual pipelines and tools.",
           "order": 4
         },
         "lintRunner.enableCodeLens": {
           "type": "boolean",
           "default": false,
           "scope": "resource",
-          "description": "Show one CodeLens per manual linter and manual fixer at the top of matching files. Linters/fixers that already run on open or save are not listed.",
+          "description": "Show top-of-file CodeLens entries for matching manual pipelines and tools.",
           "order": 5
         },
         "lintRunner.showManualRunNotifications": {
           "type": "boolean",
           "default": true,
           "scope": "resource",
-          "description": "Show a cancellable notification for manual linter and fixer runs. Automatic runs on open or save never show this notification.",
+          "description": "Show a cancellable notification for manual pipeline and tool runs. Automatic runs on open or save never show this notification.",
           "order": 6
         },
         "lintRunner.ignorePatterns": {
@@ -187,7 +181,7 @@
           "type": "array",
           "default": [],
           "scope": "resource",
-          "markdownDescription": "Target-first configurations merged by `name` across user, workspace, and folder settings. Folder-level entries can override only selected target, linter, or fixer fields while inheriting the rest from higher scopes. New targets still need `languages`; partial entries are only valid when they match an existing target name from a higher scope. Use `languages: [\"*\"]` to match any detected VS Code language ID.",
+          "markdownDescription": "Targets merged by `name` across user, workspace, and folder settings. Each target defines file matching plus explicit `manual`, `onSave`, and/or `onOpen` pipelines.",
           "items": {
             "type": "object",
             "required": [
@@ -196,297 +190,100 @@
             "additionalProperties": false,
             "properties": {
               "name": {
-                "type": "string",
-                "description": "Target display name shown in LintRunner output."
+                "type": "string"
               },
-              "filePatterns": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "Glob patterns to further narrow which files this target applies to. Optional — the file must already match `languages`. Both conditions must be satisfied."
+              "match": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "languages": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "VS Code language ids. Use * to match any opened language."
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Glob patterns matched against file name, workspace-relative path, and full path."
+                  },
+                  "exclude": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Glob patterns that exclude matched files."
+                  }
+                }
               },
-              "languages": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "VS Code language identifiers this target applies to (e.g. `[\"php\", \"javascript\"]`). Required when defining a new target. The file's language ID must match. Use `[\"*\"]` to match any detected language ID, and `filePatterns` for additional narrowing."
-              },
-              "run": {
-                "type": "string",
-                "default": "onSave",
-                "enum": [
-                  "onSave",
-                  "onOpen",
-                  "manual"
+              "manual": {
+                "type": "object",
+                "required": [
+                  "strategy",
+                  "tools"
                 ],
-                "description": "Default run mode for linters in this target. 'onOpen' runs when a file opens and again on save."
-              },
-              "cwd": {
-                "type": "string",
-                "description": "Default working directory for this target's commands. Supports ~ and command variables."
-              },
-              "preCommands": {
-                "type": "array",
-                "default": [],
-                "markdownDescription": "Commands to run once before this target's linters. They run sequentially; a non-zero exit code skips target linters.",
-                "items": {
-                  "type": "object",
-                  "required": [
-                    "command",
-                    "args"
-                  ],
-                  "additionalProperties": false,
-                  "properties": {
-                    "name": {
-                      "type": "string",
-                      "description": "Optional display name shown in the LintRunner output."
-                    },
-                    "command": {
-                      "type": "string",
-                      "description": "Executable to invoke before target linters. Must be on PATH or an absolute path. Supports ~ and command variables."
-                    },
-                    "cwd": {
-                      "type": "string",
-                      "description": "Working directory for the pre-command. Defaults to the target `cwd` or the file's workspace folder. Supports ~ and command variables."
-                    },
-                    "env": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "string"
-                      },
-                      "description": "Environment variables for the pre-command. They are merged into the spawned process environment and support ~ and command variables in values."
-                    },
-                    "args": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Arguments passed to the pre-command. Supports ~ and command variables."
+                "additionalProperties": false,
+                "properties": {
+                  "strategy": {
+                    "type": "string",
+                    "enum": [
+                      "sequence",
+                      "parallel"
+                    ]
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
                     }
                   }
                 }
               },
-              "linters": {
-                "type": "array",
-                "default": [],
-                "description": "Linter commands to run for matching files. Linter names must be unique within a target and are used as merge identifiers across scopes.",
-                "items": {
-                  "type": "object",
-                  "required": [
-                    "name"
-                  ],
-                  "additionalProperties": false,
-                  "properties": {
-                    "name": {
-                      "type": "string",
-                      "description": "Display name shown in the Problems panel source column."
-                    },
-                    "enabled": {
-                      "type": "boolean",
-                      "default": true,
-                      "description": "Whether this linter is enabled."
-                    },
-                    "command": {
-                      "type": "string",
-                      "description": "Executable to invoke. Must be on PATH or an absolute path. Supports ~ and command variables. Required when defining a new linter."
-                    },
-                    "cwd": {
-                      "type": "string",
-                      "description": "Working directory for this linter. Defaults to the target `cwd` or the file's workspace folder. Supports ~ and command variables."
-                    },
-                    "env": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "string"
-                      },
-                      "description": "Environment variables for this linter. They are merged into the spawned process environment and support ~ and command variables in values."
-                    },
-                    "args": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Arguments passed to the command. Supports ~ and command variables. Required when defining a new linter."
-                    },
-                    "preCommands": {
-                      "type": "array",
-                      "default": [],
-                      "markdownDescription": "Commands to run before this linter. They run sequentially; a non-zero exit code skips the linter.",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "command",
-                          "args"
-                        ],
-                        "additionalProperties": false,
-                        "properties": {
-                          "name": {
-                            "type": "string",
-                            "description": "Optional display name shown in the LintRunner output."
-                          },
-                          "command": {
-                            "type": "string",
-                            "description": "Executable to invoke before this linter. Must be on PATH or an absolute path. Supports ~ and command variables."
-                          },
-                          "cwd": {
-                            "type": "string",
-                            "description": "Working directory for the pre-command. Defaults to the linter `cwd`, target `cwd`, or the file's workspace folder. Supports ~ and command variables."
-                          },
-                          "env": {
-                            "type": "object",
-                            "additionalProperties": {
-                              "type": "string"
-                            },
-                            "description": "Environment variables for the pre-command. They are merged into the spawned process environment and support ~ and command variables in values."
-                          },
-                          "args": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "description": "Arguments passed to the pre-command. Supports ~ and command variables."
-                          }
-                        }
-                      }
-                    },
-                    "parser": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "description": "Regex parser: extract diagnostics using named capture groups in the pattern. Required when defining a new linter.",
-                      "properties": {
-                        "pattern": {
-                          "type": "string",
-                          "description": "JavaScript regular expression. Named capture groups: `line` and `message` are required; `col`, `endLine`, `endCol`, `severity` (error/warning/info), and `code` are optional."
-                        },
-                        "flags": {
-                          "type": "string",
-                          "default": "g",
-                          "description": "JavaScript regex flags (e.g. \"gm\"). The 'g' flag is added automatically."
-                        },
-                        "output": {
-                          "type": "string",
-                          "enum": [
-                            "stdout",
-                            "stderr",
-                            "both"
-                          ],
-                          "default": "both",
-                          "description": "Which output stream(s) to parse. Defaults to 'both'."
-                        },
-                        "defaultSeverity": {
-                          "type": "string",
-                          "enum": [
-                            "error",
-                            "warning",
-                            "info",
-                            "information"
-                          ],
-                          "default": "warning",
-                          "description": "Severity to use when the regex pattern does not capture a severity group."
-                        },
-                        "messageFormat": {
-                          "type": "string",
-                          "enum": [
-                            "plain",
-                            "json"
-                          ],
-                          "default": "plain",
-                          "description": "How to decode the captured message group. Use 'json' when matching inside JSON string values."
-                        }
-                      }
-                    },
-                    "run": {
-                      "type": "string",
-                      "enum": [
-                        "onSave",
-                        "onOpen",
-                        "manual"
-                      ],
-                      "description": "Override target run mode for this linter. 'onOpen' runs when a file opens and again on save."
-                    },
-                    "timeout": {
-                      "type": "number",
-                      "default": 30000,
-                      "minimum": 1,
-                      "description": "Timeout in milliseconds for this linter. Overrides the default 30000ms timeout. The linter process is killed if it does not finish within this time."
-                    },
-                    "successExitCodes": {
-                      "type": "array",
-                      "items": {
-                        "type": "integer"
-                      },
-                      "description": "Optional exit codes to treat as successful for this linter. When omitted, diagnostics are still parsed for any process exit code, but execution failures such as spawn errors, timeouts, cancellations, or missing exit codes still fail the run."
-                    },
-                    "maxFileSize": {
-                      "type": "number",
-                      "minimum": 1,
-                      "description": "Maximum file size in bytes that this linter will process. Files larger than this limit are skipped. If omitted, there is no size limit."
+              "onSave": {
+                "type": "object",
+                "required": [
+                  "strategy",
+                  "tools"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "strategy": {
+                    "type": "string",
+                    "enum": [
+                      "sequence",
+                      "parallel"
+                    ]
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
                     }
                   }
                 }
               },
-              "fixers": {
-                "type": "array",
-                "default": [],
-                "markdownDescription": "Commands to run when `LintRunner: Run Fixers` is invoked for files matching this target. Named fixers are merged by `name` across scopes, so use unique names for fixers you want to override from folder settings. Set `run` to `onSave` to also run on save.",
-                "items": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "name": {
-                      "type": "string",
-                      "description": "Optional display name shown in the LintRunner output. When set, it is also used as the fixer identifier for merging across scopes; fixers without a name are always treated as separate entries."
-                    },
-                    "enabled": {
-                      "type": "boolean",
-                      "default": true,
-                      "description": "Whether this fixer is enabled."
-                    },
-                    "command": {
-                      "type": "string",
-                      "description": "Executable to invoke for auto-fixing. Must be on PATH or an absolute path. Supports ~ and command variables. Required when defining a new fixer."
-                    },
-                    "cwd": {
-                      "type": "string",
-                      "description": "Working directory for this fixer. Defaults to the target `cwd` or the file's workspace folder. Supports ~ and command variables."
-                    },
-                    "env": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "string"
-                      },
-                      "description": "Environment variables for this fixer. They are merged into the spawned process environment and support ~ and command variables in values."
-                    },
-                    "args": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Arguments passed to the fix command. Supports ~ and command variables. Required when defining a new fixer."
-                    },
-                    "run": {
-                      "type": "string",
-                      "default": "manual",
-                      "enum": [
-                        "manual",
-                        "onSave"
-                      ],
-                      "description": "'manual' runs only via the command; 'onSave' also runs when a matching file is saved."
-                    },
-                    "timeout": {
-                      "type": "number",
-                      "default": 30000,
-                      "minimum": 1,
-                      "description": "Timeout in milliseconds for this fixer. Overrides the default 30000ms timeout. The fixer process is killed if it does not finish within this time."
-                    },
-                    "successExitCodes": {
-                      "type": "array",
-                      "items": {
-                        "type": "integer"
-                      },
-                      "description": "Optional exit codes to treat as successful for this fixer. When set, any other exit code stops the remaining fixer pipeline for the file."
+              "onOpen": {
+                "type": "object",
+                "required": [
+                  "strategy",
+                  "tools"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "strategy": {
+                    "type": "string",
+                    "enum": [
+                      "sequence",
+                      "parallel"
+                    ]
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
                     }
                   }
                 }
@@ -494,6 +291,128 @@
             }
           },
           "order": 100
+        },
+        "lintRunner.vars": {
+          "type": "object",
+          "default": {},
+          "scope": "resource",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Named variables available to tool command, cwd, args, and env templates. Values can reference built-in variables and other lintRunner.vars values.",
+          "order": 90
+        },
+        "lintRunner.tools": {
+          "type": "object",
+          "default": {},
+          "scope": "resource",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "kind",
+              "command",
+              "args"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "diagnostic",
+                  "write"
+                ],
+                "description": "Tool behavior. diagnostic parses output into Problems; write can modify files."
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": true
+              },
+              "command": {
+                "type": "string",
+                "description": "Executable to invoke. Supports ~, built-in variables, and lintRunner.vars."
+              },
+              "cwd": {
+                "type": "string",
+                "default": "${workspaceFolder}",
+                "description": "Working directory. Supports ~, built-in variables, and lintRunner.vars."
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Environment variables for the process. Values support templates."
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Command arguments. Supports templates."
+              },
+              "parser": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Regex parser config. Required for diagnostic tools; invalid for write tools.",
+                "properties": {
+                  "pattern": {
+                    "type": "string"
+                  },
+                  "flags": {
+                    "type": "string",
+                    "default": "g"
+                  },
+                  "output": {
+                    "type": "string",
+                    "enum": [
+                      "stdout",
+                      "stderr",
+                      "both"
+                    ],
+                    "default": "both"
+                  },
+                  "defaultSeverity": {
+                    "type": "string",
+                    "enum": [
+                      "error",
+                      "warning",
+                      "info",
+                      "information"
+                    ],
+                    "default": "warning"
+                  },
+                  "messageFormat": {
+                    "type": "string",
+                    "enum": [
+                      "plain",
+                      "json"
+                    ],
+                    "default": "plain"
+                  }
+                }
+              },
+              "timeout": {
+                "type": "number",
+                "default": 30000,
+                "minimum": 1
+              },
+              "successExitCodes": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                },
+                "default": [
+                  0
+                ]
+              },
+              "maxFileSize": {
+                "type": "number",
+                "minimum": 1
+              }
+            }
+          },
+          "description": "Reusable tool registry keyed by tool id.",
+          "order": 95
         }
       }
     },
@@ -501,7 +420,7 @@
       {
         "id": "lintRunner.gettingStarted",
         "title": "Get Started with LintRunner",
-        "description": "Configure your first CLI linter and fixer.",
+        "description": "Configure your first CLI tools and pipelines.",
         "steps": [
           {
             "id": "lintRunner.openExamples",
