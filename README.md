@@ -5,44 +5,59 @@
 [![Rating](https://vsmarketplacebadges.dev/rating-short/vix.lint-runner.svg)](https://marketplace.visualstudio.com/items?itemName=vix.lint-runner)
 ![License](https://img.shields.io/github/license/vix-4800/lint-runner)
 
-VS Code extension for running external CLI linters and fixers, then publishing found issues as VS Code Problems.
-
-LintRunner is useful when a project already has command-line quality tools and you want them integrated into the editor without writing a custom extension for each tool.
+VS Code extension for running external CLI tools as file pipelines and publishing parsed diagnostics as VS Code Problems.
 
 ## Features
 
-- run linters manually via `LintRunner: Run Linters`;
-- run auto-fixers manually via `LintRunner: Run Fixers`;
-- run linters on file open and save;
-- run auto-fixers on save;
-- show diagnostics in Problems;
-- show active tool names in the status bar;
-- stop running tools via `LintRunner: Stop Running Tools`;
-- inspect configured tools via `LintRunner: Doctor`;
-- validate config automatically and via `LintRunner: Validate Config`;
-- expose optional Code Actions and CodeLens entries for manual tools;
+- define reusable `lintRunner.tools`;
+- run explicit `manual`, `onSave`, and `onOpen` pipelines;
+- support diagnostic tools and write tools;
+- parse diagnostics with regex named groups;
+- expose optional Code Actions and CodeLens entries for manual pipelines/tools;
+- inspect current file matching;
+- validate config and run Doctor;
 - block command execution in untrusted workspaces.
 
 ## Configuration
 
-Configure targets in `settings.json` with `lintRunner.targets`. A target describes which files match and which external commands should run for them.
-
 ```json
 {
+  "lintRunner.vars": {
+    "nodeBin": "${workspaceFolder}/node_modules/.bin"
+  },
+  "lintRunner.tools": {
+    "eslint": {
+      "kind": "diagnostic",
+      "command": "${nodeBin}/eslint",
+      "args": ["--format=stylish", "${file}"],
+      "successExitCodes": [0, 1],
+      "parser": {
+        "flags": "gm",
+        "pattern": "^\\s*(?<line>\\d+):(?<col>\\d+)\\s+(?<severity>error|warning)\\s+(?<message>.+?)\\s{2,}(?<code>\\S+)\\s*$"
+      }
+    },
+    "prettier": {
+      "kind": "write",
+      "command": "${nodeBin}/prettier",
+      "args": ["--write", "${file}"]
+    }
+  },
   "lintRunner.targets": [
     {
-      "name": "TypeScript",
-      "languages": ["typescript"],
-      "linters": [
-        {
-          "name": "eslint",
-          "command": "npx",
-          "args": ["eslint", "--format", "unix", "${file}"],
-          "parser": {
-            "pattern": "^(?<file>.*?):(?<line>\\d+):(?<col>\\d+): (?<message>.*?) \\[(?<severity>Warning|Error)/(?<code>.*?)\\]$"
-          }
-        }
-      ]
+      "name": "JavaScript / TypeScript",
+      "match": {
+        "languages": ["javascript", "typescript", "javascriptreact", "typescriptreact", "vue"],
+        "files": ["**/*.{js,ts,jsx,tsx,vue}"],
+        "exclude": ["node_modules/**", "dist/**"]
+      },
+      "onSave": {
+        "strategy": "sequence",
+        "tools": ["prettier", "eslint"]
+      },
+      "manual": {
+        "strategy": "sequence",
+        "tools": ["eslint"]
+      }
     }
   ]
 }
@@ -50,16 +65,13 @@ Configure targets in `settings.json` with `lintRunner.targets`. A target describ
 
 See [docs/configuration.md](docs/configuration.md) for full configuration reference.
 
-Real-world examples: [docs/examples.md](docs/examples.md).
-
 ## Commands
 
-- `LintRunner: Run Linters`
-- `LintRunner: Run Fixers`
-- `LintRunner: Open Actions Menu`
-- `LintRunner: Stop Running Tools`
+- `LintRunner: Run Pipeline`
+- `LintRunner: Run Tool`
+- `LintRunner: Inspect Current File`
+- `LintRunner: Stop`
 - `LintRunner: Clear Diagnostics`
-- `LintRunner: Validate Config`
 - `LintRunner: Doctor`
 
 ## Development
