@@ -6,7 +6,7 @@ Guidance for coding agents working in this repository.
 
 - Name: `lint-runner`
 - Type: VS Code extension (TypeScript)
-- Purpose: Run external CLI linters/fixers and convert output into VS Code diagnostics.
+- Purpose: Run external CLI tools through pipelines and convert diagnostic tool output into VS Code diagnostics.
 
 ## Stack
 
@@ -35,12 +35,12 @@ Run `npm run lint` and `npm run compile` after changes.
 
 - `src/extension.ts`
 - Extension activation and event wiring.
-- Registers commands `lintRunner.run` and `lintRunner.fix`.
+- Registers commands for running pipelines, running individual tools, inspecting file config, stopping runs, clearing diagnostics, opening examples, and doctor checks.
 - Handles on-open/on-save triggers and workspace trust gate.
 
-- `src/linterRunner.ts`
-- Core runtime for selecting targets/linters/fixers.
-- Runs pre-commands, linters, fixers, and command templating.
+- `src/toolRunner.ts`
+- Core runtime for selecting targets, pipelines, and tools.
+- Runs tool commands and command templating.
 - Handles shell PATH resolution, process execution, timeouts, status bar state.
 - Parses outputs via parser modules and normalizes diagnostic ranges.
 
@@ -56,14 +56,14 @@ Run `npm run lint` and `npm run compile` after changes.
 - Parser must be deterministic and tolerant to malformed output.
 - Never throw on unrecognized lines; skip them.
 - Use zero-based lines/columns internally.
-- Set diagnostic `source` to linter name.
+- Set diagnostic `source` to tool id.
 - Set `code` when rule id is available.
 - Use `createDiagnostic` from `src/parser/diagnostic.ts`.
 
 ## Change Rules
 
 - Prefer minimal, local changes.
-- Do not rename public configuration keys in `package.json` without migration notes.
+- Do not rename public configuration keys in `package.json` without docs updates.
 - Use `lintRunner.targets` for configuration.
 - Keep workspace trust restrictions intact: no command execution in untrusted workspaces.
 - Avoid adding dependencies unless necessary.
@@ -72,8 +72,8 @@ Run `npm run lint` and `npm run compile` after changes.
 
 - Command templating supports placeholders like `${file}` and `${workspaceFolder}`.
 - File pattern matching checks file name, workspace-relative path, and full path.
-- `onOpen` linters should also run on save (current behavior).
-- Fixers can be target-level (`fixers`).
+- `onOpen` pipelines should also run on save.
+- Write tools refresh diagnostics from diagnostic tools in the same pipeline when needed.
 
 ## Definition of Done
 
