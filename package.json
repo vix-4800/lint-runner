@@ -168,7 +168,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Glob patterns for files to skip. Checked against the file name, workspace-relative path, and full path. Files matching any pattern are not linted or fixed.",
+          "description": "Glob patterns for files to skip. Checked against the file name, workspace-relative path, and full path. Matching files are not processed.",
           "order": 7
         },
         "lintRunner.respectGitignore": {
