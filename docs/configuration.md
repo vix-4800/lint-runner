@@ -4,8 +4,6 @@ Configuration is stored in `settings.json`.
 
 LintRunner 0.4.0 uses tools and pipelines. A tool describes one external command. A target matches files and chooses which tools run for `manual`, `onSave`, or `onOpen`.
 
-Old `linters`, `fixers`, `run`, `preCommands`, target-level `languages`, and `filePatterns` keys are invalid.
-
 ## Example
 
 ```json
@@ -58,7 +56,7 @@ Old `linters`, `fixers`, `run`, `preCommands`, target-level `languages`, and `fi
 | --- | --- | --- |
 | `lintRunner.vars` | `Record<string, string>` | Named template variables. Values can reference built-ins and other vars. Circular references are invalid. |
 | `lintRunner.tools` | `Record<string, ToolConfig>` | Tool registry keyed by tool id. |
-| `lintRunner.targets` | `TargetConfig[]` | File matching and explicit pipelines. Targets merge by `name` across user, workspace, and folder scopes. |
+| `lintRunner.targets` | `ToolTargetDefinition[]` | File matching and explicit pipelines. Targets merge by `name` across user, workspace, and folder scopes. |
 
 Existing non-conflicting settings remain: `enabled`, `debounceMs`, `enableLogging`, `enableCodeActions`, `enableCodeLens`, `showManualRunNotifications`, `ignorePatterns`, and `respectGitignore`.
 
