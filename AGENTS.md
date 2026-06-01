@@ -64,6 +64,7 @@ Run `npm run lint` and `npm run compile` after changes.
 
 - Prefer minimal, local changes.
 - Do not rename public configuration keys in `package.json` without docs updates.
+- Update `CHANGELOG.md` under the current version after behavior, config, command, parser, or runtime logic changes.
 - Use `lintRunner.targets` for configuration.
 - Keep workspace trust restrictions intact: no command execution in untrusted workspaces.
 - Avoid adding dependencies unless necessary.
