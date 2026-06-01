@@ -387,7 +387,7 @@ suite('Extension', () => {
         ]);
     });
 
-    test('creates manual pipeline and tool code actions and lenses', () => {
+    test('creates manual tool code actions and lenses without pipeline entries', () => {
         const uri = vscode.Uri.file('/tmp/file.ts');
         const pipeline = createPipeline();
         const tool = createTool();
@@ -395,19 +395,15 @@ suite('Extension', () => {
         const lenses = createManualCodeLenses(uri, [pipeline], [tool]);
 
         assert.deepStrictEqual(actions.map((action) => action.command?.command), [
-            'lintRunner.runManualPipelineCodeAction',
             'lintRunner.runManualToolCodeAction',
         ]);
         assert.deepStrictEqual(lenses.map((lens) => lens.command?.command), [
-            'lintRunner.runManualPipelineCodeAction',
             'lintRunner.runManualToolCodeAction',
         ]);
         assert.deepStrictEqual(actions.map((action) => action.command?.title), [
-            'Run pipeline: JS: manual',
             'Run: eslint',
         ]);
         assert.deepStrictEqual(lenses.map((lens) => lens.command?.title), [
-            'Run pipeline: JS: manual',
             'Run: eslint',
         ]);
     });

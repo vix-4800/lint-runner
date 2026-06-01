@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Hid manual pipeline entries from Code Actions and CodeLens while keeping manual tool entries visible.
 - Shortened manual tool Code Action and CodeLens titles.
 
 ## [0.4.0] - 2026-06-01

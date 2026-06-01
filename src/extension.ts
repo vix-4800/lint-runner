@@ -554,16 +554,10 @@ export async function runManualToolForFile(
 
 export function createManualCodeActions(
     documentUri: vscode.Uri,
-    pipelines: readonly RunnablePipeline[],
+    _pipelines: readonly RunnablePipeline[],
     tools: readonly RunnableTool[]
 ): vscode.CodeAction[] {
     const actions: vscode.CodeAction[] = [];
-    for (const pipeline of pipelines) {
-        const title = `Run pipeline: ${pipeline.label}`;
-        const action = new vscode.CodeAction(title, manualPipelineCodeActionKind);
-        action.command = { title, command: 'lintRunner.runManualPipelineCodeAction', arguments: [documentUri, pipeline] };
-        actions.push(action);
-    }
     for (const tool of tools) {
         const title = `Run: ${tool.label}`;
         const action = new vscode.CodeAction(title, manualToolCodeActionKind);
