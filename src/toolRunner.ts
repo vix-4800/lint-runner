@@ -1108,7 +1108,7 @@ function getLoginShell(): string | undefined {
 async function resolveShellPath(): Promise<string | undefined> {
     const shell = getLoginShell();
     if (shell === undefined || process.platform === 'win32') {
-        return await Promise.resolve(undefined);
+        return void await Promise.resolve(undefined);
     }
     return await new Promise((resolve) => {
         const proc = cp.spawn(shell, ['-lc', getShellPathCommand(shell)]);

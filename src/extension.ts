@@ -574,13 +574,13 @@ async function openActionsMenu(
             label: `$(play) ${pipeline.label}`,
             description: pipeline.description,
             detail: pipeline.detail,
-            action: async () => runManualPipelinesForFile(fileName, diagnostics, output, runningStatusBar, [pipeline]),
+            action: async () => await runManualPipelinesForFile(fileName, diagnostics, output, runningStatusBar, [pipeline]),
         })),
         ...tools.map((tool) => ({
             label: `$(wrench) ${tool.label}`,
             description: tool.description,
             detail: tool.detail,
-            action: async () => runManualToolForFile(fileName, tool, diagnostics, output, runningStatusBar),
+            action: async () => await runManualToolForFile(fileName, tool, diagnostics, output, runningStatusBar),
         })),
     ];
     const selectedItem = await vscode.window.showQuickPick(items, {
@@ -806,7 +806,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 );
             }
         }),
-        vscode.commands.registerCommand('lintRunner.openExamples', async () => openBundledExamples(context.extensionUri)),
+        vscode.commands.registerCommand('lintRunner.openExamples', async () => await openBundledExamples(context.extensionUri)),
         vscode.commands.registerCommand('lintRunner.doctor', async () => {
             if (canRunWorkspaceCommands(true)) {
                 await runDoctorWithNotification(vscode.window.activeTextEditor?.document.uri);
@@ -874,6 +874,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 clearDiagnosticsCache();
             }
         }),
-        vscode.commands.registerCommand('lintRunner.actions', async () => openActionsMenu(diagnostics, output, runningStatusBar))
+        vscode.commands.registerCommand('lintRunner.actions', async () => await openActionsMenu(diagnostics, output, runningStatusBar))
     );
 }
