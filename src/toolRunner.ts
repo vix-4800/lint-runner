@@ -21,11 +21,11 @@ const REQUIRED_PARSER_GROUPS = ['line', 'message'] as const;
 const NAMED_CAPTURE_GROUP_RE = /(?<!\\)\(\?<([A-Za-z][A-Za-z0-9]*)>/g;
 const PIPELINE_NAMES = ['manual', 'onOpen', 'onSave'] as const;
 const UNSUPPORTED_TARGET_KEYS = [
-    `file${'Patterns'}`,
-    `fix${'ers'}`,
+    `filePatterns`,
+    `fixers`,
     'languages',
-    `lin${'ters'}`,
-    `pre${'Commands'}`,
+    `linters`,
+    `preCommands`,
     'run',
 ] as const;
 

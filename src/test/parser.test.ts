@@ -49,7 +49,7 @@ suite('Tool Runner', () => {
             { bin: '${workspaceFolder}/vendor/bin' }
         );
 
-        assert.strictEqual(result, `${workspaceFolder}/vendor/bin|example.test.ts|example.test|${'${unknown}'}`);
+        assert.strictEqual(result, `${workspaceFolder}/vendor/bin|example.test.ts|example.test|\${unknown}`);
     });
 
     test('prepends shell PATH to command PATH', () => {
@@ -223,7 +223,7 @@ suite('Tool configuration', () => {
                             {
                                 name: 'JS',
                                 languages: ['javascript'],
-                                [`lin${'ters'}`]: [],
+                                [`linters`]: [],
                                 match: { languages: ['javascript'], files: ['**/*.js'] },
                                 manual: ['prettier', 'missing-tool'] as unknown as never,
                             },
@@ -237,7 +237,7 @@ suite('Tool configuration', () => {
         assert.match(issues.errors.join('\n'), /var 'a' contains a circular reference/);
         assert.match(issues.errors.join('\n'), /tool 'eslint' parser is missing pattern/);
         assert.match(issues.errors.join('\n'), /tool 'prettier' with kind 'write' must not define parser/);
-        assert.match(issues.errors.join('\n'), new RegExp(`target 'JS' contains unsupported key 'lin${'ters'}'`));
+        assert.match(issues.errors.join('\n'), new RegExp(`target 'JS' contains unsupported key 'linters'`));
         assert.match(issues.errors.join('\n'), /target 'JS' pipeline 'manual' must be an object/);
     });
 
