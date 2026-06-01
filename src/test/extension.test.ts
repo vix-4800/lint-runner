@@ -402,6 +402,14 @@ suite('Extension', () => {
             'lintRunner.runManualPipelineCodeAction',
             'lintRunner.runManualToolCodeAction',
         ]);
+        assert.deepStrictEqual(actions.map((action) => action.command?.title), [
+            'Run pipeline: JS: manual',
+            'Run: eslint',
+        ]);
+        assert.deepStrictEqual(lenses.map((lens) => lens.command?.title), [
+            'Run pipeline: JS: manual',
+            'Run: eslint',
+        ]);
     });
 
     test('getActionsStatusBarState returns undefined without active file editor', () => {

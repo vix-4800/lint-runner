@@ -565,7 +565,7 @@ export function createManualCodeActions(
         actions.push(action);
     }
     for (const tool of tools) {
-        const title = `Run tool: ${tool.label} (${tool.description})`;
+        const title = `Run: ${tool.label}`;
         const action = new vscode.CodeAction(title, manualToolCodeActionKind);
         action.command = { title, command: 'lintRunner.runManualToolCodeAction', arguments: [documentUri, tool] };
         actions.push(action);
