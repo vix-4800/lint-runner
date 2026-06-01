@@ -2,202 +2,111 @@
 
 Configuration is stored in `settings.json`.
 
-Real-world target examples: [examples.md](examples.md).
+LintRunner 0.4.0 uses tools and pipelines. A tool describes one external command. A target matches files and chooses which tools run for `manual`, `onSave`, or `onOpen`.
 
-LintRunner validates configured targets, linters, fixers, parsers, language IDs, and safely-checkable commands on startup
-and after settings changes. If validation fails, linter and fixer runs are blocked until the config is fixed.
+## Example
 
-## Global Enable Switch
+```json
+{
+  "lintRunner.vars": {
+    "composerBin": "${workspaceFolder}/vendor/bin",
+    "nodeBin": "${workspaceFolder}/node_modules/.bin"
+  },
+  "lintRunner.tools": {
+    "phpstan": {
+      "kind": "diagnostic",
+      "command": "${composerBin}/phpstan",
+      "args": ["analyse", "--error-format=raw", "${file}"],
+      "successExitCodes": [0, 1],
+      "parser": {
+        "flags": "gm",
+        "pattern": "^.+?:(?<line>\\d+):(?<message>.+)$"
+      }
+    },
+    "php-cs-fixer": {
+      "kind": "write",
+      "command": "${composerBin}/php-cs-fixer",
+      "args": ["fix", "${file}"]
+    }
+  },
+  "lintRunner.targets": [
+    {
+      "name": "PHP",
+      "match": {
+        "languages": ["php"],
+        "files": ["**/*.php"],
+        "exclude": ["vendor/**"]
+      },
+      "onSave": {
+        "strategy": "sequence",
+        "tools": ["php-cs-fixer", "phpstan"]
+      },
+      "manual": {
+        "strategy": "sequence",
+        "tools": ["phpstan"]
+      }
+    }
+  ]
+}
+```
 
-### `lintRunner.enabled`
+## Settings
 
-Set `lintRunner.enabled` to `false` to disable the extension and all of its features. When disabled, LintRunner does not
-run linters or fixers automatically, manual commands are blocked, Code Actions and CodeLens entries are hidden, and
-related UI state is cleared.
+| Setting | Type | Description |
+| --- | --- | --- |
+| `lintRunner.vars` | `Record<string, string>` | Named template variables. Values can reference built-ins and other vars. Circular references are invalid. |
+| `lintRunner.tools` | `Record<string, ToolConfig>` | Tool registry keyed by tool id. |
+| `lintRunner.targets` | `ToolTargetDefinition[]` | File matching and explicit pipelines. Targets merge by `name` across user, workspace, and folder scopes. |
 
-## Target Config
+Existing non-conflicting settings remain: `enabled`, `debounceMs`, `enableLogging`, `enableCodeActions`, `enableCodeLens`, `showManualRunNotifications`, `ignorePatterns`, and `respectGitignore`.
 
-`lintRunner.targets` groups a shared file set and commands that should run for those files. The setting is
-resource-scoped: user, workspace, and folder values are merged by target `name`. If a lower-scope target has the same
-`name`, only the fields you specify there are replaced; omitted fields are inherited from the higher scope. A target
-must match the file's VS Code language id via `languages`. Use `["*"]` to match all detected languages. `filePatterns`
-is optional and further narrows the match.
+## Tools
 
-| Field          | Type                               | Required | Description                                                                                                    |
-| -------------- | ---------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------- |
-| `name`         | `string`                           | yes      | Target name in LintRunner output.                                                                              |
-| `languages`    | `string[]`                         | yes      | VS Code language ids this target applies to. Use `["*"]` to match all detected language ids.                   |
-| `filePatterns` | `string[]`                         | no       | Optional glob patterns that further narrow matching files.                                                     |
-| `run`          | `"onOpen" \| "onSave" \| "manual"` | no       | Default run mode for linters. Defaults to `onSave`. `onOpen` also runs on save.                                |
-| `cwd`          | `string`                           | no       | Default working directory for this target's commands. Defaults to the file's workspace folder.                 |
-| `preCommands`  | `CommandConfig[]`                  | no       | Commands executed once before target linters.                                                                  |
-| `linters`      | `TargetLinterConfig[]`             | no       | Linter commands for the target.                                                                                |
-| `fixers`       | `FixerConfig[]`                    | no       | Auto-fixer commands. By default they run via `LintRunner: Run Fixers`; `run: "onSave"` also runs them on save. |
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `kind` | `"diagnostic" \| "write"` | yes | `diagnostic` parses command output into Problems. `write` runs commands that can modify files. |
+| `command` | `string` | yes | Executable path or command. Supports `~`, built-in variables, and `lintRunner.vars`. |
+| `args` | `string[]` | yes | Command args. Supports templates. |
+| `cwd` | `string` | no | Defaults to `${workspaceFolder}`. Supports templates. |
+| `env` | `Record<string, string>` | no | Process env overrides. Values support templates. |
+| `enabled` | `boolean` | no | Defaults to `true`. |
+| `timeout` | `number` | no | Defaults to `30000`. |
+| `successExitCodes` | `number[]` | no | Defaults to `[0]`. Any other exit code fails the tool. |
+| `maxFileSize` | `number` | no | Diagnostic tools skip larger files. |
+| `parser` | `RegexParserConfig` | diagnostic only | Required for `diagnostic`; invalid for `write`. |
 
-`filePatterns` use the same path matching rules as before: the extension checks the file name, workspace-relative path,
-and full path.
+## Targets
 
-Targets must have unique `name` values within the merged configuration. Linters inside a target are matched by `name`,
-so linter names must be unique there as well. Fixers are also merged by `name` when a `name` is provided, so give any
-fixer you want to override from a lower scope a unique `name`.
+`match.languages`, `match.files`, and `match.exclude` select files. `languages` and `files` are combined with AND. `exclude` always wins.
 
-### Target Linter Config
+Pipeline fields are `manual`, `onSave`, and `onOpen`. Every pipeline must be an object:
 
-| Field         | Type                               | Required | Description                                                                                                  |
-| ------------- | ---------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------ |
-| `name`        | `string`                           | yes      | Source name in Problems.                                                                                     |
-| `enabled`     | `boolean`                          | no       | Enables or disables this linter. Defaults to `true`.                                                         |
-| `command`     | `string`                           | yes      | Linter command. Must be in `PATH` or an absolute path. Supports `~` and command variables.                   |
-| `cwd`         | `string`                           | no       | Working directory for this linter. Defaults to target `cwd` or the file's workspace folder.                  |
-| `env`         | `Record<string, string>`           | no       | Environment variables merged into the spawned process environment. Values support `~` and command variables. |
-| `args`        | `string[]`                         | yes      | Command arguments. Supports `~` and command variables.                                                       |
-| `parser`      | `RegexParserConfig`                | yes      | Regex parser config.                                                                                         |
-| `run`         | `"onOpen" \| "onSave" \| "manual"` | no       | Overrides target `run`. `onOpen` also runs on save.                                                          |
-| `preCommands` | `CommandConfig[]`                  | no       | Commands before the main linter.                                                                             |
-| `timeout`     | `number`                           | no       | Timeout in milliseconds for this linter. Defaults to `30000`.                                                |
-| `maxFileSize` | `number`                           | no       | Maximum file size in bytes for this linter. Larger files are skipped.                                        |
+```json
+{
+  "strategy": "sequence",
+  "tools": ["prettier", "eslint"]
+}
+```
 
-When a folder-level target reuses a linter `name`, the linter is merged into the higher-scope one by name. You can
-override only `args`, only `run`, only `parser`, or any other linter fields without repeating the rest of the config.
-Named fixers behave the same way.
+Array shorthand is invalid. `strategy: "sequence"` runs tools left to right and stops on first failure. `strategy: "parallel"` starts all tools and marks the pipeline failed when any tool fails. `onOpen` also runs on save.
 
-## Pre-Commands
-
-`preCommands` run sequentially before the main linter. If one command exits with a non-zero exit code, the main linter
-does not run.
-
-### Command Config
-
-| Field     | Type                     | Required | Description                                                                                                  |
-| --------- | ------------------------ | -------- | ------------------------------------------------------------------------------------------------------------ |
-| `name`    | `string`                 | no       | Command name in LintRunner output.                                                                           |
-| `command` | `string`                 | yes      | Executable file. Supports `~` and command variables.                                                         |
-| `cwd`     | `string`                 | no       | Working directory. Defaults to the owner `cwd` or the file's workspace folder.                               |
-| `env`     | `Record<string, string>` | no       | Environment variables merged into the spawned process environment. Values support `~` and command variables. |
-| `args`    | `string[]`               | yes      | Arguments. Supports `~` and command variables.                                                               |
-
-### Fixer Config
-
-| Field     | Type                   | Required | Description                                                                                                        |
-| --------- | ---------------------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
-| `name`    | `string`               | no       | Optional fixer name shown in LintRunner output. Set it when you want the fixer to be merged by name across scopes. |
-| `enabled` | `boolean`              | no       | Enables or disables this fixer. Defaults to `true`.                                                                |
-| `run`     | `"manual" \| "onSave"` | no       | Defaults to `manual`. `onSave` runs the fixer on save and manually.                                                |
-| `timeout` | `number`               | no       | Timeout in milliseconds for this fixer. Defaults to `30000`.                                                       |
-
-Other fields are the same as `CommandConfig`.
-
-## Command Variables
-
-LintRunner substitutes variables in `command`, `cwd`, `args`, `env` values, `preCommands[*].command`,
-`preCommands[*].cwd`, `preCommands[*].env` values, `preCommands[*].args`, `fixers[*].command`,
-`fixers[*].cwd`, `fixers[*].env` values, and `fixers[*].args`.
-
-| Variable                     | Value                                                                                     |
-| ---------------------------- | ----------------------------------------------------------------------------------------- |
-| `${file}`                    | Full file path.                                                                           |
-| `${workspaceFolder}`         | Path to the file's workspace folder. Empty string if the file is outside a workspace.     |
-| `${relativeFile}`            | File path relative to the workspace folder. Full path if the file is outside a workspace. |
-| `${fileDirname}`             | File directory.                                                                           |
-| `${fileBasename}`            | File name with extension.                                                                 |
-| `${fileBasenameNoExtension}` | File name without extension.                                                              |
-| `${fileExtname}`             | File extension, including the dot.                                                        |
-
-Unknown variables are left unchanged.
-
-## Workspace Trust
-
-LintRunner does not run commands from workspace config until the workspace is trusted. In an untrusted workspace,
-`LintRunner: Run Linters`, `LintRunner: Run Fixers`, runs on open, and runs on save are skipped.
-
-## Ignoring Files
-
-### `lintRunner.ignorePatterns`
-
-Glob patterns for files that LintRunner should never lint or fix. The same matching rules apply as for target
-`filePatterns` (checked against the file name, workspace-relative path, and full path).
-
-Example values: `vendor/**`, `*.min.js`, `dist/**`.
-
-### `lintRunner.respectGitignore`
-
-When `true`, LintRunner skips any file that `git check-ignore` reports as ignored by `.gitignore`. Requires `git` to be
-available on `PATH`. The file's workspace folder is used as the working directory.
-
-## Debounce
-
-`lintRunner.debounceMs` sets a delay (in milliseconds) between a save event and the actual linter/fixer run. This is
-useful when VS Code's auto-save is enabled with a very short interval, to avoid spawning a new process on every
-keystroke.
-
-The default is `0` (no debounce). When multiple saves arrive within the debounce window, only the last one triggers a
-run.
-
-## Logging
-
-### `lintRunner.enableLogging`
-
-When `true` (default), LintRunner writes command lifecycle messages to the `LintRunner` output channel. Set it to
-`false` to fully disable those logs and hide the `LintRunner` entry from the Output panel.
-
-## Code Actions
-
-### `lintRunner.enableCodeActions`
-
-When enabled, LintRunner exposes one source code action per matching manual linter and manual fixer for the current
-file. Linters with `run: "onOpen"` or `run: "onSave"` and fixers with `run: "onSave"` are not listed there because they
-already run automatically.
-
-## Code Lens
-
-### `lintRunner.enableCodeLens`
-
-When enabled, LintRunner exposes one top-of-file CodeLens per matching manual linter and manual fixer for the current
-file. Linters with `run: "onOpen"` or `run: "onSave"` and fixers with `run: "onSave"` are not listed there because they
-already run automatically.
-
-## Manual Run Notifications
-
-### `lintRunner.showManualRunNotifications`
-
-When enabled (default), LintRunner shows a cancellable notification for manual runs started from commands, Code Actions,
-or CodeLens. The notification includes the names of the running tools. Automatic runs on open and save never show this
-notification.
-
-## Fix Commands
-
-`fixers` run via `LintRunner: Run Fixers`. If a fixer command has `run: "onSave"`, it also runs when a matching file is
-saved. Commands run sequentially for all matching configs. After fixers finish, the extension runs linters to update
-Problems.
+After a successful `write` tool, LintRunner refreshes diagnostics from diagnostic tools in the same pipeline when no later diagnostic tool already ran after that write.
 
 ## Regex Parser
 
-`parser` is a regex config object. The regex runs globally over selected command output and creates one diagnostic per
-match.
+The parser config is unchanged. Required named groups: `line`, `message`. Optional groups: `col`, `endLine`, `endCol`, `severity`, `code`.
 
-| Field             | Type                                              | Required | Description                                                       |
-| ----------------- | ------------------------------------------------- | -------- | ----------------------------------------------------------------- |
-| `pattern`         | `string`                                          | yes      | JavaScript regex pattern.                                         |
-| `flags`           | `string`                                          | no       | JavaScript regex flags. `g` is added automatically.               |
-| `output`          | `"stdout" \| "stderr" \| "both"`                  | no       | Output stream to parse. Defaults to `both`.                       |
-| `defaultSeverity` | `"error" \| "warning" \| "info" \| "information"` | no       | Severity when no `severity` group matched. Defaults to `warning`. |
-| `messageFormat`   | `"plain" \| "json"`                               | no       | Decode the captured `message` as plain text or JSON.              |
+Unknown output lines are skipped. Invalid regex config blocks runs through config validation.
 
-Required named groups:
+## Commands
 
-| Group     | Description          |
-| --------- | -------------------- |
-| `line`    | 1-based line number. |
-| `message` | Diagnostic message.  |
+- `LintRunner: Run Pipeline`
+- `LintRunner: Run Tool`
+- `LintRunner: Inspect Current File`
+- `LintRunner: Stop`
+- `LintRunner: Clear Diagnostics`
+- `LintRunner: Doctor`
 
-Optional named groups:
+## Workspace Trust
 
-| Group      | Description                                           |
-| ---------- | ----------------------------------------------------- |
-| `col`      | 1-based start column number.                          |
-| `endLine`  | 1-based end line for an explicit diagnostic range.    |
-| `endCol`   | 1-based end column for an explicit diagnostic range.  |
-| `severity` | `error`, `warning`, `info`, plus aliases like `note`. |
-| `code`     | Rule id for the diagnostic.                           |
-
-When `endLine` or `endCol` are not captured, LintRunner keeps the current inferred range behavior.
+Configured commands do not run until the workspace is trusted.

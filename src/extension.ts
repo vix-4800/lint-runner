@@ -3,144 +3,42 @@ import * as vscode from 'vscode';
 import {
     cancelAllFileRuns,
     cancelFileRun,
-    getRunnableFixers,
-    getRunnableLinters,
-    isLintRunnerEnabled,
-    runFixers,
-    runLinters,
-    runRunnableLinters,
-    resetCommandEnv,
-    clearRunnerRuntimeState,
+    clearAllFileToolDiagnostics,
     clearDiagnosticsCache,
-    clearFileLinterDiagnostics,
-    clearAllFileLinterDiagnostics,
     clearFileDiagnosticsCache,
-    validateLintRunnerConfig,
+    clearFileToolDiagnostics,
+    clearRunnerRuntimeState,
     getDoctorToolStatuses,
+    getRunnablePipelines,
+    getRunnableTools,
+    isLintRunnerEnabled,
+    resetCommandEnv,
+    runPipeline,
+    validateLintRunnerConfig,
     type ConfigValidationIssues,
     type DoctorToolStatus,
+    type RunnablePipeline,
+    type RunnableTool,
     type RunnerFailure,
     type RunnerOutput,
-    type RunnableFixer,
-    type RunnableLinter,
-} from './linterRunner.js';
+} from './toolRunner.js';
+
+export type { RunnablePipeline, RunnableTool } from './toolRunner.js';
 
 let untrustedWorkspaceWarningShown = false;
 let configValidationIssues: ConfigValidationIssues = { errors: [], warnings: [] };
 let configValidationWarningShown = false;
-const skipFixersOnSave = new Set<string>();
 const saveDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const lastSavedContentHashes = new Map<string, string>();
 const CONFIG_VALIDATION_PREVIEW_LIMIT = 5;
-let deactivateCleanupResources: Omit<
-    DeactivateCleanupDeps,
-    'clearPendingSaveDebounces' | 'clearRunnerRuntimeState' | 'savedContentHashes' | 'skipFixersOnSaveSet'
-> | undefined;
+const manualCodeActionKind = vscode.CodeActionKind.Source.append('lintRunner.manual');
+const manualPipelineCodeActionKind = manualCodeActionKind.append('pipeline');
+const manualToolCodeActionKind = manualCodeActionKind.append('tool');
 
-export function computeContentHash(text: string): string {
-    return crypto.createHash('sha256').update(text).digest('hex');
-}
-
-/**
- * Checks whether the document content has changed since the last save.
- * Updates the stored hash for the given key and returns true if the content
- * is new or different from the previously stored hash.
- */
-export function isContentChanged(fileKey: string, newHash: string, hashMap: Map<string, string>): boolean {
-    const prevHash = hashMap.get(fileKey);
-    hashMap.set(fileKey, newHash);
-    return prevHash !== newHash;
-}
-
-type OnOpenDocument = Pick<vscode.TextDocument, 'fileName' | 'isUntitled' | 'uri'>;
-interface OnOpenEditor {
-    readonly document: OnOpenDocument;
-    readonly viewColumn?: vscode.ViewColumn;
-}
-type OnOpenTab = Pick<vscode.Tab, 'input'>;
-interface OnOpenTabGroup {
-    readonly activeTab: OnOpenTab | undefined;
-    readonly viewColumn: vscode.ViewColumn;
-}
 type OutputChannelLike = Pick<vscode.OutputChannel, 'appendLine' | 'dispose'>;
 type StatusBarLike = Pick<vscode.StatusBarItem, 'dispose' | 'hide'>;
 type DiagnosticsLike = Pick<vscode.DiagnosticCollection, 'clear' | 'dispose'>;
 type DisposableLike = Pick<vscode.Disposable, 'dispose'>;
-interface DeactivateCleanupDeps {
-    clearPendingSaveDebounces?: () => void;
-    clearRunnerRuntimeState?: () => void;
-    skipFixersOnSaveSet?: Set<string>;
-    savedContentHashes?: Map<string, string>;
-    seenOnOpenDocumentUris?: Set<string>;
-    diagnostics?: DiagnosticsLike;
-    runningStatusBar?: StatusBarLike;
-    actionsStatusBar?: StatusBarLike;
-    output?: OutputChannelLike;
-    codeLensRefreshEmitter?: DisposableLike;
-}
-interface CollectVisibleFileNamesOptions {
-    readonly includeSeen?: boolean;
-}
-
-interface FixerQuickPickItem extends vscode.QuickPickItem {
-    fixer: RunnableFixer;
-}
-
-interface ActionQuickPickItem extends vscode.QuickPickItem {
-    action?: () => Promise<void>;
-}
-
-interface ManualFixerRunnerDeps {
-    saveDocumentBeforeManualFixers?: (document: vscode.TextDocument) => Promise<boolean>;
-    selectManualFixers?: (fileName: string) => Promise<readonly RunnableFixer[] | undefined>;
-    runWithManualNotification?: <T>(
-        filePath: string,
-        labels: readonly string[],
-        task: () => Promise<T>
-    ) => Promise<T>;
-    runFixers?: (
-        filePath: string,
-        output: RunnerOutput,
-        statusBar: vscode.StatusBarItem,
-        trigger: 'manual',
-        fixers: readonly RunnableFixer[]
-    ) => Promise<number>;
-    runLinters?: (
-        filePath: string,
-        trigger: 'onSave',
-        diagnostics: vscode.DiagnosticCollection,
-        output: RunnerOutput,
-        statusBar: vscode.StatusBarItem
-    ) => Promise<void>;
-    showWarningMessage?: (message: string) => Thenable<string | undefined>;
-}
-
-interface ManualLinterRunnerDeps {
-    runWithManualNotification?: <T>(
-        filePath: string,
-        labels: readonly string[],
-        task: () => Promise<T>
-    ) => Promise<T>;
-    runLinters?: (
-        filePath: string,
-        trigger: 'manual',
-        diagnostics: vscode.DiagnosticCollection,
-        output: RunnerOutput,
-        statusBar: vscode.StatusBarItem
-    ) => Promise<void>;
-    runRunnableLinters?: (
-        filePath: string,
-        diagnostics: vscode.DiagnosticCollection,
-        output: RunnerOutput,
-        statusBar: vscode.StatusBarItem,
-        linters: readonly RunnableLinter[]
-    ) => Promise<number>;
-    showWarningMessage?: (message: string) => Thenable<string | undefined>;
-}
-
-const manualCodeActionKind = vscode.CodeActionKind.Source.append('lintRunner.manual');
-const manualLinterCodeActionKind = manualCodeActionKind.append('linter');
-const manualFixerCodeActionKind = manualCodeActionKind.append('fixer');
 type WithProgressFn = <T>(
     options: vscode.ProgressOptions,
     task: (
@@ -149,48 +47,44 @@ type WithProgressFn = <T>(
     ) => Thenable<T>
 ) => Thenable<T>;
 
-export function isLoggingEnabled(
-    config: Pick<vscode.WorkspaceConfiguration, 'get'> = vscode.workspace.getConfiguration('lintRunner')
-): boolean {
-    return config.get<boolean>('enableLogging') !== false;
+interface OnOpenDocument {
+    readonly fileName: string;
+    readonly isUntitled: boolean;
+    readonly uri: vscode.Uri;
 }
 
-export function isManualRunNotificationEnabled(
-    resourceOrConfig: Pick<vscode.WorkspaceConfiguration, 'get'> | vscode.Uri =
-        vscode.workspace.getConfiguration('lintRunner')
-): boolean {
-    const config =
-        resourceOrConfig instanceof vscode.Uri
-            ? vscode.workspace.getConfiguration('lintRunner', resourceOrConfig)
-            : resourceOrConfig;
-    return config.get<boolean>('showManualRunNotifications') !== false;
+interface OnOpenEditor {
+    readonly document: OnOpenDocument;
+    readonly viewColumn?: vscode.ViewColumn;
 }
 
-export function formatDoctorTable(rows: readonly DoctorToolStatus[]): string {
-    const headers = ['Tool', 'Found', 'Version', 'Used by'];
-    const formatCell = (value: string): string => value.replaceAll('\\', '\\\\').replaceAll('|', '\\|').replaceAll('\n', ' ');
-    const formatRow = (row: readonly string[]): string => `| ${row.map(formatCell).join(' | ')} |`;
-    const cells = rows.map((row) => [row.tool, row.found, row.version, row.usedBy.join(', ')]);
-
-    return [formatRow(headers), formatRow(headers.map(() => '---')), ...cells.map((row) => formatRow(row))].join('\n');
+interface OnOpenTab {
+    readonly input: unknown;
 }
 
-function uniqueLabels(labels: readonly string[]): string[] {
-    return [...new Set(labels.filter((label) => label !== ''))];
+interface OnOpenTabGroup {
+    readonly activeTab: OnOpenTab | undefined;
+    readonly viewColumn: vscode.ViewColumn;
 }
 
-export function getManualRunNotificationTitle(labels: readonly string[]): string {
-    const unique = uniqueLabels(labels);
-    if (unique.length === 0) {
-        return 'LintRunner: Running tools…';
-    }
-    if (unique.length === 1) {
-        return `LintRunner: Running ${unique[0]}…`;
-    }
-    if (unique.length === 2) {
-        return `LintRunner: Running ${unique.join(', ')}…`;
-    }
-    return `LintRunner: Running ${unique[0]}, ${unique[1]}, +${unique.length - 2} more…`;
+interface CollectVisibleFileNamesOptions {
+    readonly includeSeen?: boolean;
+}
+
+interface ActionQuickPickItem extends vscode.QuickPickItem {
+    action?: () => Promise<void>;
+}
+
+interface DeactivateCleanupDeps {
+    clearPendingSaveDebounces?: () => void;
+    clearRunnerRuntimeState?: () => void;
+    savedContentHashes?: Map<string, string>;
+    seenOnOpenDocumentUris?: Set<string>;
+    diagnostics?: DiagnosticsLike;
+    runningStatusBar?: StatusBarLike;
+    actionsStatusBar?: StatusBarLike;
+    output?: OutputChannelLike;
+    codeLensRefreshEmitter?: DisposableLike;
 }
 
 interface ManualRunNotificationDeps {
@@ -213,46 +107,343 @@ interface OpenBundledExamplesDeps {
     showTextDocument?: typeof vscode.window.showTextDocument;
 }
 
-export async function openBundledExamples(
-    extensionUri: vscode.Uri,
-    deps: OpenBundledExamplesDeps = {}
-): Promise<void> {
-    const openTextDocument = deps.openTextDocument ?? vscode.workspace.openTextDocument.bind(vscode.workspace);
-    const showTextDocument = deps.showTextDocument ?? vscode.window.showTextDocument.bind(vscode.window);
-    const document = await openTextDocument(vscode.Uri.joinPath(extensionUri, 'docs', 'examples.md'));
-    await showTextDocument(document, { preview: false });
+let deactivateCleanupResources: Omit<
+    DeactivateCleanupDeps,
+    'clearPendingSaveDebounces' | 'clearRunnerRuntimeState' | 'savedContentHashes'
+> | undefined;
+
+export function computeContentHash(text: string): string {
+    return crypto.createHash('sha256').update(text).digest('hex');
 }
 
-export async function runDoctorWithNotification(
-    resource?: vscode.Uri,
-    deps: DoctorNotificationDeps = {}
-): Promise<void> {
-    const getStatuses = deps.getStatuses ?? getDoctorToolStatuses;
-    const withProgress = deps.withProgress ?? vscode.window.withProgress.bind(vscode.window);
-    const rows = await withProgress(
-        {
-            location: vscode.ProgressLocation.Notification,
-            title: 'LintRunner: Checking configured tools…',
-            cancellable: false,
-        },
-        async () => await getStatuses(resource)
-    );
+export function isContentChanged(fileKey: string, newHash: string, hashMap: Map<string, string>): boolean {
+    const prevHash = hashMap.get(fileKey);
+    hashMap.set(fileKey, newHash);
+    return prevHash !== newHash;
+}
 
-    if (rows.length === 0) {
-        const showInformationMessage = deps.showInformationMessage ?? vscode.window.showInformationMessage.bind(vscode.window);
-        await showInformationMessage('LintRunner: No configured tools found.');
-        return;
+export function isLoggingEnabled(
+    config: Pick<vscode.WorkspaceConfiguration, 'get'> = vscode.workspace.getConfiguration('lintRunner')
+): boolean {
+    return config.get<boolean>('enableLogging') !== false;
+}
+
+export function isManualRunNotificationEnabled(
+    resourceOrConfig: Pick<vscode.WorkspaceConfiguration, 'get'> | vscode.Uri =
+        vscode.workspace.getConfiguration('lintRunner')
+): boolean {
+    const config =
+        resourceOrConfig instanceof vscode.Uri
+            ? vscode.workspace.getConfiguration('lintRunner', resourceOrConfig)
+            : resourceOrConfig;
+    return config.get<boolean>('showManualRunNotifications') !== false;
+}
+
+function uniqueLabels(labels: readonly string[]): string[] {
+    return [...new Set(labels.filter((label) => label !== ''))];
+}
+
+export function getManualRunNotificationTitle(labels: readonly string[]): string {
+    const unique = uniqueLabels(labels);
+    if (unique.length === 0) {
+        return 'LintRunner: Running tools...';
+    }
+    if (unique.length === 1) {
+        return `LintRunner: Running ${unique[0]}...`;
+    }
+    if (unique.length === 2) {
+        return `LintRunner: Running ${unique.join(', ')}...`;
+    }
+    return `LintRunner: Running ${unique[0]}, ${unique[1]}, +${unique.length - 2} more...`;
+}
+
+export function formatDoctorTable(rows: readonly DoctorToolStatus[]): string {
+    const headers = ['Tool', 'Found', 'Version', 'Used by'];
+    const formatCell = (value: string): string => value.replaceAll('\\', '\\\\').replaceAll('|', '\\|').replaceAll('\n', ' ');
+    const formatRow = (row: readonly string[]): string => `| ${row.map(formatCell).join(' | ')} |`;
+    const cells = rows.map((row) => [row.tool, row.found, row.version, row.usedBy.join(', ')]);
+    return [formatRow(headers), formatRow(headers.map(() => '---')), ...cells.map((row) => formatRow(row))].join('\n');
+}
+
+export class OutputChannelManager implements RunnerOutput, vscode.Disposable {
+    private output: vscode.OutputChannel | undefined;
+
+    public constructor(
+        private readonly createOutputChannel: typeof vscode.window.createOutputChannel = vscode.window.createOutputChannel
+    ) {}
+
+    public sync(enabled: boolean): void {
+        if (enabled && this.output === undefined) {
+            this.output = this.createOutputChannel('LintRunner');
+        }
+        if (!enabled && this.output !== undefined) {
+            this.output.dispose();
+            this.output = undefined;
+        }
     }
 
-    const openTextDocument = deps.openTextDocument ?? vscode.workspace.openTextDocument.bind(vscode.workspace);
-    const showTextDocument = deps.showTextDocument ?? vscode.window.showTextDocument.bind(vscode.window);
-    const executeCommand = deps.executeCommand ?? vscode.commands.executeCommand.bind(vscode.commands);
-    const document = await openTextDocument({
-        language: 'markdown',
-        content: formatDoctorTable(rows),
+    public appendLine(value: string): void {
+        this.output?.appendLine(value);
+    }
+
+    public dispose(): void {
+        this.output?.dispose();
+        this.output = undefined;
+    }
+}
+
+function documentKey(doc: Pick<vscode.TextDocument, 'uri'>): string {
+    return doc.uri.toString();
+}
+
+function isVisibleDiffDocument(tab: OnOpenTab | undefined): tab is OnOpenTab & { input: vscode.TabInputTextDiff } {
+    return tab !== undefined && tab.input instanceof vscode.TabInputTextDiff;
+}
+
+export function collectVisibleDiffDocumentUrisByColumn(tabGroups: readonly OnOpenTabGroup[]): Map<vscode.ViewColumn, Set<string>> {
+    const result = new Map<vscode.ViewColumn, Set<string>>();
+    for (const group of tabGroups) {
+        const tab = group.activeTab;
+        if (!isVisibleDiffDocument(tab)) {
+            continue;
+        }
+        const uris = result.get(group.viewColumn) ?? new Set<string>();
+        uris.add(tab.input.original.toString());
+        uris.add(tab.input.modified.toString());
+        result.set(group.viewColumn, uris);
+    }
+    return result;
+}
+
+export function collectNewVisibleFileNames(
+    editors: readonly OnOpenEditor[],
+    seenDocumentUris: Set<string>,
+    diffDocumentUrisByColumn: Map<vscode.ViewColumn, Set<string>>,
+    options: CollectVisibleFileNamesOptions = {}
+): string[] {
+    const files: string[] = [];
+    for (const editor of editors) {
+        const doc = editor.document;
+        if (doc.isUntitled || doc.uri.scheme !== 'file') {
+            continue;
+        }
+        if (editor.viewColumn !== undefined && diffDocumentUrisByColumn.get(editor.viewColumn)?.has(doc.uri.toString())) {
+            continue;
+        }
+        const key = doc.uri.toString();
+        if (!options.includeSeen && seenDocumentUris.has(key)) {
+            continue;
+        }
+        seenDocumentUris.add(key);
+        files.push(doc.fileName);
+    }
+    return files;
+}
+
+export function collectClosedFileTabUris(tabs: readonly OnOpenTab[]): vscode.Uri[] {
+    const uris: vscode.Uri[] = [];
+    for (const tab of tabs) {
+        if (tab.input instanceof vscode.TabInputText) {
+            uris.push(tab.input.uri);
+        }
+        if (tab.input instanceof vscode.TabInputTextDiff) {
+            uris.push(tab.input.original, tab.input.modified);
+        }
+    }
+    return uris.filter((uri) => uri.scheme === 'file');
+}
+
+export function clearPendingSaveDebounce(fileName: string): void {
+    const timer = saveDebounceTimers.get(fileName);
+    if (timer !== undefined) {
+        clearTimeout(timer);
+        saveDebounceTimers.delete(fileName);
+    }
+}
+
+export function clearAllPendingSaveDebounces(): void {
+    for (const fileName of [...saveDebounceTimers.keys()]) {
+        clearPendingSaveDebounce(fileName);
+    }
+}
+
+export function handleClosedFileUri(
+    uri: vscode.Uri,
+    fileName: string,
+    seenDocumentUris: Set<string>,
+    savedContentHashes: Map<string, string>,
+    diagnostics: vscode.DiagnosticCollection
+): void {
+    seenDocumentUris.delete(uri.toString());
+    savedContentHashes.delete(uri.toString());
+    clearPendingSaveDebounce(fileName);
+    cancelFileRun(fileName);
+    clearFileToolDiagnostics(uri.toString());
+    clearFileDiagnosticsCache(fileName);
+    diagnostics.delete(uri);
+}
+
+export function handleClosedDocument(
+    doc: OnOpenDocument,
+    seenDocumentUris: Set<string>,
+    savedContentHashes: Map<string, string>,
+    diagnostics: vscode.DiagnosticCollection
+): void {
+    handleClosedFileUri(doc.uri, doc.fileName, seenDocumentUris, savedContentHashes, diagnostics);
+}
+
+export function cleanupExtensionRuntime(deps: DeactivateCleanupDeps = {}): void {
+    (deps.clearPendingSaveDebounces ?? clearAllPendingSaveDebounces)();
+    (deps.clearRunnerRuntimeState ?? clearRunnerRuntimeState)();
+    deps.savedContentHashes?.clear();
+    deps.seenOnOpenDocumentUris?.clear();
+    deps.diagnostics?.clear();
+    deps.diagnostics?.dispose();
+    deps.runningStatusBar?.hide();
+    deps.runningStatusBar?.dispose();
+    deps.actionsStatusBar?.hide();
+    deps.actionsStatusBar?.dispose();
+    deps.output?.dispose();
+    deps.codeLensRefreshEmitter?.dispose();
+}
+
+export function deactivate(): void {
+    cleanupExtensionRuntime({
+        ...deactivateCleanupResources,
+        clearPendingSaveDebounces: clearAllPendingSaveDebounces,
+        clearRunnerRuntimeState,
+        savedContentHashes: lastSavedContentHashes,
     });
-    await showTextDocument(document, { preview: false });
-    await executeCommand('markdown.showPreview', document.uri);
+    deactivateCleanupResources = undefined;
+}
+
+function canRunWorkspaceCommands(showWarning: boolean): boolean {
+    if (!vscode.workspace.isTrusted) {
+        if (showWarning && !untrustedWorkspaceWarningShown) {
+            untrustedWorkspaceWarningShown = true;
+            void vscode.window.showWarningMessage('LintRunner: Workspace is not trusted. External tools are disabled.');
+        }
+        return false;
+    }
+    return true;
+}
+
+function getActiveFileEditor(): vscode.TextEditor | undefined {
+    const editor = vscode.window.activeTextEditor;
+    return editor?.document.uri.scheme === 'file' ? editor : undefined;
+}
+
+function hasValidConfig(): boolean {
+    return configValidationIssues.errors.length === 0;
+}
+
+function getConfigValidationMessage(issues: ConfigValidationIssues): string {
+    const errors = issues.errors.slice(0, CONFIG_VALIDATION_PREVIEW_LIMIT).join('\n');
+    const suffix = issues.errors.length > CONFIG_VALIDATION_PREVIEW_LIMIT
+        ? `\n...and ${issues.errors.length - CONFIG_VALIDATION_PREVIEW_LIMIT} more.`
+        : '';
+    return `LintRunner config has ${issues.errors.length} error(s):\n${errors}${suffix}`;
+}
+
+function showConfigValidationWarning(issues: ConfigValidationIssues, force = false): void {
+    if (issues.errors.length === 0 || (configValidationWarningShown && !force)) {
+        return;
+    }
+    configValidationWarningShown = true;
+    void vscode.window.showWarningMessage(getConfigValidationMessage(issues));
+}
+
+async function refreshConfigValidation(forceWarning = false): Promise<boolean> {
+    configValidationIssues = await validateLintRunnerConfig();
+    showConfigValidationWarning(configValidationIssues, forceWarning);
+    return hasValidConfig();
+}
+
+export function getActionsStatusBarState(
+    editor: Pick<vscode.TextEditor, 'document'> | undefined,
+    isEnabled: typeof isLintRunnerEnabled = isLintRunnerEnabled,
+    isConfigValid: typeof hasValidConfig = hasValidConfig,
+    getPipelines: typeof getRunnablePipelines = getRunnablePipelines,
+    getTools: typeof getRunnableTools = getRunnableTools
+): { text: string; tooltip: string } | undefined {
+    if (editor === undefined || editor.document.isUntitled || editor.document.uri.scheme !== 'file') {
+        return undefined;
+    }
+    if (!isEnabled(editor.document.uri) || !isConfigValid()) {
+        return undefined;
+    }
+    const pipelines = getPipelines(editor.document.fileName, 'manual');
+    const tools = getTools(editor.document.fileName, 'manual');
+    return {
+        text: '$(wrench)',
+        tooltip: `LintRunner: ${pipelines.length} pipeline(s), ${tools.length} tool(s) for ${vscode.workspace.asRelativePath(editor.document.fileName)}`,
+    };
+}
+
+function updateActionsStatusBar(statusBar: vscode.StatusBarItem): void {
+    const state = getActionsStatusBarState(getActiveFileEditor());
+    if (state === undefined) {
+        statusBar.hide();
+        return;
+    }
+    statusBar.text = state.text;
+    statusBar.tooltip = state.tooltip;
+    statusBar.show();
+}
+
+function shouldEnableOutputChannel(): boolean {
+    return isLoggingEnabled();
+}
+
+async function runPipelinesForFile(
+    fileName: string,
+    trigger: 'manual' | 'onOpen' | 'onSave',
+    diagnostics: vscode.DiagnosticCollection,
+    output: RunnerOutput,
+    statusBar: vscode.StatusBarItem,
+    pipelines: readonly RunnablePipeline[] = getRunnablePipelines(fileName, trigger)
+): Promise<number> {
+    let count = 0;
+    for (const pipeline of pipelines) {
+        count += await runPipeline(fileName, pipeline, output, statusBar, diagnostics);
+    }
+    return count;
+}
+
+export function runOnOpenPipelinesForVisibleEditors(
+    editors: readonly OnOpenEditor[],
+    seenDocumentUris: Set<string>,
+    diagnostics: vscode.DiagnosticCollection,
+    output: RunnerOutput,
+    statusBar: vscode.StatusBarItem,
+    tabGroups: readonly OnOpenTabGroup[] = vscode.window.tabGroups.all,
+    options: CollectVisibleFileNamesOptions = {},
+    onRunPipelines: typeof runPipelinesForFile = runPipelinesForFile
+): void {
+    const diffDocumentUrisByColumn = collectVisibleDiffDocumentUrisByColumn(tabGroups);
+    for (const fileName of collectNewVisibleFileNames(editors, seenDocumentUris, diffDocumentUrisByColumn, options)) {
+        void onRunPipelines(fileName, 'onOpen', diagnostics, output, statusBar);
+    }
+}
+
+function createFailureAwareOutput(output: RunnerOutput, failures: RunnerFailure[]): RunnerOutput {
+    return {
+        appendLine: (value) => output.appendLine(value),
+        reportFailure: (failure) => {
+            failures.push(failure);
+            output.reportFailure?.(failure);
+        },
+    };
+}
+
+async function showManualRunFailureWarning(
+    failures: readonly RunnerFailure[],
+    showWarningMessage: typeof vscode.window.showWarningMessage = vscode.window.showWarningMessage
+): Promise<void> {
+    if (failures.length === 0) {
+        return;
+    }
+    await showWarningMessage(`LintRunner: ${failures[0].label} failed: ${failures[0].message}`);
 }
 
 export async function runManualTaskWithNotification<T>(
@@ -262,12 +453,11 @@ export async function runManualTaskWithNotification<T>(
     deps: ManualRunNotificationDeps = {}
 ): Promise<T> {
     const resource = vscode.Uri.file(filePath);
-    const isEnabled = deps.isEnabled ?? ((uri: vscode.Uri) => isManualRunNotificationEnabled(uri));
-    if (!isEnabled(resource) || labels.length === 0) {
+    const isEnabled = deps.isEnabled ?? isManualRunNotificationEnabled;
+    if (!isEnabled(resource)) {
         return await task();
     }
-
-    const withProgress = deps.withProgress ?? vscode.window.withProgress.bind(vscode.window);
+    const withProgress = deps.withProgress ?? vscode.window.withProgress;
     const onCancel = deps.onCancel ?? cancelFileRun;
     return await withProgress(
         {
@@ -276,607 +466,90 @@ export async function runManualTaskWithNotification<T>(
             cancellable: true,
         },
         async (_progress, token) => {
-            const cancellation = token.onCancellationRequested(() => {
-                onCancel(filePath);
-            });
+            const disposable = token.onCancellationRequested(() => onCancel(filePath));
             try {
                 return await task();
             } finally {
-                cancellation.dispose();
+                disposable.dispose();
             }
         }
     );
 }
 
-function createFailureAwareOutput(output: RunnerOutput, failures: RunnerFailure[]): RunnerOutput {
-    return {
-        appendLine(value: string): void {
-            output.appendLine(value);
-        },
-        reportFailure(failure: RunnerFailure): void {
-            failures.push(failure);
-            output.reportFailure?.(failure);
-        },
-    };
+function getRunnablePipelineLabels(pipelines: readonly RunnablePipeline[]): string[] {
+    return uniqueLabels(pipelines.map((pipeline) => pipeline.label));
 }
 
-function getManualRunFailureMessage(failures: readonly RunnerFailure[]): string | undefined {
-    if (failures.length === 0) {
-        return undefined;
-    }
-
-    if (failures.length === 1) {
-        const [failure] = failures;
-        return `LintRunner: ${failure.label} failed: ${failure.message}`;
-    }
-
-    const labels = uniqueLabels(failures.map((failure) => failure.label));
-    const preview = labels.slice(0, 2);
-    const suffix = labels.length > preview.length ? `, +${labels.length - preview.length} more` : '';
-    return `LintRunner: ${labels.length} tools failed: ${preview.join(', ')}${suffix}. See output for details.`;
-}
-
-async function showManualRunFailureWarning(
-    failures: readonly RunnerFailure[],
-    showWarningMessage: (message: string) => Thenable<string | undefined>
-): Promise<void> {
-    const message = getManualRunFailureMessage(failures);
-    if (message !== undefined) {
-        await showWarningMessage(message);
-    }
-}
-
-function hasValidConfig(): boolean {
-    return configValidationIssues.errors.length === 0;
-}
-
-function getConfigValidationMessage(issues: ConfigValidationIssues): string {
-    const entries = [
-        ...issues.errors.map((issue) => `• Error: ${issue}`),
-        ...issues.warnings.map((issue) => `• Warning: ${issue}`),
-    ];
-    const preview = entries.slice(0, CONFIG_VALIDATION_PREVIEW_LIMIT);
-    if (entries.length > preview.length) {
-        preview.push(`• +${entries.length - preview.length} more issue(s)`);
-    }
-
-    const summary: string[] = [];
-    if (issues.errors.length > 0) {
-        summary.push(`${issues.errors.length} error(s)`);
-    }
-    if (issues.warnings.length > 0) {
-        summary.push(`${issues.warnings.length} warning(s)`);
-    }
-
-    const status = issues.errors.length > 0 ? 'failed' : 'completed with warnings';
-    return `LintRunner: Config validation ${status} (${summary.join(', ')}).\n${preview.join('\n')}`;
-}
-
-function showConfigValidationWarning(): void {
-    if (configValidationIssues.errors.length === 0 && configValidationIssues.warnings.length === 0) {
-        return;
-    }
-
-    vscode.window.showWarningMessage(getConfigValidationMessage(configValidationIssues));
-    configValidationWarningShown = true;
-}
-
-async function collectConfigValidationIssues(): Promise<ConfigValidationIssues> {
-    const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
-    const resources = workspaceFolders.length === 0 ? [undefined] : workspaceFolders.map((folder) => folder.uri);
-    const results = await Promise.all(resources.map(async (resource) => await validateLintRunnerConfig(resource)));
-    return {
-        errors: [...new Set(results.flatMap((result) => result.errors))],
-        warnings: [...new Set(results.flatMap((result) => result.warnings))],
-    };
-}
-
-async function refreshConfigValidation(showSuccessMessage = false): Promise<boolean> {
-    configValidationIssues = await collectConfigValidationIssues();
-    configValidationWarningShown = false;
-    const configValid = hasValidConfig();
-
-    if (configValidationIssues.warnings.length > 0 || !configValid) {
-        showConfigValidationWarning();
-    }
-
-    if (!configValid) {
-        return false;
-    }
-
-    if (showSuccessMessage && configValidationIssues.warnings.length === 0) {
-        vscode.window.showInformationMessage('LintRunner: Config is valid.');
-    }
-
-    return true;
-}
-
-function shouldEnableOutputChannel(): boolean {
-    return isLintRunnerEnabled() && isLoggingEnabled();
-}
-
-export class OutputChannelManager implements RunnerOutput, vscode.Disposable {
-    private output: OutputChannelLike | undefined;
-
-    constructor(
-        private readonly createOutputChannel: () => OutputChannelLike = () =>
-            vscode.window.createOutputChannel('LintRunner')
-    ) {}
-
-    appendLine(value: string): void {
-        this.output?.appendLine(value);
-    }
-
-    sync(enabled: boolean): void {
-        if (enabled) {
-            this.output ??= this.createOutputChannel();
-            return;
-        }
-
-        this.output?.dispose();
-        this.output = undefined;
-    }
-
-    dispose(): void {
-        this.output?.dispose();
-        this.output = undefined;
-    }
-}
-
-function documentKey(document: Pick<vscode.TextDocument, 'uri'>): string {
-    return document.uri.toString();
-}
-
-export function clearPendingSaveDebounce(
+export async function runManualPipelinesForFile(
     fileName: string,
-    timers: Map<string, ReturnType<typeof setTimeout>> = saveDebounceTimers
-): void {
-    const existingTimer = timers.get(fileName);
-    if (existingTimer === undefined) {
-        return;
-    }
-
-    clearTimeout(existingTimer);
-    timers.delete(fileName);
-}
-
-export function clearAllPendingSaveDebounces(
-    timers: Map<string, ReturnType<typeof setTimeout>> = saveDebounceTimers
-): void {
-    for (const timer of timers.values()) {
-        clearTimeout(timer);
-    }
-    timers.clear();
-}
-
-export function handleClosedDocument(
-    document: Pick<vscode.TextDocument, 'fileName' | 'uri'>,
-    seenDocumentUris: Set<string>,
-    savedContentHashes: Map<string, string>,
-    diagnostics: Pick<vscode.DiagnosticCollection, 'delete'>,
-    timers: Map<string, ReturnType<typeof setTimeout>> = saveDebounceTimers,
-    onCancelFileRun: (filePath: string) => void = cancelFileRun,
-    onClearFileDiagnostics: (uriString: string) => void = clearFileLinterDiagnostics
-): void {
-    handleClosedFileUri(
-        document.uri,
-        document.fileName,
-        seenDocumentUris,
-        savedContentHashes,
-        diagnostics,
-        timers,
-        onCancelFileRun,
-        onClearFileDiagnostics
-    );
-}
-
-export function handleClosedFileUri(
-    uri: vscode.Uri,
-    fileName: string,
-    seenDocumentUris: Set<string>,
-    savedContentHashes: Map<string, string>,
-    diagnostics: Pick<vscode.DiagnosticCollection, 'delete'>,
-    timers: Map<string, ReturnType<typeof setTimeout>> = saveDebounceTimers,
-    onCancelFileRun: (filePath: string) => void = cancelFileRun,
-    onClearFileDiagnostics: (uriString: string) => void = clearFileLinterDiagnostics
-): void {
-    const key = uri.toString();
-    seenDocumentUris.delete(key);
-    savedContentHashes.delete(key);
-    clearPendingSaveDebounce(fileName, timers);
-    onCancelFileRun(fileName);
-    diagnostics.delete(uri);
-    onClearFileDiagnostics(key);
-}
-
-function isUserOpenDocument(document: OnOpenDocument): boolean {
-    return document.uri.scheme === 'file' && !document.isUntitled;
-}
-
-function getActiveFileEditor(): vscode.TextEditor | undefined {
-    const editor = vscode.window.activeTextEditor;
-    if (editor === undefined || !isUserOpenDocument(editor.document)) {
-        return undefined;
-    }
-
-    return editor;
-}
-
-function addDiffDocumentUri(
-    diffDocumentUrisByColumn: Map<vscode.ViewColumn, Set<string>>,
-    viewColumn: vscode.ViewColumn,
-    uri: vscode.Uri
-): void {
-    let diffDocumentUris = diffDocumentUrisByColumn.get(viewColumn);
-    if (diffDocumentUris === undefined) {
-        diffDocumentUris = new Set<string>();
-        diffDocumentUrisByColumn.set(viewColumn, diffDocumentUris);
-    }
-
-    diffDocumentUris.add(uri.toString());
-}
-
-export function collectVisibleDiffDocumentUrisByColumn(
-    tabGroups: readonly OnOpenTabGroup[]
-): Map<vscode.ViewColumn, Set<string>> {
-    const diffDocumentUrisByColumn = new Map<vscode.ViewColumn, Set<string>>();
-
-    for (const group of tabGroups) {
-        const input = group.activeTab?.input;
-        if (!(input instanceof vscode.TabInputTextDiff)) {
-            continue;
-        }
-
-        addDiffDocumentUri(diffDocumentUrisByColumn, group.viewColumn, input.original);
-        addDiffDocumentUri(diffDocumentUrisByColumn, group.viewColumn, input.modified);
-    }
-
-    return diffDocumentUrisByColumn;
-}
-
-function isVisibleDiffDocument(
-    editor: OnOpenEditor,
-    diffDocumentUrisByColumn: ReadonlyMap<vscode.ViewColumn, ReadonlySet<string>>
-): boolean {
-    const key = documentKey(editor.document);
-
-    if (editor.viewColumn !== undefined) {
-        return diffDocumentUrisByColumn.get(editor.viewColumn)?.has(key) ?? false;
-    }
-
-    for (const diffDocumentUris of diffDocumentUrisByColumn.values()) {
-        if (diffDocumentUris.has(key)) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-export function collectNewVisibleFileNames(
-    editors: readonly OnOpenEditor[],
-    seenDocumentUris: Set<string>,
-    diffDocumentUrisByColumn: ReadonlyMap<vscode.ViewColumn, ReadonlySet<string>> = new Map(),
-    options: CollectVisibleFileNamesOptions = {}
-): string[] {
-    const fileNames: string[] = [];
-    const includeSeen = options.includeSeen === true;
-
-    for (const editor of editors) {
-        const document = editor.document;
-        if (!isUserOpenDocument(document)) {
-            continue;
-        }
-
-        if (isVisibleDiffDocument(editor, diffDocumentUrisByColumn)) {
-            continue;
-        }
-
-        const key = documentKey(document);
-        if (!includeSeen && seenDocumentUris.has(key)) {
-            continue;
-        }
-
-        seenDocumentUris.add(key);
-        fileNames.push(document.fileName);
-    }
-
-    return fileNames;
-}
-
-export function runOnOpenLintersForVisibleEditors(
-    editors: readonly OnOpenEditor[],
-    seenDocumentUris: Set<string>,
     diagnostics: vscode.DiagnosticCollection,
     output: RunnerOutput,
     statusBar: vscode.StatusBarItem,
-    tabGroups: readonly OnOpenTabGroup[] = vscode.window.tabGroups.all,
-    options: CollectVisibleFileNamesOptions = {},
-    onRunLinters: typeof runLinters = runLinters
-): void {
-    const diffDocumentUrisByColumn = collectVisibleDiffDocumentUrisByColumn(tabGroups);
-    for (const fileName of collectNewVisibleFileNames(
-        editors,
-        seenDocumentUris,
-        diffDocumentUrisByColumn,
-        options
-    )) {
-        void onRunLinters(fileName, 'onOpen', diagnostics, output, statusBar);
-    }
-}
-
-export function collectClosedFileTabUris(tabs: readonly OnOpenTab[]): vscode.Uri[] {
-    const uris: vscode.Uri[] = [];
-
-    for (const tab of tabs) {
-        const input = tab.input;
-        if (input instanceof vscode.TabInputText && input.uri.scheme === 'file') {
-            uris.push(input.uri);
-        }
-    }
-
-    return uris;
-}
-
-function canRunWorkspaceCommands(showRepeatedWarning: boolean): boolean {
-    if (!isLintRunnerEnabled()) {
-        if (showRepeatedWarning) {
-            vscode.window.showWarningMessage(
-                'LintRunner: Extension is disabled. Set lintRunner.enabled to true to run commands.'
-            );
-        }
-        return false;
-    }
-
-    if (!hasValidConfig()) {
-        if (showRepeatedWarning || !configValidationWarningShown) {
-            showConfigValidationWarning();
-        }
-        return false;
-    }
-
-    if (vscode.workspace.isTrusted) {
-        return true;
-    }
-
-    if (showRepeatedWarning || !untrustedWorkspaceWarningShown) {
-        vscode.window.showWarningMessage(
-            'LintRunner: Workspace is not trusted. Trust the workspace to run configured commands.'
-        );
-        untrustedWorkspaceWarningShown = true;
-    }
-
-    return false;
-}
-
-async function selectManualFixers(fileName: string): Promise<readonly RunnableFixer[] | undefined> {
-    const fixers = getRunnableFixers(fileName, 'manual');
-    if (fixers.length <= 1) {
-        return fixers;
-    }
-
-    const items: FixerQuickPickItem[] = fixers.map((fixer) => ({
-        label: fixer.label,
-        description: fixer.description,
-        detail: fixer.detail,
-        fixer,
-    }));
-    const selectedItems = await vscode.window.showQuickPick(items, {
-        canPickMany: true,
-        placeHolder: 'Select fixers to run',
-        title: 'LintRunner: Run Fixers',
-    });
-
-    if (selectedItems === undefined || selectedItems.length === 0) {
-        return undefined;
-    }
-
-    return selectedItems.map((item) => item.fixer);
-}
-
-export function getActionsStatusBarState(
-    editor: Pick<vscode.TextEditor, 'document'> | undefined = getActiveFileEditor(),
-    isEnabled: (resource: vscode.Uri) => boolean = isLintRunnerEnabled,
-    isConfigValid: () => boolean = hasValidConfig
-): { text: string; tooltip: string } | undefined {
-    if (
-        editor === undefined ||
-        !isUserOpenDocument(editor.document) ||
-        !isEnabled(editor.document.uri) ||
-        !isConfigValid()
-    ) {
-        return undefined;
-    }
-
-    const fileName = editor.document.fileName;
-    const linters = getRunnableLinters(fileName, 'manual');
-    const fixers = getRunnableFixers(fileName, 'manual');
-
-    return {
-        text: '$(wrench)',
-        tooltip:
-            `LintRunner: ${linters.length} linter(s), ${fixers.length} fixer(s) for ${vscode.workspace.asRelativePath(editor.document.fileName)}`,
-    };
-}
-
-function updateActionsStatusBar(statusBar: vscode.StatusBarItem): void {
-    const state = getActionsStatusBarState();
-    if (state === undefined) {
-        statusBar.hide();
+    pipelines?: readonly RunnablePipeline[]
+): Promise<void> {
+    const selectedPipelines = pipelines ?? getRunnablePipelines(fileName, 'manual');
+    if (selectedPipelines.length === 0) {
+        await vscode.window.showWarningMessage('LintRunner: No matching manual pipeline.');
         return;
     }
 
-    statusBar.text = state.text;
-    statusBar.tooltip = state.tooltip;
-    statusBar.show();
-}
-
-function findVisibleFileEditor(uri: vscode.Uri): vscode.TextEditor | undefined {
-    return vscode.window.visibleTextEditors.find(
-        (editor) => editor.document.uri.toString() === uri.toString()
+    const failures: RunnerFailure[] = [];
+    const failureAwareOutput = createFailureAwareOutput(output, failures);
+    await runManualTaskWithNotification(fileName, getRunnablePipelineLabels(selectedPipelines), async () =>
+        await runPipelinesForFile(fileName, 'manual', diagnostics, failureAwareOutput, statusBar, selectedPipelines)
     );
+    await showManualRunFailureWarning(failures);
 }
 
-function getRunnableLinterLabels(linters: readonly RunnableLinter[]): string[] {
-    return linters.map((linter) => `${linter.description}:${linter.label}`);
-}
-
-function getRunnableFixerLabels(fixers: readonly RunnableFixer[]): string[] {
-    return fixers.map((fixer) => `${fixer.targetName}:fix:${fixer.label}`);
-}
-
-async function saveDocumentBeforeManualFixers(document: vscode.TextDocument): Promise<boolean> {
-    skipFixersOnSave.add(document.fileName);
-    try {
-        return await document.save();
-    } finally {
-        skipFixersOnSave.delete(document.fileName);
-    }
-}
-
-export function isManualCodeActionLinter(runnable: RunnableLinter): boolean {
-    return runnable.linter.run === 'manual';
-}
-
-export function isManualCodeActionFixer(runnable: RunnableFixer): boolean {
-    return runnable.fixer.run !== 'onSave';
+export async function runManualToolForFile(
+    fileName: string,
+    tool: RunnableTool,
+    diagnostics: vscode.DiagnosticCollection,
+    output: RunnerOutput,
+    statusBar: vscode.StatusBarItem
+): Promise<void> {
+    const pipeline: RunnablePipeline = {
+        label: tool.label,
+        description: tool.description,
+        detail: tool.detail,
+        target: { name: tool.targetName },
+        pipelineName: 'manual',
+        pipeline: { strategy: 'sequence', tools: [tool.toolName] },
+        tools: [tool],
+    };
+    await runManualPipelinesForFile(fileName, diagnostics, output, statusBar, [pipeline]);
 }
 
 export function createManualCodeActions(
     documentUri: vscode.Uri,
-    linters: readonly RunnableLinter[],
-    fixers: readonly RunnableFixer[]
+    pipelines: readonly RunnablePipeline[],
+    tools: readonly RunnableTool[]
 ): vscode.CodeAction[] {
     const actions: vscode.CodeAction[] = [];
-
-    for (const linter of linters) {
-        const title = `Run linter: ${linter.label} (${linter.description})`;
-        const action = new vscode.CodeAction(title, manualLinterCodeActionKind);
-        action.command = {
-            title,
-            command: 'lintRunner.runManualLinterCodeAction',
-            arguments: [documentUri, linter],
-        };
+    for (const pipeline of pipelines) {
+        const title = `Run pipeline: ${pipeline.label}`;
+        const action = new vscode.CodeAction(title, manualPipelineCodeActionKind);
+        action.command = { title, command: 'lintRunner.runManualPipelineCodeAction', arguments: [documentUri, pipeline] };
         actions.push(action);
     }
-
-    for (const fixer of fixers) {
-        const title = `Run fixer: ${fixer.label} (${fixer.description})`;
-        const action = new vscode.CodeAction(title, manualFixerCodeActionKind);
-        action.command = {
-            title,
-            command: 'lintRunner.runManualFixerCodeAction',
-            arguments: [documentUri, fixer],
-        };
+    for (const tool of tools) {
+        const title = `Run tool: ${tool.label} (${tool.description})`;
+        const action = new vscode.CodeAction(title, manualToolCodeActionKind);
+        action.command = { title, command: 'lintRunner.runManualToolCodeAction', arguments: [documentUri, tool] };
         actions.push(action);
     }
-
     return actions;
 }
 
 export function createManualCodeLenses(
     documentUri: vscode.Uri,
-    linters: readonly RunnableLinter[],
-    fixers: readonly RunnableFixer[]
+    pipelines: readonly RunnablePipeline[],
+    tools: readonly RunnableTool[]
 ): vscode.CodeLens[] {
     const range = new vscode.Range(0, 0, 0, 0);
-    const codeLenses: vscode.CodeLens[] = [];
-
-    for (const linter of linters) {
-        const title = `Lint: ${linter.label} (${linter.description})`;
-        codeLenses.push(
-            new vscode.CodeLens(range, {
-                title,
-                command: 'lintRunner.runManualLinterCodeAction',
-                arguments: [documentUri, linter],
-            })
-        );
-    }
-
-    for (const fixer of fixers) {
-        const title = `Fix: ${fixer.label} (${fixer.description})`;
-        codeLenses.push(
-            new vscode.CodeLens(range, {
-                title,
-                command: 'lintRunner.runManualFixerCodeAction',
-                arguments: [documentUri, fixer],
-            })
-        );
-    }
-
-    return codeLenses;
-}
-
-export async function runManualFixersForEditor(
-    editorOrUri: vscode.TextEditor | vscode.Uri,
-    diagnostics: vscode.DiagnosticCollection,
-    output: RunnerOutput,
-    statusBar: vscode.StatusBarItem,
-    fixers?: readonly RunnableFixer[],
-    deps: ManualFixerRunnerDeps = {}
-): Promise<void> {
-    const saveDocument = deps.saveDocumentBeforeManualFixers ?? saveDocumentBeforeManualFixers;
-    const selectFixers = deps.selectManualFixers ?? selectManualFixers;
-    const runWithManualNotification = deps.runWithManualNotification ?? runManualTaskWithNotification;
-    const runSelectedFixers = deps.runFixers ?? runFixers;
-    const refreshLinters = deps.runLinters ?? runLinters;
-    const showWarningMessage = deps.showWarningMessage ?? vscode.window.showWarningMessage;
-    const documentUri = editorOrUri instanceof vscode.Uri ? editorOrUri : editorOrUri.document.uri;
-    const editor = editorOrUri instanceof vscode.Uri ? findVisibleFileEditor(documentUri) : editorOrUri;
-    if (editor === undefined) {
-        await showWarningMessage('LintRunner: No visible file editor for fixer action.');
-        return;
-    }
-
-    const document = editor.document;
-    const fileName = document.fileName;
-
-    const saved = await saveDocument(document);
-    if (!saved) {
-        await showWarningMessage('LintRunner: File was not saved.');
-        return;
-    }
-
-    const selectedFixers = fixers ?? (await selectFixers(fileName));
-    if (selectedFixers === undefined) {
-        return;
-    }
-    if (selectedFixers.length === 0) {
-        await showWarningMessage('LintRunner: No matching fix command.');
-        return;
-    }
-
-    const failures: RunnerFailure[] = [];
-    const failureAwareOutput = createFailureAwareOutput(output, failures);
-    await runWithManualNotification(fileName, getRunnableFixerLabels(selectedFixers), async () =>
-        await runSelectedFixers(fileName, failureAwareOutput, statusBar, 'manual', selectedFixers)
+    return createManualCodeActions(documentUri, pipelines, tools).map((action) =>
+        new vscode.CodeLens(range, action.command)
     );
-    await showManualRunFailureWarning(failures, showWarningMessage);
-    await refreshLinters(fileName, 'onSave', diagnostics, output, statusBar);
-}
-
-export async function runManualLintersForFile(
-    fileName: string,
-    diagnostics: vscode.DiagnosticCollection,
-    output: RunnerOutput,
-    statusBar: vscode.StatusBarItem,
-    linters?: readonly RunnableLinter[],
-    deps: ManualLinterRunnerDeps = {}
-): Promise<void> {
-    const manualLinters = linters ?? getRunnableLinters(fileName, 'manual');
-    const runWithManualNotification = deps.runWithManualNotification ?? runManualTaskWithNotification;
-    const runSelectedLinters = deps.runRunnableLinters ?? runRunnableLinters;
-    const runAllLinters = deps.runLinters ?? runLinters;
-    const showWarningMessage = deps.showWarningMessage ?? vscode.window.showWarningMessage;
-    const failures: RunnerFailure[] = [];
-    const failureAwareOutput = createFailureAwareOutput(output, failures);
-
-    await runWithManualNotification(fileName, getRunnableLinterLabels(manualLinters), async () =>
-        linters === undefined
-            ? await runAllLinters(fileName, 'manual', diagnostics, failureAwareOutput, statusBar)
-            : await runSelectedLinters(fileName, diagnostics, failureAwareOutput, statusBar, manualLinters)
-    );
-    await showManualRunFailureWarning(failures, showWarningMessage);
 }
 
 async function openActionsMenu(
@@ -885,124 +558,89 @@ async function openActionsMenu(
     runningStatusBar: vscode.StatusBarItem
 ): Promise<void> {
     const editor = getActiveFileEditor();
-    if (editor === undefined) {
+    if (editor === undefined || !canRunWorkspaceCommands(true)) {
         return;
     }
-    if (!canRunWorkspaceCommands(true)) {
-        return;
-    }
-
     const fileName = editor.document.fileName;
-    const linters = getRunnableLinters(fileName, 'manual');
-    const fixers = getRunnableFixers(fileName, 'manual');
-    if (linters.length === 0 && fixers.length === 0) {
-        vscode.window.showWarningMessage('LintRunner: No matching linter or fix command.');
+    const pipelines = getRunnablePipelines(fileName, 'manual');
+    const tools = getRunnableTools(fileName, 'manual');
+    if (pipelines.length === 0 && tools.length === 0) {
+        vscode.window.showWarningMessage('LintRunner: No matching pipeline or tool.');
         return;
     }
 
-    const items: ActionQuickPickItem[] = [];
-    if (linters.length > 0) {
-        items.push({
-            label: '$(play) Run all linters',
-            description: `${linters.length} command(s)`,
-            action: async () => {
-                await runManualLintersForFile(fileName, diagnostics, output, runningStatusBar);
-            },
-        });
-        items.push({
-            kind: vscode.QuickPickItemKind.Separator,
-            label: 'Linters',
-        });
-        items.push(
-            ...linters.map((linter) => ({
-                label: `$(play) ${linter.label}`,
-                description: linter.description,
-                detail: linter.detail,
-                action: async () => {
-                    await runManualLintersForFile(fileName, diagnostics, output, runningStatusBar, [linter]);
-                },
-            }))
-        );
-    }
-
-    if (fixers.length > 0) {
-        items.push({
-            label: '$(wrench) Run all fixers',
-            description: `${fixers.length} command(s)`,
-            action: async () => {
-                await runManualFixersForEditor(
-                    editor,
-                    diagnostics,
-                    output,
-                    runningStatusBar,
-                    fixers
-                );
-            },
-        });
-        items.push({
-            kind: vscode.QuickPickItemKind.Separator,
-            label: 'Fixers',
-        });
-        items.push(
-            ...fixers.map((fixer) => ({
-                label: `$(wrench) ${fixer.label}`,
-                description: fixer.description,
-                detail: fixer.detail,
-                action: async () => {
-                    await runManualFixersForEditor(
-                        editor,
-                        diagnostics,
-                        output,
-                        runningStatusBar,
-                        [fixer]
-                    );
-                },
-            }))
-        );
-    }
-
+    const items: ActionQuickPickItem[] = [
+        ...pipelines.map((pipeline) => ({
+            label: `$(play) ${pipeline.label}`,
+            description: pipeline.description,
+            detail: pipeline.detail,
+            action: async () => await runManualPipelinesForFile(fileName, diagnostics, output, runningStatusBar, [pipeline]),
+        })),
+        ...tools.map((tool) => ({
+            label: `$(wrench) ${tool.label}`,
+            description: tool.description,
+            detail: tool.detail,
+            action: async () => await runManualToolForFile(fileName, tool, diagnostics, output, runningStatusBar),
+        })),
+    ];
     const selectedItem = await vscode.window.showQuickPick(items, {
-        placeHolder: 'Run linter or fixer for active file',
+        placeHolder: 'Run pipeline or tool for active file',
         title: 'LintRunner Actions',
     });
-
     await selectedItem?.action?.();
 }
 
-export function cleanupExtensionRuntime(deps: DeactivateCleanupDeps = {}): void {
-    const cleanupResources = deactivateCleanupResources;
-    const {
-        clearPendingSaveDebounces = clearAllPendingSaveDebounces,
-        clearRunnerRuntimeState: clearRunnerRuntimeStateFn = clearRunnerRuntimeState,
-        skipFixersOnSaveSet = skipFixersOnSave,
-        savedContentHashes = lastSavedContentHashes,
-        seenOnOpenDocumentUris = cleanupResources?.seenOnOpenDocumentUris,
-        diagnostics = cleanupResources?.diagnostics,
-        runningStatusBar = cleanupResources?.runningStatusBar,
-        actionsStatusBar = cleanupResources?.actionsStatusBar,
-        output = cleanupResources?.output,
-        codeLensRefreshEmitter = cleanupResources?.codeLensRefreshEmitter,
-    } = deps;
+export async function runDoctorWithNotification(
+    resource?: vscode.Uri,
+    deps: DoctorNotificationDeps = {}
+): Promise<void> {
+    const getStatuses = deps.getStatuses ?? getDoctorToolStatuses;
+    const withProgress = deps.withProgress ?? vscode.window.withProgress;
+    const openTextDocument = deps.openTextDocument ?? vscode.workspace.openTextDocument;
+    const showTextDocument = deps.showTextDocument ?? vscode.window.showTextDocument;
+    const statuses = await withProgress(
+        { location: vscode.ProgressLocation.Notification, title: 'LintRunner: Doctor', cancellable: false },
+        async () => await getStatuses(resource)
+    );
+    const document = await openTextDocument({
+        content: `# LintRunner Doctor\n\n${formatDoctorTable(statuses)}\n`,
+        language: 'markdown',
+    });
+    await showTextDocument(document, { preview: true });
+}
 
-    clearPendingSaveDebounces();
-    clearRunnerRuntimeStateFn();
-    skipFixersOnSaveSet.clear();
-    savedContentHashes.clear();
-    seenOnOpenDocumentUris?.clear();
-    configValidationIssues = { errors: [], warnings: [] };
-    configValidationWarningShown = false;
-    untrustedWorkspaceWarningShown = false;
-    diagnostics?.clear();
-    runningStatusBar?.hide();
-    actionsStatusBar?.hide();
-    codeLensRefreshEmitter?.dispose();
-    actionsStatusBar?.dispose();
-    runningStatusBar?.dispose();
-    output?.dispose();
-    diagnostics?.dispose();
-    if (cleanupResources !== undefined) {
-        deactivateCleanupResources = undefined;
+export async function openBundledExamples(
+    extensionUri: vscode.Uri,
+    deps: OpenBundledExamplesDeps = {}
+): Promise<void> {
+    const openTextDocument = deps.openTextDocument ?? vscode.workspace.openTextDocument;
+    const showTextDocument = deps.showTextDocument ?? vscode.window.showTextDocument;
+    const document = await openTextDocument(vscode.Uri.joinPath(extensionUri, 'docs', 'examples.md'));
+    await showTextDocument(document, { preview: true });
+}
+
+async function inspectCurrentFile(): Promise<void> {
+    const editor = getActiveFileEditor();
+    if (editor === undefined) {
+        vscode.window.showWarningMessage('LintRunner: No active file editor.');
+        return;
     }
+    const fileName = editor.document.fileName;
+    const pipelines = getRunnablePipelines(fileName, 'manual');
+    const tools = getRunnableTools(fileName, 'manual');
+    const lines = [
+        '# LintRunner Inspect Current File',
+        '',
+        `File: ${fileName}`,
+        '',
+        '## Manual Pipelines',
+        ...(pipelines.length === 0 ? ['- none'] : pipelines.map((pipeline) => `- ${pipeline.label}: ${pipeline.detail}`)),
+        '',
+        '## Manual Tools',
+        ...(tools.length === 0 ? ['- none'] : tools.map((tool) => `- ${tool.label}: ${tool.detail}`)),
+    ];
+    const document = await vscode.workspace.openTextDocument({ content: lines.join('\n'), language: 'markdown' });
+    await vscode.window.showTextDocument(document, { preview: true });
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -1011,35 +649,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     output.sync(shouldEnableOutputChannel());
     const runningStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
     runningStatusBar.name = 'LintRunner';
-    runningStatusBar.command = 'lintRunner.stopRunningTools';
+    runningStatusBar.command = 'lintRunner.stop';
     const actionsStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    const codeLensRefreshEmitter = new vscode.EventEmitter<void>();
     actionsStatusBar.name = 'LintRunner Actions';
     actionsStatusBar.command = 'lintRunner.actions';
-    updateActionsStatusBar(actionsStatusBar);
-    context.subscriptions.push(diagnostics, output, runningStatusBar, actionsStatusBar, codeLensRefreshEmitter);
-
+    const codeLensRefreshEmitter = new vscode.EventEmitter<void>();
     const seenOnOpenDocumentUris = new Set<string>();
-    deactivateCleanupResources = {
-        seenOnOpenDocumentUris,
-        diagnostics,
-        runningStatusBar,
-        actionsStatusBar,
-        output,
-        codeLensRefreshEmitter,
-    };
+    context.subscriptions.push(diagnostics, output, runningStatusBar, actionsStatusBar, codeLensRefreshEmitter);
+    deactivateCleanupResources = { seenOnOpenDocumentUris, diagnostics, runningStatusBar, actionsStatusBar, output, codeLensRefreshEmitter };
+
     let lintRunnerEnabled = isLintRunnerEnabled();
     let configValid = await refreshConfigValidation();
     updateActionsStatusBar(actionsStatusBar);
     codeLensRefreshEmitter.fire();
+
     if (canRunWorkspaceCommands(false)) {
-        runOnOpenLintersForVisibleEditors(
-            vscode.window.visibleTextEditors,
-            seenOnOpenDocumentUris,
-            diagnostics,
-            output,
-            runningStatusBar
-        );
+        runOnOpenPipelinesForVisibleEditors(vscode.window.visibleTextEditors, seenOnOpenDocumentUris, diagnostics, output, runningStatusBar);
     } else {
         collectNewVisibleFileNames(
             vscode.window.visibleTextEditors,
@@ -1061,12 +686,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 ) {
                     return [];
                 }
-
-                const fileName = document.fileName;
                 return createManualCodeLenses(
                     document.uri,
-                    getRunnableLinters(fileName, 'manual').filter(isManualCodeActionLinter),
-                    getRunnableFixers(fileName, 'manual').filter(isManualCodeActionFixer)
+                    getRunnablePipelines(document.fileName, 'manual'),
+                    getRunnableTools(document.fileName, 'manual')
                 );
             },
         })
@@ -1086,45 +709,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     ) {
                         return [];
                     }
-
-                    const fileName = document.fileName;
                     return createManualCodeActions(
                         document.uri,
-                        getRunnableLinters(fileName, 'manual').filter(isManualCodeActionLinter),
-                        getRunnableFixers(fileName, 'manual').filter(isManualCodeActionFixer)
+                        getRunnablePipelines(document.fileName, 'manual'),
+                        getRunnableTools(document.fileName, 'manual')
                     );
                 },
             },
-            {
-                providedCodeActionKinds: [manualLinterCodeActionKind, manualFixerCodeActionKind],
-            }
+            { providedCodeActionKinds: [manualPipelineCodeActionKind, manualToolCodeActionKind] }
         )
     );
 
     context.subscriptions.push(
         vscode.window.onDidChangeVisibleTextEditors((editors) => {
-            if (!canRunWorkspaceCommands(false)) {
-                return;
+            if (canRunWorkspaceCommands(false)) {
+                runOnOpenPipelinesForVisibleEditors(editors, seenOnOpenDocumentUris, diagnostics, output, runningStatusBar);
             }
-
-            runOnOpenLintersForVisibleEditors(
-                editors,
-                seenOnOpenDocumentUris,
-                diagnostics,
-                output,
-                runningStatusBar
-            );
             updateActionsStatusBar(actionsStatusBar);
-        })
-    );
-
-    context.subscriptions.push(
+        }),
         vscode.workspace.onDidGrantWorkspaceTrust(() => {
             if (!canRunWorkspaceCommands(false)) {
                 return;
             }
-
-            runOnOpenLintersForVisibleEditors(
+            runOnOpenPipelinesForVisibleEditors(
                 vscode.window.visibleTextEditors,
                 seenOnOpenDocumentUris,
                 diagnostics,
@@ -1135,150 +742,77 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             );
             updateActionsStatusBar(actionsStatusBar);
             codeLensRefreshEmitter.fire();
-        })
-    );
-
-    const debounceTimerDisposable: vscode.Disposable = {
-        dispose() {
-            clearAllPendingSaveDebounces();
-        },
-    };
-
-    context.subscriptions.push(
-        debounceTimerDisposable,
+        }),
+        { dispose: clearAllPendingSaveDebounces },
         vscode.workspace.onDidSaveTextDocument(async (doc) => {
             if (!canRunWorkspaceCommands(false)) {
                 return;
             }
-
-            // Capture the fixer-skip flag synchronously before any async delay,
-            // because runManualFixersForEditor removes the entry from the Set during
-            // the save() call and the finally block runs right after it resolves.
-            const skipFixer = skipFixersOnSave.delete(doc.fileName);
-
             const hash = computeContentHash(doc.getText());
             if (!isContentChanged(documentKey(doc), hash, lastSavedContentHashes)) {
                 return;
             }
-
-            const existingTimer = saveDebounceTimers.get(doc.fileName);
-            if (existingTimer !== undefined) {
-                clearTimeout(existingTimer);
-            }
-
-            const debounceMs =
-                vscode.workspace.getConfiguration('lintRunner', doc.uri).get<number>('debounceMs') ?? 0;
-
+            clearPendingSaveDebounce(doc.fileName);
+            const debounceMs = vscode.workspace.getConfiguration('lintRunner', doc.uri).get<number>('debounceMs') ?? 0;
             const doRun = async (): Promise<void> => {
                 saveDebounceTimers.delete(doc.fileName);
-                if (!skipFixer) {
-                    await runFixers(doc.fileName, output, runningStatusBar, 'onSave');
-                }
-                runLinters(doc.fileName, 'onSave', diagnostics, output, runningStatusBar);
+                await runPipelinesForFile(doc.fileName, 'onSave', diagnostics, output, runningStatusBar);
                 updateActionsStatusBar(actionsStatusBar);
             };
-
             if (debounceMs <= 0) {
                 await doRun();
             } else {
-                const timer = setTimeout(() => { doRun().catch(() => undefined); }, debounceMs);
-                saveDebounceTimers.set(doc.fileName, timer);
+                saveDebounceTimers.set(doc.fileName, setTimeout(() => { doRun().catch(() => undefined); }, debounceMs));
             }
-        })
-    );
-
-    context.subscriptions.push(
+        }),
         vscode.workspace.onDidCloseTextDocument((doc) => {
             handleClosedDocument(doc, seenOnOpenDocumentUris, lastSavedContentHashes, diagnostics);
             updateActionsStatusBar(actionsStatusBar);
-        })
-    );
-
-    context.subscriptions.push(
+        }),
         vscode.window.tabGroups.onDidChangeTabs((event) => {
             for (const uri of collectClosedFileTabUris(event.closed)) {
-                handleClosedFileUri(
-                    uri,
-                    uri.fsPath,
-                    seenOnOpenDocumentUris,
-                    lastSavedContentHashes,
-                    diagnostics
-                );
+                handleClosedFileUri(uri, uri.fsPath, seenOnOpenDocumentUris, lastSavedContentHashes, diagnostics);
             }
             updateActionsStatusBar(actionsStatusBar);
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.window.onDidChangeActiveTextEditor(() => {
-            updateActionsStatusBar(actionsStatusBar);
-        })
-    );
-
-    context.subscriptions.push(
+        }),
+        vscode.window.onDidChangeActiveTextEditor(() => updateActionsStatusBar(actionsStatusBar)),
         vscode.workspace.onDidChangeConfiguration(async (event) => {
-            if (event.affectsConfiguration('lintRunner')) {
-                const wasEnabled = lintRunnerEnabled;
-                const wasConfigValid = configValid;
-                resetCommandEnv();
-                clearDiagnosticsCache();
-                clearAllFileLinterDiagnostics();
-                clearAllPendingSaveDebounces();
-                cancelAllFileRuns();
-                diagnostics.clear();
-                runningStatusBar.hide();
-                output.sync(shouldEnableOutputChannel());
-                updateActionsStatusBar(actionsStatusBar);
-                codeLensRefreshEmitter.fire();
-                lintRunnerEnabled = isLintRunnerEnabled();
-                configValid = await refreshConfigValidation();
-
-                if (
-                    (!wasEnabled || !wasConfigValid) &&
-                    lintRunnerEnabled &&
-                    configValid &&
-                    vscode.workspace.isTrusted
-                ) {
-                    runOnOpenLintersForVisibleEditors(
-                        vscode.window.visibleTextEditors,
-                        seenOnOpenDocumentUris,
-                        diagnostics,
-                        output,
-                        runningStatusBar,
-                        vscode.window.tabGroups.all,
-                        { includeSeen: true }
-                    );
-                }
+            if (!event.affectsConfiguration('lintRunner')) {
+                return;
             }
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('lintRunner.validateConfig', async () => {
-            configValid = await refreshConfigValidation(true);
+            const wasEnabled = lintRunnerEnabled;
+            const wasConfigValid = configValid;
+            resetCommandEnv();
+            clearDiagnosticsCache();
+            clearAllFileToolDiagnostics();
+            clearAllPendingSaveDebounces();
+            cancelAllFileRuns();
+            diagnostics.clear();
+            runningStatusBar.hide();
+            output.sync(shouldEnableOutputChannel());
             updateActionsStatusBar(actionsStatusBar);
             codeLensRefreshEmitter.fire();
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('lintRunner.openExamples', async () => {
-            await openBundledExamples(context.extensionUri);
-        })
-    );
-
-    context.subscriptions.push(
+            lintRunnerEnabled = isLintRunnerEnabled();
+            configValid = await refreshConfigValidation();
+            if ((!wasEnabled || !wasConfigValid) && lintRunnerEnabled && configValid && vscode.workspace.isTrusted) {
+                runOnOpenPipelinesForVisibleEditors(
+                    vscode.window.visibleTextEditors,
+                    seenOnOpenDocumentUris,
+                    diagnostics,
+                    output,
+                    runningStatusBar,
+                    vscode.window.tabGroups.all,
+                    { includeSeen: true }
+                );
+            }
+        }),
+        vscode.commands.registerCommand('lintRunner.openExamples', async () => await openBundledExamples(context.extensionUri)),
         vscode.commands.registerCommand('lintRunner.doctor', async () => {
-            if (!canRunWorkspaceCommands(true)) {
-                return;
+            if (canRunWorkspaceCommands(true)) {
+                await runDoctorWithNotification(vscode.window.activeTextEditor?.document.uri);
             }
-
-            await runDoctorWithNotification(vscode.window.activeTextEditor?.document.uri);
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('lintRunner.run', async () => {
+        }),
+        vscode.commands.registerCommand('lintRunner.runPipeline', async () => {
             const editor = getActiveFileEditor();
             if (editor === undefined) {
                 vscode.window.showWarningMessage('LintRunner: No active file editor.');
@@ -1287,13 +821,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (!canRunWorkspaceCommands(true)) {
                 return;
             }
-            const fileName = editor.document.fileName;
-            await runManualLintersForFile(fileName, diagnostics, output, runningStatusBar);
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('lintRunner.fix', async () => {
+            const pipelines = getRunnablePipelines(editor.document.fileName, 'manual');
+            const selected = pipelines.length === 1
+                ? pipelines[0]
+                : await vscode.window.showQuickPick(pipelines, { title: 'LintRunner: Run Pipeline' });
+            if (selected !== undefined) {
+                await runManualPipelinesForFile(editor.document.fileName, diagnostics, output, runningStatusBar, [selected]);
+            }
+        }),
+        vscode.commands.registerCommand('lintRunner.runTool', async () => {
             const editor = getActiveFileEditor();
             if (editor === undefined) {
                 vscode.window.showWarningMessage('LintRunner: No active file editor.');
@@ -1302,44 +838,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (!canRunWorkspaceCommands(true)) {
                 return;
             }
-
-            await runManualFixersForEditor(editor, diagnostics, output, runningStatusBar);
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand(
-            'lintRunner.runManualLinterCodeAction',
-            async (uri: vscode.Uri, linter: RunnableLinter) => {
-                if (!canRunWorkspaceCommands(true)) {
-                    return;
-                }
-
-                await runManualLintersForFile(uri.fsPath, diagnostics, output, runningStatusBar, [linter]);
+            const tools = getRunnableTools(editor.document.fileName, 'manual');
+            const selected = tools.length === 1
+                ? tools[0]
+                : await vscode.window.showQuickPick(tools, { title: 'LintRunner: Run Tool' });
+            if (selected !== undefined) {
+                await runManualToolForFile(editor.document.fileName, selected, diagnostics, output, runningStatusBar);
             }
-        )
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand(
-            'lintRunner.runManualFixerCodeAction',
-            async (uri: vscode.Uri, fixer: RunnableFixer) => {
-                if (!canRunWorkspaceCommands(true)) {
-                    return;
-                }
-
-                await runManualFixersForEditor(uri, diagnostics, output, runningStatusBar, [fixer]);
+        }),
+        vscode.commands.registerCommand('lintRunner.inspectCurrentFile', inspectCurrentFile),
+        vscode.commands.registerCommand('lintRunner.runManualPipelineCodeAction', async (uri: vscode.Uri, pipeline: RunnablePipeline) => {
+            if (canRunWorkspaceCommands(true)) {
+                await runManualPipelinesForFile(uri.fsPath, diagnostics, output, runningStatusBar, [pipeline]);
             }
-        )
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('lintRunner.stopRunningTools', () => {
-            cancelAllFileRuns();
-        })
-    );
-
-    context.subscriptions.push(
+        }),
+        vscode.commands.registerCommand('lintRunner.runManualToolCodeAction', async (uri: vscode.Uri, tool: RunnableTool) => {
+            if (canRunWorkspaceCommands(true)) {
+                await runManualToolForFile(uri.fsPath, tool, diagnostics, output, runningStatusBar);
+            }
+        }),
+        vscode.commands.registerCommand('lintRunner.stop', () => cancelAllFileRuns()),
         vscode.commands.registerCommand('lintRunner.clearDiagnostics', () => {
             if (!canRunWorkspaceCommands(true)) {
                 return;
@@ -1348,23 +866,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (editor !== undefined) {
                 const uri = editor.document.uri;
                 diagnostics.delete(uri);
-                clearFileLinterDiagnostics(uri.toString());
+                clearFileToolDiagnostics(uri.toString());
                 clearFileDiagnosticsCache(uri.fsPath);
             } else {
                 diagnostics.clear();
-                clearAllFileLinterDiagnostics();
+                clearAllFileToolDiagnostics();
                 clearDiagnosticsCache();
             }
-        })
+        }),
+        vscode.commands.registerCommand('lintRunner.actions', async () => await openActionsMenu(diagnostics, output, runningStatusBar))
     );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('lintRunner.actions', async () => {
-            await openActionsMenu(diagnostics, output, runningStatusBar);
-        })
-    );
-}
-
-export function deactivate(): void {
-    cleanupExtensionRuntime();
 }

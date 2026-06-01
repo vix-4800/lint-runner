@@ -1,27 +1,20 @@
 import * as assert from 'assert';
-import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
     applyCommandTemplate,
-    collectRunnableLinters,
     buildCommandEnv,
-    collectRunnableFixers,
+    collectRunnablePipelines,
     matchesIgnorePatterns,
-    mergeConfiguredTargets,
+    mergeToolConfiguration,
     normalizeDiagnosticRanges,
-    isLintRunnerEnabled,
-    parseLinterOutput,
-    resolveConfiguredTargets,
-    shouldProcessLinterFile,
-    shouldRunLinter,
-    validateTargetScopes,
-    type TargetPatch,
-    type LinterConfig,
+    parseToolOutput,
+    resolveToolConfiguration,
+    shouldProcessToolFile,
+    validateToolConfigScopes,
     type RegexParserConfig,
-    type TargetConfig,
-} from '../linterRunner.js';
+    type ToolConfigurationPatch,
+} from '../toolRunner.js';
 
 const TEST_REGEX_PARSER: RegexParserConfig = {
     pattern: String.raw`(?<line>\d+):(?<col>\d+):(?<severity>\w+):(?<message>.+)`,
@@ -33,62 +26,51 @@ function parseRegexFixture(
     stdout: string,
     stderr = ''
 ): vscode.Diagnostic[] {
-    return parseLinterOutput(
+    return parseToolOutput(
+        name,
         {
-            name,
-            filePatterns: ['*'],
+            kind: 'diagnostic',
             command: 'test',
             args: [],
             parser,
-            run: 'manual',
         },
         { code: 1, stdout, stderr }
     );
 }
 
-suite('Linter Runner', () => {
-    test('expands command variables and leaves unknown variables unchanged', () => {
+suite('Tool Runner', () => {
+    test('expands built-in and custom command variables', () => {
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
         const filePath = path.join(workspaceRoot, 'src', 'example.test.ts');
-        const workspaceFolder =
-            vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath))?.uri.fsPath ?? '';
-        const relativeFile =
-            workspaceFolder === '' ? filePath : path.relative(workspaceFolder, filePath);
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath))?.uri.fsPath ?? '';
         const result = applyCommandTemplate(
-            '${file}|${file}|${workspaceFolder}|${relativeFile}|${fileDirname}|${fileBasename}|${fileBasenameNoExtension}|${fileExtname}|${unknown}',
-            filePath
+            '${bin}|${fileBasename}|${fileBasenameNoExtension}|${unknown}',
+            filePath,
+            { bin: '${workspaceFolder}/vendor/bin' }
         );
 
-        assert.strictEqual(
-            result,
-            [
-                filePath,
-                filePath,
-                workspaceFolder,
-                relativeFile,
-                path.join(workspaceRoot, 'src'),
-                'example.test.ts',
-                'example.test',
-                '.ts',
-                '${unknown}',
-            ].join('|')
-        );
+        assert.strictEqual(result, `${workspaceFolder}/vendor/bin|example.test.ts|example.test|\${unknown}`);
+    });
+
+    test('prepends shell PATH to command PATH', () => {
+        const env = buildCommandEnv('/tmp/lint-runner-bin');
+        const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
+        assert.strictEqual(env[pathKey]?.split(path.delimiter)[0], '/tmp/lint-runner-bin');
     });
 
     test('moves diagnostics without explicit column to first non-whitespace word', async () => {
         const filePath = path.resolve(__dirname, '../../lint-test/test.php');
         const diagnostics = parseRegexFixture(
-            'dotenv-linter',
+            'dotenv',
             {
                 pattern: String.raw`^.+?:(?<line>\d+) (?<code>[A-Za-z][\w-]*): (?<message>.+)$`,
                 flags: 'gm',
             },
-            'lint-test/test.php:5 LowercaseKey: The key should be uppercase'
+            'lint-test/test.php:5 LowercaseKey: The key should be uppercase',
         );
 
         await normalizeDiagnosticRanges(filePath, diagnostics);
 
-        assert.strictEqual(diagnostics.length, 1);
         assert.strictEqual(diagnostics[0].range.start.line, 4);
         assert.strictEqual(diagnostics[0].range.start.character, 4);
         assert.strictEqual(diagnostics[0].range.end.character, 11);
@@ -96,11 +78,7 @@ suite('Linter Runner', () => {
 
     test('extends diagnostics with explicit column to first whitespace', async () => {
         const filePath = path.resolve(__dirname, '../../lint-test/test.js');
-        const diagnostics = parseRegexFixture(
-            'eslint',
-            TEST_REGEX_PARSER,
-            '2:7:error:Unused variable'
-        );
+        const diagnostics = parseRegexFixture('eslint', TEST_REGEX_PARSER, '2:7:error:Unused variable');
 
         await normalizeDiagnosticRanges(filePath, diagnostics);
 
@@ -129,560 +107,203 @@ suite('Linter Runner', () => {
         assert.strictEqual(diagnostics[0].range.end.character, 14);
     });
 
-    test('prepends shell PATH to command PATH', () => {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
-        const env = buildCommandEnv(workspaceRoot);
-        const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
-
-        assert.strictEqual(env[pathKey]?.split(path.delimiter)[0], workspaceRoot);
-    });
-
-    test('resolves target-first configs with shared target settings', () => {
-        const targets = resolveConfiguredTargets([
+    test('parses diagnostic tool output', () => {
+        const diagnostics = parseToolOutput(
+            'eslint',
             {
-                name: 'PHP',
-                filePatterns: ['*.php'],
-                run: 'manual',
-                preCommands: [{ name: 'php -l', command: 'php', args: ['-l', '${file}'] }],
-                linters: [
-                    {
-                        name: 'PHPStan',
-                        command: 'phpstan',
-                        args: ['analyse', '${file}'],
-                        parser: TEST_REGEX_PARSER,
-                    },
-                    {
-                        name: 'PHPCS',
-                        command: 'phpcs',
-                        args: ['${file}'],
-                        parser: TEST_REGEX_PARSER,
-                        run: 'onSave',
-                    },
-                ],
-                fixers: [{ name: 'phpcbf', command: 'phpcbf', args: ['${file}'], run: 'onSave' }],
+                kind: 'diagnostic',
+                command: 'eslint',
+                args: ['${file}'],
+                parser: TEST_REGEX_PARSER,
             },
-        ]);
-
-        assert.strictEqual(targets.length, 1);
-        assert.strictEqual(targets[0].linters.length, 2);
-        assert.strictEqual(targets[0].linters[0].run, 'manual');
-        assert.strictEqual(targets[0].linters[1].run, 'onSave');
-        assert.strictEqual(targets[0].preCommands.length, 1);
-        assert.strictEqual(targets[0].fixers.length, 1);
-        assert.strictEqual(targets[0].fixers[0].run, 'onSave');
-    });
-
-    test('applies target cwd defaults to nested commands and keeps env settings', () => {
-        const targets = resolveConfiguredTargets([
-            {
-                name: 'HTML',
-                languages: ['html'],
-                cwd: '${workspaceFolder}/tools',
-                preCommands: [
-                    {
-                        command: 'prepare-html',
-                        args: ['--check'],
-                        env: { NODE_OPTIONS: '--max-old-space-size=4096' },
-                    },
-                ],
-                linters: [
-                    {
-                        name: 'linthtml',
-                        command: 'linthtml',
-                        args: ['${fileBasename}'],
-                        cwd: '${fileDirname}',
-                        env: { PATH: '/custom/bin' },
-                        preCommands: [
-                            {
-                                command: 'before-lint',
-                                args: ['--warm-up'],
-                                env: { PHP_CS_FIXER_IGNORE_ENV: '1' },
-                            },
-                        ],
-                        parser: TEST_REGEX_PARSER,
-                    },
-                ],
-                fixers: [
-                    {
-                        command: 'html-beautify',
-                        args: ['${file}'],
-                        env: { COMPOSER_MEMORY_LIMIT: '-1' },
-                    },
-                ],
-            },
-        ]);
-
-        assert.strictEqual(targets[0].preCommands[0].cwd, '${workspaceFolder}/tools');
-        assert.deepStrictEqual(targets[0].preCommands[0].env, { NODE_OPTIONS: '--max-old-space-size=4096' });
-        assert.strictEqual(targets[0].linters[0].cwd, '${fileDirname}');
-        assert.deepStrictEqual(targets[0].linters[0].env, { PATH: '/custom/bin' });
-        assert.strictEqual(targets[0].linters[0].preCommands?.[0].cwd, '${fileDirname}');
-        assert.deepStrictEqual(targets[0].linters[0].preCommands?.[0].env, { PHP_CS_FIXER_IGNORE_ENV: '1' });
-        assert.strictEqual(targets[0].fixers[0].cwd, '${workspaceFolder}/tools');
-        assert.deepStrictEqual(targets[0].fixers[0].env, { COMPOSER_MEMORY_LIMIT: '-1' });
-    });
-
-    test('resolves onOpen run mode', () => {
-        const targets = resolveConfiguredTargets([
-            {
-                name: 'Markdown',
-                filePatterns: ['*.md'],
-                run: 'onOpen',
-                linters: [
-                    {
-                        name: 'markdownlint',
-                        command: 'markdownlint',
-                        args: ['${file}'],
-                        parser: TEST_REGEX_PARSER,
-                    },
-                ],
-            },
-        ]);
-
-        assert.strictEqual(targets[0].linters[0].run, 'onOpen');
-    });
-
-    test('keeps linter maxFileSize in resolved target configs', () => {
-        const targets = resolveConfiguredTargets([
-            {
-                name: 'Markdown',
-                languages: ['markdown'],
-                linters: [
-                    {
-                        name: 'markdownlint',
-                        command: 'markdownlint',
-                        args: ['${file}'],
-                        parser: TEST_REGEX_PARSER,
-                        maxFileSize: 4096,
-                    },
-                ],
-            },
-        ]);
-
-        assert.strictEqual(targets[0].linters[0].maxFileSize, 4096);
-    });
-
-    test('keeps successExitCodes in resolved target configs', () => {
-        const targets = resolveConfiguredTargets([
-            {
-                name: 'PHP',
-                languages: ['php'],
-                linters: [
-                    {
-                        name: 'phpstan',
-                        command: 'phpstan',
-                        args: ['analyse', '${file}'],
-                        parser: TEST_REGEX_PARSER,
-                        successExitCodes: [0, 1],
-                    },
-                ],
-                fixers: [
-                    {
-                        name: 'php-cs-fixer',
-                        command: 'php-cs-fixer',
-                        args: ['fix', '${file}'],
-                        successExitCodes: [0, 8],
-                    },
-                ],
-            },
-        ]);
-
-        assert.deepStrictEqual(targets[0].linters[0].successExitCodes, [0, 1]);
-        assert.deepStrictEqual(targets[0].fixers[0].successExitCodes, [0, 8]);
-    });
-
-    test('runs onOpen linters again on save', () => {
-        const linter: LinterConfig = {
-            name: 'markdownlint',
-            filePatterns: ['*.md'],
-            command: 'markdownlint',
-            args: ['${file}'],
-            parser: TEST_REGEX_PARSER,
-            run: 'onOpen',
-        };
-
-        assert.strictEqual(shouldRunLinter(linter, 'onOpen'), true);
-        assert.strictEqual(shouldRunLinter(linter, 'onSave'), true);
-    });
-
-    test('does not run onSave linters on open', () => {
-        const linter: LinterConfig = {
-            name: 'eslint',
-            filePatterns: ['*.ts'],
-            command: 'eslint',
-            args: ['${file}'],
-            parser: TEST_REGEX_PARSER,
-            run: 'onSave',
-        };
-
-        assert.strictEqual(shouldRunLinter(linter, 'onOpen'), false);
-        assert.strictEqual(shouldRunLinter(linter, 'onSave'), true);
-    });
-
-    test('does not run disabled linters', () => {
-        const linter: LinterConfig = {
-            name: 'eslint',
-            filePatterns: ['*.ts'],
-            command: 'eslint',
-            args: ['${file}'],
-            parser: TEST_REGEX_PARSER,
-            run: 'onSave',
-            enabled: false,
-        };
-
-        assert.strictEqual(shouldRunLinter(linter, 'manual'), false);
-        assert.strictEqual(shouldRunLinter(linter, 'onSave'), false);
-    });
-
-    test('isLintRunnerEnabled defaults to true and accepts false', () => {
-        const defaultConfig: Pick<vscode.WorkspaceConfiguration, 'get'> = {
-            get: () => undefined,
-        };
-        const disabledConfig: Pick<vscode.WorkspaceConfiguration, 'get'> = {
-            get: () => false,
-        };
-
-        assert.strictEqual(isLintRunnerEnabled(defaultConfig), true);
-        assert.strictEqual(isLintRunnerEnabled(disabledConfig), false);
-    });
-
-    test('shouldProcessLinterFile allows files when no maxFileSize is set', () => {
-        assert.strictEqual(shouldProcessLinterFile(10_000), true);
-    });
-
-    test('shouldProcessLinterFile enforces maxFileSize inclusively', () => {
-        assert.strictEqual(shouldProcessLinterFile(512, 1024), true);
-        assert.strictEqual(shouldProcessLinterFile(1024, 1024), true);
-        assert.strictEqual(shouldProcessLinterFile(1025, 1024), false);
-    });
-
-    test('collects runnable fixers for matching targets', async () => {
-        const tsFilePath = path.resolve(__dirname, '../../lint-test/test.ts');
-        await vscode.workspace.openTextDocument(tsFilePath);
-
-        const targets = resolveConfiguredTargets([
-            {
-                name: 'TypeScript',
-                languages: ['typescript'],
-                fixers: [
-                    { name: 'prettier', command: 'prettier', args: ['--write', '${file}'] },
-                    {
-                        name: 'disabled prettier',
-                        command: 'prettier',
-                        args: ['--write', '${file}'],
-                        enabled: false,
-                    },
-                    {
-                        name: 'eslint --fix',
-                        command: 'eslint',
-                        args: ['--fix', '${file}'],
-                        run: 'onSave',
-                    },
-                ],
-                linters: [
-                    {
-                        name: 'ESLint',
-                        command: 'eslint',
-                        args: ['${file}'],
-                        parser: TEST_REGEX_PARSER,
-                    },
-                    {
-                        name: 'Disabled ESLint',
-                        command: 'eslint',
-                        args: ['${file}'],
-                        parser: TEST_REGEX_PARSER,
-                    },
-                ],
-            },
-        ]);
-
-        const manualFixers = collectRunnableFixers(targets, tsFilePath, 'manual');
-        assert.deepStrictEqual(
-            manualFixers.map((fixer) => fixer.label),
-            ['prettier', 'eslint --fix']
-        );
-        assert.deepStrictEqual(
-            manualFixers.map((fixer) => fixer.description),
-            ['TypeScript', 'TypeScript']
+            { code: 1, stdout: '2:7:error:Unused variable', stderr: '' }
         );
 
-        const onSaveFixers = collectRunnableFixers(targets, tsFilePath, 'onSave');
-        assert.deepStrictEqual(
-            onSaveFixers.map((fixer) => fixer.label),
-            ['eslint --fix']
-        );
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].source, 'eslint');
+        assert.strictEqual(diagnostics[0].range.start.line, 1);
+        assert.strictEqual(diagnostics[0].range.start.character, 6);
     });
 
-    test('collects runnable linters for matching targets', async () => {
-        const tsFilePath = path.resolve(__dirname, '../../lint-test/test.ts');
-        await vscode.workspace.openTextDocument(tsFilePath);
-
-        const targets = resolveConfiguredTargets([
-            {
-                name: 'TypeScript',
-                languages: ['typescript'],
-                run: 'onSave',
-                linters: [
-                    {
-                        name: 'ESLint',
-                        command: 'eslint',
-                        args: ['${file}'],
-                        parser: TEST_REGEX_PARSER,
-                    },
-                    {
-                        name: 'manual only',
-                        command: 'biome',
-                        args: ['check', '${file}'],
-                        parser: TEST_REGEX_PARSER,
-                        run: 'manual',
-                    },
-                    {
-                        name: 'disabled',
-                        command: 'tsc',
-                        args: ['--noEmit', '${file}'],
-                        parser: TEST_REGEX_PARSER,
-                        enabled: false,
-                    },
-                ],
-            },
-        ]);
-
-        const manualLinters = collectRunnableLinters(targets, tsFilePath, 'manual');
-        assert.deepStrictEqual(
-            manualLinters.map((linter) => linter.label),
-            ['ESLint', 'manual only']
-        );
-        assert.deepStrictEqual(
-            manualLinters.map((linter) => linter.description),
-            ['TypeScript', 'TypeScript']
-        );
-
-        const onSaveLinters = collectRunnableLinters(targets, tsFilePath, 'onSave');
-        assert.deepStrictEqual(
-            onSaveLinters.map((linter) => linter.label),
-            ['ESLint']
-        );
+    test('matches ignore patterns by file name and path', () => {
+        assert.strictEqual(matchesIgnorePatterns('/repo/src/app.min.js', ['*.min.js']), true);
+        assert.strictEqual(matchesIgnorePatterns('/repo/vendor/package/file.php', ['vendor/**']), true);
+        assert.strictEqual(matchesIgnorePatterns('/repo/src/app.js', ['*.min.js']), false);
     });
 
     test('matches files with brace-expanded glob patterns', () => {
-        assert.strictEqual(
-            matchesIgnorePatterns('/tmp/example.ts', ['*.{ts,tsx}']),
-            true,
-            '*.{ts,tsx} should match .ts files'
-        );
-        assert.strictEqual(
-            matchesIgnorePatterns('/tmp/example.tsx', ['*.{ts,tsx}']),
-            true,
-            '*.{ts,tsx} should match .tsx files'
-        );
-        assert.strictEqual(
-            matchesIgnorePatterns('/tmp/example.js', ['*.{ts,tsx}']),
-            false,
-            '*.{ts,tsx} should not match .js files'
-        );
+        assert.strictEqual(matchesIgnorePatterns('/tmp/example.ts', ['*.{ts,tsx}']), true);
+        assert.strictEqual(matchesIgnorePatterns('/tmp/example.tsx', ['*.{ts,tsx}']), true);
+        assert.strictEqual(matchesIgnorePatterns('/tmp/example.js', ['*.{ts,tsx}']), false);
     });
+
     test('matches files with bracket expression glob patterns', () => {
-        assert.strictEqual(
-            matchesIgnorePatterns('/tmp/Makefile', ['[Mm]akefile']),
-            true,
-            '[Mm]akefile should match Makefile'
-        );
-        assert.strictEqual(
-            matchesIgnorePatterns('/tmp/makefile', ['[Mm]akefile']),
-            true,
-            '[Mm]akefile should match makefile'
-        );
-        assert.strictEqual(
-            matchesIgnorePatterns('/tmp/GNUMakefile', ['[Mm]akefile']),
-            false,
-            '[Mm]akefile should not match GNUMakefile'
-        );
+        assert.strictEqual(matchesIgnorePatterns('/tmp/Makefile', ['[Mm]akefile']), true);
+        assert.strictEqual(matchesIgnorePatterns('/tmp/makefile', ['[Mm]akefile']), true);
+        assert.strictEqual(matchesIgnorePatterns('/tmp/GNUMakefile', ['[Mm]akefile']), false);
     });
 
     test('matches files with negated bracket expression glob patterns', () => {
-        assert.strictEqual(
-            matchesIgnorePatterns('/tmp/example.ts', ['*.[!j]s']),
-            true,
-            '*.[!j]s should match .ts'
-        );
-        assert.strictEqual(
-            matchesIgnorePatterns('/tmp/example.js', ['*.[!j]s']),
-            false,
-            '*.[!j]s should not match .js'
-        );
+        assert.strictEqual(matchesIgnorePatterns('/tmp/example.ts', ['*.[!j]s']), true);
+        assert.strictEqual(matchesIgnorePatterns('/tmp/example.js', ['*.[!j]s']), false);
     });
 
     test('treats unclosed [ as literal character', () => {
-        assert.strictEqual(
-            matchesIgnorePatterns('/tmp/[file.txt', ['[file.txt']),
-            true,
-            'unclosed [ should be treated as literal'
-        );
-        assert.strictEqual(
-            matchesIgnorePatterns('/tmp/file.txt', ['[file.txt']),
-            false,
-            'unclosed [ should not be dropped silently'
-        );
+        assert.strictEqual(matchesIgnorePatterns('/tmp/[file.txt', ['[file.txt']), true);
+        assert.strictEqual(matchesIgnorePatterns('/tmp/file.txt', ['[file.txt']), false);
     });
 
-    test('matchesIgnorePatterns returns false for empty patterns', () => {
-        assert.strictEqual(matchesIgnorePatterns('/tmp/example.ts', []), false);
+    test('enforces max file size inclusively', () => {
+        assert.strictEqual(shouldProcessToolFile(100, undefined), true);
+        assert.strictEqual(shouldProcessToolFile(100, 100), true);
+        assert.strictEqual(shouldProcessToolFile(101, 100), false);
     });
+});
 
-    test('matchesIgnorePatterns matches file names', () => {
-        assert.strictEqual(matchesIgnorePatterns('/tmp/vendor/lib.ts', ['vendor/**']), true);
-        assert.strictEqual(matchesIgnorePatterns('/tmp/src/lib.ts', ['vendor/**']), false);
-    });
-
-    test('matchesIgnorePatterns matches extension patterns', () => {
-        assert.strictEqual(matchesIgnorePatterns('/tmp/example.min.js', ['*.min.js']), true);
-        assert.strictEqual(matchesIgnorePatterns('/tmp/example.ts', ['*.min.js']), false);
-    });
-
-    test('matches files by VS Code language ID', async () => {
-        const phpFilePath = path.resolve(__dirname, '../../lint-test/test.php');
-        const tsFilePath = path.resolve(__dirname, '../../lint-test/test.ts');
-        await vscode.workspace.openTextDocument(phpFilePath);
-
-        const targets = resolveConfiguredTargets([
-            {
-                name: 'PHP',
-                languages: ['php'],
-                linters: [
-                    {
-                        name: 'PHPStan',
-                        command: 'phpstan',
-                        args: ['${file}'],
-                        parser: TEST_REGEX_PARSER,
-                    },
-                ],
+suite('Tool configuration', () => {
+    test('merges vars tools and targets by key or name across scopes', () => {
+        const base: ToolConfigurationPatch = {
+            vars: { composerBin: '${workspaceFolder}/vendor/bin', phpBin: '/usr/bin' },
+            tools: {
+                phpstan: {
+                    kind: 'diagnostic',
+                    command: '${composerBin}/phpstan',
+                    args: ['analyse', '${file}'],
+                    parser: { pattern: '(?<line>\\d+):(?<message>.+)' },
+                },
             },
-        ]);
+            targets: [
+                {
+                    name: 'PHP',
+                    match: { languages: ['php'], files: ['**/*.php'] },
+                    manual: { strategy: 'sequence', tools: ['phpstan'] },
+                },
+            ],
+        };
 
-        assert.strictEqual(
-            collectRunnableLinters(targets, phpFilePath, 'manual').length,
-            1,
-            'languages: [php] should match a PHP file'
-        );
-        assert.strictEqual(
-            collectRunnableLinters(targets, tsFilePath, 'manual').length,
-            0,
-            'languages: [php] should not match a TypeScript file'
-        );
+        const result = mergeToolConfiguration(base, {
+            vars: { phpBin: '/opt/php/bin' },
+            tools: {
+                phpstan: {
+                    args: ['analyse', '--memory-limit=1G', '${file}'],
+                    successExitCodes: [0, 1],
+                },
+            },
+            targets: [
+                {
+                    name: 'PHP',
+                    onSave: { strategy: 'parallel', tools: ['phpstan'] },
+                },
+            ],
+        });
+
+        assert.strictEqual(result.vars?.phpBin, '/opt/php/bin');
+        assert.deepStrictEqual(result.tools?.phpstan?.args, ['analyse', '--memory-limit=1G', '${file}']);
+        assert.deepStrictEqual(result.targets?.[0].manual, { strategy: 'sequence', tools: ['phpstan'] });
+        assert.deepStrictEqual(result.targets?.[0].onSave, { strategy: 'parallel', tools: ['phpstan'] });
     });
 
-    test('languages: ["*"] matches any opened file language for linters and fixers', async () => {
-        const phpFilePath = path.resolve(__dirname, '../../lint-test/test.php');
-        const tsFilePath = path.resolve(__dirname, '../../lint-test/test.ts');
-        await vscode.workspace.openTextDocument(phpFilePath);
-        await vscode.workspace.openTextDocument(tsFilePath);
+    test('validates tool config and rejects unsupported target keys and array pipeline shorthand', () => {
+        const issues = validateToolConfigScopes(
+            [
+                {
+                    label: 'Workspace settings',
+                    config: {
+                        vars: { a: '${b}', b: '${a}' },
+                        tools: {
+                            eslint: { kind: 'diagnostic', command: 'eslint', args: ['${file}'] },
+                            prettier: {
+                                kind: 'write',
+                                command: 'prettier',
+                                args: ['--write', '${file}'],
+                                parser: { pattern: '(?<line>\\d+):(?<message>.+)' },
+                            },
+                        },
+                        targets: [
+                            {
+                                name: 'JS',
+                                languages: ['javascript'],
+                                [`linters`]: [],
+                                match: { languages: ['javascript'], files: ['**/*.js'] },
+                                manual: ['prettier', 'missing-tool'] as unknown as never,
+                            },
+                        ],
+                    },
+                },
+            ],
+            { knownLanguageIds: ['javascript'], env: { PATH: process.env.PATH ?? '' } }
+        );
 
-        const targets = resolveConfiguredTargets([
-            {
-                name: 'All languages',
-                languages: ['*'],
-                linters: [
-                    {
-                        name: 'Universal linter',
-                        command: 'lint',
-                        args: ['${file}'],
-                        parser: TEST_REGEX_PARSER,
-                    },
-                ],
-                fixers: [
-                    {
-                        name: 'Universal fixer',
-                        command: 'fix',
-                        args: ['${file}'],
-                    },
-                ],
+        assert.match(issues.errors.join('\n'), /var 'a' contains a circular reference/);
+        assert.match(issues.errors.join('\n'), /tool 'eslint' parser is missing pattern/);
+        assert.match(issues.errors.join('\n'), /tool 'prettier' with kind 'write' must not define parser/);
+        assert.match(issues.errors.join('\n'), new RegExp(`target 'JS' contains unsupported key 'linters'`));
+        assert.match(issues.errors.join('\n'), /target 'JS' pipeline 'manual' must be an object/);
+    });
+
+    test('collects runnable pipelines using target match languages files and exclude', async () => {
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        const phpFilePath = path.join(workspaceRoot, 'lint-test', 'test.php');
+        const vendorFilePath = path.join(workspaceRoot, 'lint-test', 'vendor', 'Package.php');
+        const jsFilePath = path.join(workspaceRoot, 'lint-test', 'test.js');
+        await vscode.workspace.openTextDocument(vscode.Uri.file(phpFilePath));
+        await vscode.workspace.openTextDocument(vscode.Uri.file(jsFilePath));
+
+        const config = resolveToolConfiguration({
+            tools: {
+                phpstan: {
+                    kind: 'diagnostic',
+                    command: 'phpstan',
+                    args: ['analyse', '${file}'],
+                    parser: { pattern: '(?<line>\\d+):(?<message>.+)' },
+                },
             },
-        ]);
+            targets: [
+                {
+                    name: 'PHP',
+                    match: { languages: ['php'], files: ['**/*.php'], exclude: ['**/vendor/**'] },
+                    manual: { strategy: 'sequence', tools: ['phpstan'] },
+                },
+            ],
+        });
 
-        assert.strictEqual(
-            collectRunnableLinters(targets, phpFilePath, 'manual').length,
-            1,
-            'languages: [*] should match a PHP file'
-        );
-        assert.strictEqual(
-            collectRunnableLinters(targets, tsFilePath, 'manual').length,
-            1,
-            'languages: [*] should match a TypeScript file'
-        );
+        assert.strictEqual(collectRunnablePipelines(config, phpFilePath, 'manual').length, 1);
+        assert.strictEqual(collectRunnablePipelines(config, vendorFilePath, 'manual').length, 0);
+        assert.strictEqual(collectRunnablePipelines(config, jsFilePath, 'manual').length, 0);
+    });
+
+    test('collects both onSave and onOpen pipelines for save trigger', async () => {
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        const jsFilePath = path.join(workspaceRoot, 'lint-test', 'test.js');
+        await vscode.workspace.openTextDocument(vscode.Uri.file(jsFilePath));
+
+        const config = resolveToolConfiguration({
+            tools: {
+                eslint: {
+                    kind: 'diagnostic',
+                    command: 'eslint',
+                    args: ['${file}'],
+                    parser: { pattern: '(?<line>\\d+):(?<message>.+)' },
+                },
+                prettier: {
+                    kind: 'write',
+                    command: 'prettier',
+                    args: ['--write', '${file}'],
+                },
+            },
+            targets: [
+                {
+                    name: 'JS',
+                    match: { languages: ['javascript'] },
+                    onOpen: { strategy: 'sequence', tools: ['eslint'] },
+                    onSave: { strategy: 'sequence', tools: ['prettier'] },
+                },
+            ],
+        });
+
         assert.deepStrictEqual(
-            collectRunnableFixers(targets, phpFilePath, 'manual').map((fixer) => fixer.label),
-            ['Universal fixer']
-        );
-        assert.deepStrictEqual(
-            collectRunnableFixers(targets, tsFilePath, 'manual').map((fixer) => fixer.label),
-            ['Universal fixer']
-        );
-    });
-
-    test('filePatterns filters further on top of language match', async () => {
-        const phpFilePath = path.resolve(__dirname, '../../lint-test/test.php');
-        await vscode.workspace.openTextDocument(phpFilePath);
-
-        const targets = resolveConfiguredTargets([
-            {
-                name: 'PHP controllers only',
-                languages: ['php'],
-                filePatterns: ['*Controller*'],
-                linters: [
-                    {
-                        name: 'test-linter',
-                        command: 'test',
-                        args: ['${file}'],
-                        parser: TEST_REGEX_PARSER,
-                    },
-                ],
-            },
-        ]);
-
-        // Language matches but filePatterns does not → no match
-        assert.strictEqual(
-            collectRunnableLinters(targets, phpFilePath, 'manual').length,
-            0,
-            'languages match but filePatterns does not → should not match'
-        );
-
-        const phpControllerPath = path.resolve(__dirname, '../../lint-test/MyController.php');
-        const targetsMatchingAll = resolveConfiguredTargets([
-            {
-                name: 'PHP with *.php pattern',
-                languages: ['php'],
-                filePatterns: ['*.php'],
-                linters: [
-                    {
-                        name: 'PHPStan',
-                        command: 'phpstan',
-                        args: ['${file}'],
-                        parser: TEST_REGEX_PARSER,
-                    },
-                ],
-            },
-        ]);
-
-        // Language matches AND filePatterns matches → match
-        assert.strictEqual(
-            collectRunnableLinters(targetsMatchingAll, phpFilePath, 'manual').length,
-            1,
-            'languages match AND filePatterns matches → should match'
-        );
-
-        // filePatterns matches but document language is not php → no match
-        const tsFilePath = path.resolve(__dirname, '../../lint-test/test.ts');
-        assert.strictEqual(
-            collectRunnableLinters(targetsMatchingAll, tsFilePath, 'manual').length,
-            0,
-            'filePatterns matches but language does not → should not match'
-        );
-
-        // Test that a fake php path matches filePatterns but language wins
-        assert.strictEqual(
-            collectRunnableLinters(targetsMatchingAll, phpControllerPath, 'manual').length,
-            0,
-            'file not open (no languageId) → should not match even if filePatterns matches'
+            collectRunnablePipelines(config, jsFilePath, 'onSave').map((pipeline) => pipeline.pipelineName),
+            ['onSave', 'onOpen']
         );
     });
 });
@@ -693,115 +314,65 @@ suite('Regex Parser', () => {
         String.raw`(?<line>\d+):(?<col>\d+):\s*(?<severity>\w+):\s*(?<message>.+?)\s*\[(?<code>[\w-]+)\]`;
 
     test('empty input returns no diagnostics', () => {
-        const diags = parseLinterOutput(
-            {
-                name: 'test',
-                filePatterns: ['*'],
-                command: 'test',
-                args: [],
-                parser: { pattern: BASIC_PATTERN },
-                run: 'manual',
-            },
-            { code: 0, stdout: '', stderr: '' }
-        );
-        assert.strictEqual(diags.length, 0);
+        const diagnostics = parseRegexFixture('test', { pattern: BASIC_PATTERN }, '');
+
+        assert.strictEqual(diagnostics.length, 0);
     });
 
     test('basic match: line and message', () => {
-        const diags = parseLinterOutput(
-            {
-                name: 'test',
-                filePatterns: ['*'],
-                command: 'test',
-                args: [],
-                parser: { pattern: BASIC_PATTERN },
-                run: 'manual',
-            },
-            { code: 1, stdout: '3:Something went wrong', stderr: '' }
-        );
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.line, 2);
-        assert.strictEqual(diags[0].message, 'Something went wrong');
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
-        assert.strictEqual(diags[0].source, 'test');
+        const diagnostics = parseRegexFixture('test', { pattern: BASIC_PATTERN }, '3:Something went wrong');
+
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].range.start.line, 2);
+        assert.strictEqual(diagnostics[0].message, 'Something went wrong');
+        assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Warning);
+        assert.strictEqual(diagnostics[0].source, 'test');
     });
 
     test('with column: sets explicit character position', () => {
-        const diags = parseLinterOutput(
-            {
-                name: 'test',
-                filePatterns: ['*'],
-                command: 'test',
-                args: [],
-                parser: { pattern: String.raw`(?<line>\d+):(?<col>\d+):(?<message>.+)` },
-                run: 'manual',
-            },
-            { code: 1, stdout: '5:10:Some issue', stderr: '' }
+        const diagnostics = parseRegexFixture(
+            'test',
+            { pattern: String.raw`(?<line>\d+):(?<col>\d+):(?<message>.+)` },
+            '5:10:Some issue'
         );
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.line, 4);
-        assert.strictEqual(diags[0].range.start.character, 9);
+
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].range.start.line, 4);
+        assert.strictEqual(diagnostics[0].range.start.character, 9);
     });
 
     test('with endLine and endCol: sets explicit range', () => {
-        const diags = parseLinterOutput(
+        const diagnostics = parseRegexFixture(
+            'test',
             {
-                name: 'test',
-                filePatterns: ['*'],
-                command: 'test',
-                args: [],
-                parser: {
-                    pattern: String.raw`(?<line>\d+):(?<col>\d+):(?<endLine>\d+):(?<endCol>\d+):(?<message>.+)`,
-                },
-                run: 'manual',
+                pattern: String.raw`(?<line>\d+):(?<col>\d+):(?<endLine>\d+):(?<endCol>\d+):(?<message>.+)`,
             },
-            { code: 1, stdout: '2:5:3:2:Some issue', stderr: '' }
+            '2:5:3:2:Some issue'
         );
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.line, 1);
-        assert.strictEqual(diags[0].range.start.character, 4);
-        assert.strictEqual(diags[0].range.end.line, 2);
-        assert.strictEqual(diags[0].range.end.character, 1);
+
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].range.start.line, 1);
+        assert.strictEqual(diagnostics[0].range.start.character, 4);
+        assert.strictEqual(diagnostics[0].range.end.line, 2);
+        assert.strictEqual(diagnostics[0].range.end.character, 1);
     });
 
     test('severity mapping: error', () => {
-        const diags = parseLinterOutput(
-            {
-                name: 'test',
-                filePatterns: ['*'],
-                command: 'test',
-                args: [],
-                parser: {
-                    pattern: String.raw`(?<line>\d+):(?<severity>\w+):(?<message>.+)`,
-                    flags: 'g',
-                },
-                run: 'manual',
-            },
-            { code: 1, stdout: '1:error:Bad thing', stderr: '' }
+        const diagnostics = parseRegexFixture(
+            'test',
+            { pattern: String.raw`(?<line>\d+):(?<severity>\w+):(?<message>.+)`, flags: 'g' },
+            '1:error:Bad thing'
         );
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+
+        assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Error);
     });
 
     test('severity mapping: info/information', () => {
         const pattern = String.raw`(?<line>\d+):(?<severity>\w+):(?<message>.+)`;
-        const mkLinter = (sev: string) =>
-            parseLinterOutput(
-                {
-                    name: 'test',
-                    filePatterns: ['*'],
-                    command: 'test',
-                    args: [],
-                    parser: { pattern },
-                    run: 'manual',
-                },
-                { code: 0, stdout: `1:${sev}:Hint`, stderr: '' }
-            );
+        const parseSeverity = (severity: string) => parseRegexFixture('test', { pattern }, `1:${severity}:Hint`);
 
-        assert.strictEqual(mkLinter('info')[0].severity, vscode.DiagnosticSeverity.Information);
-        assert.strictEqual(
-            mkLinter('information')[0].severity,
-            vscode.DiagnosticSeverity.Information
-        );
+        assert.strictEqual(parseSeverity('info')[0].severity, vscode.DiagnosticSeverity.Information);
+        assert.strictEqual(parseSeverity('information')[0].severity, vscode.DiagnosticSeverity.Information);
     });
 
     test('severity mapping: aliases used by CLI formatters', () => {
@@ -817,204 +388,144 @@ suite('Regex Parser', () => {
         ];
 
         for (const [severity, expected] of cases) {
-            const diags = parseRegexFixture('test', { pattern }, `1:${severity}:Message`);
-            assert.strictEqual(diags[0].severity, expected);
+            const diagnostics = parseRegexFixture('test', { pattern }, `1:${severity}:Message`);
+            assert.strictEqual(diagnostics[0].severity, expected);
         }
     });
 
     test('defaultSeverity is used when severity group is missing', () => {
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'test',
             { pattern: BASIC_PATTERN, defaultSeverity: 'error' },
             '1:Missing severity'
         );
 
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Error);
     });
 
     test('severity mapping: unknown defaults to warning', () => {
-        const diags = parseLinterOutput(
-            {
-                name: 'test',
-                filePatterns: ['*'],
-                command: 'test',
-                args: [],
-                parser: { pattern: String.raw`(?<line>\d+):(?<severity>\w+):(?<message>.+)` },
-                run: 'manual',
-            },
-            { code: 1, stdout: '1:notice:Something', stderr: '' }
+        const diagnostics = parseRegexFixture(
+            'test',
+            { pattern: String.raw`(?<line>\d+):(?<severity>\w+):(?<message>.+)` },
+            '1:unknown:Something'
         );
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
+
+        assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Warning);
     });
 
     test('code group sets diagnostic code', () => {
-        const diags = parseLinterOutput(
-            {
-                name: 'test',
-                filePatterns: ['*'],
-                command: 'test',
-                args: [],
-                parser: {
-                    pattern: FULL_PATTERN,
-                    flags: 'g',
-                },
-                run: 'manual',
-            },
-            { code: 1, stdout: '3:7: error: Unused import [no-unused-imports]', stderr: '' }
+        const diagnostics = parseRegexFixture(
+            'test',
+            { pattern: FULL_PATTERN, flags: 'g' },
+            '3:7: error: Unused import [no-unused-imports]'
         );
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].code, 'no-unused-imports');
-        assert.strictEqual(diags[0].message, 'Unused import');
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].code, 'no-unused-imports');
+        assert.strictEqual(diagnostics[0].message, 'Unused import');
+        assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Error);
     });
 
     test('multiple matches returns one diagnostic per match', () => {
-        const diags = parseLinterOutput(
-            {
-                name: 'test',
-                filePatterns: ['*'],
-                command: 'test',
-                args: [],
-                parser: { pattern: BASIC_PATTERN, flags: 'gm' },
-                run: 'manual',
-            },
-            { code: 1, stdout: '1:First error\n2:Second error\n3:Third error', stderr: '' }
+        const diagnostics = parseRegexFixture(
+            'test',
+            { pattern: BASIC_PATTERN, flags: 'gm' },
+            '1:First error\n2:Second error\n3:Third error'
         );
-        assert.strictEqual(diags.length, 3);
-        assert.strictEqual(diags[0].range.start.line, 0);
-        assert.strictEqual(diags[1].range.start.line, 1);
-        assert.strictEqual(diags[2].range.start.line, 2);
+
+        assert.strictEqual(diagnostics.length, 3);
+        assert.strictEqual(diagnostics[0].range.start.line, 0);
+        assert.strictEqual(diagnostics[1].range.start.line, 1);
+        assert.strictEqual(diagnostics[2].range.start.line, 2);
     });
 
     test('unmatched lines are silently skipped', () => {
-        const diags = parseLinterOutput(
-            {
-                name: 'test',
-                filePatterns: ['*'],
-                command: 'test',
-                args: [],
-                parser: { pattern: BASIC_PATTERN, flags: 'gm' },
-                run: 'manual',
-            },
-            {
-                code: 1,
-                stdout: 'This line does not match\n5:This line matches\nAnother non-match',
-                stderr: '',
-            }
+        const diagnostics = parseRegexFixture(
+            'test',
+            { pattern: BASIC_PATTERN, flags: 'gm' },
+            'This line does not match\n5:This line matches\nAnother non-match'
         );
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.line, 4);
+
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].range.start.line, 4);
     });
 
     test('invalid regex returns no diagnostics', () => {
-        const diags = parseLinterOutput(
-            {
-                name: 'test',
-                filePatterns: ['*'],
-                command: 'test',
-                args: [],
-                parser: { pattern: '(?<line>\\d+' }, // unclosed group
-                run: 'manual',
-            },
-            { code: 1, stdout: '1:message', stderr: '' }
-        );
-        assert.strictEqual(diags.length, 0);
+        const diagnostics = parseRegexFixture('test', { pattern: '(?<line>\\d+' }, '1:message');
+
+        assert.strictEqual(diagnostics.length, 0);
     });
 
     test('match missing required message group is skipped', () => {
-        // Pattern has line but no message group
-        const diags = parseLinterOutput(
-            {
-                name: 'test',
-                filePatterns: ['*'],
-                command: 'test',
-                args: [],
-                parser: { pattern: String.raw`(?<line>\d+):\w+` },
-                run: 'manual',
-            },
-            { code: 1, stdout: '5:error', stderr: '' }
+        const diagnostics = parseRegexFixture(
+            'test',
+            { pattern: String.raw`(?<line>\d+):\w+` },
+            '5:error'
         );
-        assert.strictEqual(diags.length, 0);
+
+        assert.strictEqual(diagnostics.length, 0);
     });
 
     test('output:stdout parses only stdout', () => {
-        const diags = parseLinterOutput(
-            {
-                name: 'test',
-                filePatterns: ['*'],
-                command: 'test',
-                args: [],
-                parser: { pattern: BASIC_PATTERN, output: 'stdout' },
-                run: 'manual',
-            },
-            { code: 1, stdout: '1:From stdout', stderr: '2:From stderr' }
+        const diagnostics = parseRegexFixture(
+            'test',
+            { pattern: BASIC_PATTERN, output: 'stdout' },
+            '1:From stdout',
+            '2:From stderr'
         );
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].message, 'From stdout');
+
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].message, 'From stdout');
     });
 
     test('output:stderr parses only stderr', () => {
-        const diags = parseLinterOutput(
-            {
-                name: 'test',
-                filePatterns: ['*'],
-                command: 'test',
-                args: [],
-                parser: { pattern: BASIC_PATTERN, output: 'stderr' },
-                run: 'manual',
-            },
-            { code: 1, stdout: '1:From stdout', stderr: '2:From stderr' }
+        const diagnostics = parseRegexFixture(
+            'test',
+            { pattern: BASIC_PATTERN, output: 'stderr' },
+            '1:From stdout',
+            '2:From stderr'
         );
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].message, 'From stderr');
+
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].message, 'From stderr');
     });
 
     test('output:both (default) parses stdout and stderr', () => {
-        const diags = parseLinterOutput(
-            {
-                name: 'test',
-                filePatterns: ['*'],
-                command: 'test',
-                args: [],
-                parser: { pattern: BASIC_PATTERN, output: 'both' },
-                run: 'manual',
-            },
-            { code: 1, stdout: '1:From stdout', stderr: '2:From stderr' }
+        const diagnostics = parseRegexFixture(
+            'test',
+            { pattern: BASIC_PATTERN, output: 'both' },
+            '1:From stdout',
+            '2:From stderr'
         );
-        assert.strictEqual(diags.length, 2);
+
+        assert.strictEqual(diagnostics.length, 2);
     });
 
     test('g flag is added automatically when absent', () => {
-        // Without 'g' flag exec would only return first match; with auto-added 'g' all matches found
-        const diags = parseLinterOutput(
-            {
-                name: 'test',
-                filePatterns: ['*'],
-                command: 'test',
-                args: [],
-                parser: { pattern: BASIC_PATTERN, flags: 'm' }, // no g, multiline
-                run: 'manual',
-            },
-            { code: 1, stdout: '1:First\n2:Second', stderr: '' }
+        const diagnostics = parseRegexFixture(
+            'test',
+            { pattern: BASIC_PATTERN, flags: 'm' },
+            '1:First\n2:Second'
         );
-        assert.strictEqual(diags.length, 2);
+
+        assert.strictEqual(diagnostics.length, 2);
     });
 
     test('zero-width matches do not hang parser', () => {
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'test',
             { pattern: String.raw`(?=(?<line>\d):(?<message>\w+))`, flags: 'gm' },
             '1:First\n2:Second'
         );
 
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].message, 'First');
-        assert.strictEqual(diags[1].message, 'Second');
+        assert.strictEqual(diagnostics.length, 2);
+        assert.strictEqual(diagnostics[0].message, 'First');
+        assert.strictEqual(diagnostics[1].message, 'Second');
     });
 
     test('malformed numeric captures are skipped without throwing', () => {
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'test',
             {
                 pattern: String.raw`(?<line>\S+):(?<col>\S+):(?<endLine>\S+):(?<endCol>\S+):(?<message>[^\n]+)`,
@@ -1029,22 +540,22 @@ suite('Regex Parser', () => {
             ].join('\n')
         );
 
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.line, 3);
-        assert.strictEqual(diags[0].range.start.character, 1);
-        assert.strictEqual(diags[0].message, 'Valid');
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].range.start.line, 3);
+        assert.strictEqual(diagnostics[0].range.start.character, 1);
+        assert.strictEqual(diagnostics[0].message, 'Valid');
     });
 
     test('partially numeric line captures are skipped', () => {
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'test',
             { pattern: String.raw`^(?<line>[^:\n]+):(?<message>[^\n]+)$`, flags: 'gm' },
             '12x:Broken\n8:Valid'
         );
 
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.line, 7);
-        assert.strictEqual(diags[0].message, 'Valid');
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].range.start.line, 7);
+        assert.strictEqual(diagnostics[0].message, 'Valid');
     });
 });
 
@@ -1054,7 +565,7 @@ suite('Regex Utility Parser Configs', () => {
             'lint-test/test.sh:7:16: note: Double quote to prevent globbing and word splitting. [SC2086]',
             'lint-test/test.sh:7:16: note: Prefer putting braces around variable references even when not strictly required. [SC2250]',
         ].join('\n');
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'Shell Check',
             {
                 pattern: String.raw`^.+?:(?<line>\d+):(?<col>\d+): (?<severity>\w+): (?<message>.+?) \[(?<code>SC\d+)\]$`,
@@ -1063,11 +574,11 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].range.start.line, 6);
-        assert.strictEqual(diags[0].range.start.character, 15);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Information);
-        assert.strictEqual(diags[0].code, 'SC2086');
+        assert.strictEqual(diagnostics.length, 2);
+        assert.strictEqual(diagnostics[0].range.start.line, 6);
+        assert.strictEqual(diagnostics[0].range.start.character, 15);
+        assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Information);
+        assert.strictEqual(diagnostics[0].code, 'SC2086');
     });
 
     test('hadolint tty format', () => {
@@ -1075,7 +586,7 @@ suite('Regex Utility Parser Configs', () => {
             'lint-test/Dockerfile:4 DL3007 warning: Using latest is prone to errors if the image will ever update. Pin the version explicitly to a release tag',
             'lint-test/Dockerfile:12 DL3025 error: Use arguments JSON notation for CMD and ENTRYPOINT arguments',
         ].join('\n');
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'HadoLint',
             {
                 pattern: String.raw`^.+?:(?<line>\d+) (?<code>\S+) (?<severity>\w+): (?<message>.+)$`,
@@ -1084,16 +595,16 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[1].range.start.line, 11);
-        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Error);
-        assert.strictEqual(diags[1].code, 'DL3025');
+        assert.strictEqual(diagnostics.length, 2);
+        assert.strictEqual(diagnostics[1].range.start.line, 11);
+        assert.strictEqual(diagnostics[1].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diagnostics[1].code, 'DL3025');
     });
 
     test('markdownlint default format', () => {
         const output =
             'lint-test/test.md:9:1 error MD029/ol-prefix Ordered list item prefix [Expected: 3; Actual: 1; Style: 1/2/3]';
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'Markdown Lint',
             {
                 pattern: String.raw`^.+?:(?<line>\d+):(?<col>\d+) (?<severity>\w+) (?<code>[A-Z0-9]+)(?:/\S+)? (?<message>.+)$`,
@@ -1102,14 +613,14 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].code, 'MD029');
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].code, 'MD029');
+        assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Error);
     });
 
     test('yamllint parsable format', () => {
         const output = 'lint-test/test.yml:1:1: [warning] missing document start "---" (document-start)';
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'YAML Lint',
             {
                 pattern: String.raw`^.+?:(?<line>\d+):(?<col>\d+): \[(?<severity>\w+)\] (?<message>.+?) \((?<code>[^)]+)\)$`,
@@ -1118,9 +629,9 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].code, 'document-start');
-        assert.strictEqual(diags[0].message, 'missing document start "---"');
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].code, 'document-start');
+        assert.strictEqual(diagnostics[0].message, 'missing document start "---"');
     });
 
     test('ansible-lint full format', () => {
@@ -1131,7 +642,7 @@ suite('Regex Utility Parser Configs', () => {
             'no-changed-when: Commands should not change things if nothing needs doing.',
             'lint-test/ansible.yml:10 Task/Handler: shell echo done',
         ].join('\n');
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'Ansible Lint',
             {
                 pattern: String.raw`^(?<code>[a-z][\w.\[\]-]+): (?<message>.+)\n.+?:(?<line>\d+)(?::(?<col>\d+))?`,
@@ -1141,18 +652,18 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].range.start.line, 7);
-        assert.strictEqual(diags[0].range.start.character, 6);
-        assert.strictEqual(diags[0].code, 'fqcn[action-core]');
-        assert.strictEqual(diags[1].range.start.line, 9);
-        assert.strictEqual(diags[1].code, 'no-changed-when');
+        assert.strictEqual(diagnostics.length, 2);
+        assert.strictEqual(diagnostics[0].range.start.line, 7);
+        assert.strictEqual(diagnostics[0].range.start.character, 6);
+        assert.strictEqual(diagnostics[0].code, 'fqcn[action-core]');
+        assert.strictEqual(diagnostics[1].range.start.line, 9);
+        assert.strictEqual(diagnostics[1].code, 'no-changed-when');
     });
 
     test('ruff github format', () => {
         const output =
             '::error title=ruff (F841),file=/home/vix/Code/lint-runner/lint-test/test.py,line=2,col=5,endLine=2,endColumn=6::lint-test/test.py:2:5: F841 Local variable `x` is assigned to but never used%0A  help: Remove assignment to unused variable `x`';
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'Ruff',
             {
                 pattern: String.raw`^::(?<severity>error|warning) title=ruff \((?<code>[^)]+)\),file=[^,]+,line=(?<line>\d+),col=(?<col>\d+),endLine=(?<endLine>\d+),endColumn=(?<endCol>\d+)::(?:[^:]+:\d+:\d+: [A-Z]\d+ )?(?<message>[^\n%]+)`,
@@ -1161,15 +672,15 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.character, 4);
-        assert.strictEqual(diags[0].range.end.line, 1);
-        assert.strictEqual(diags[0].range.end.character, 5);
-        assert.strictEqual(diags[0].code, 'F841');
-        assert.strictEqual(diags[0].message, 'Local variable `x` is assigned to but never used');
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].range.start.character, 4);
+        assert.strictEqual(diagnostics[0].range.end.line, 1);
+        assert.strictEqual(diagnostics[0].range.end.character, 5);
+        assert.strictEqual(diagnostics[0].code, 'F841');
+        assert.strictEqual(diagnostics[0].message, 'Local variable `x` is assigned to but never used');
     });
 
-    test('dotenv-linter plain format', () => {
+    test('dotenv plain format', () => {
         const output = [
             'Checking lint-test/.env',
             'lint-test/.env:1 LowercaseKey: The app_name key should be in uppercase',
@@ -1177,8 +688,8 @@ suite('Regex Utility Parser Configs', () => {
             '',
             'Found 2 problems',
         ].join('\n');
-        const diags = parseRegexFixture(
-            'Dotenv Linter',
+        const diagnostics = parseRegexFixture(
+            'Dotenv',
             {
                 pattern: String.raw`^.+?:(?<line>\d+) (?<code>[A-Za-z][\w-]*): (?<message>.+)$`,
                 flags: 'gm',
@@ -1186,9 +697,9 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].code, 'LowercaseKey');
-        assert.strictEqual(diags[1].range.start.line, 1);
+        assert.strictEqual(diagnostics.length, 2);
+        assert.strictEqual(diagnostics[0].code, 'LowercaseKey');
+        assert.strictEqual(diagnostics[1].range.start.line, 1);
     });
 
     test('luacheck plain format', () => {
@@ -1196,7 +707,7 @@ suite('Regex Utility Parser Configs', () => {
             "/tmp/lint-runner-test.lua:1:7: (W211) unused variable 'unused'",
             "/tmp/lint-runner-test.lua:2:7: (W113) accessing undefined variable 'unknown'",
         ].join('\n');
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'LuaCheck',
             {
                 pattern: String.raw`^.+?:(?<line>\d+):(?<col>\d+): \((?<code>[A-Z]\d+)\) (?<message>.+)$`,
@@ -1205,20 +716,20 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].code, 'W211');
-        assert.strictEqual(diags[1].range.start.character, 6);
+        assert.strictEqual(diagnostics.length, 2);
+        assert.strictEqual(diagnostics[0].code, 'W211');
+        assert.strictEqual(diagnostics[1].range.start.character, 6);
     });
 
     test('taplo syntax format', () => {
         const output = [
             'error: invalid TOML',
-            '  ┌─ /tmp/test.toml:1:5',
-            '  │',
-            '1 │ x = ]',
-            '  │     ^ expected value',
+            '  \u250c\u2500 /tmp/test.toml:1:5',
+            '  |',
+            '1 | x = ]',
+            '  |     ^ expected value',
         ].join('\n');
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'Taplo',
             {
                 pattern: String.raw`(?<severity>error|warning|info):\s*(?<message>[^\n]+)[\s\S]*?\u250c\u2500\s+[^:\n]+:(?<line>\d+):(?<col>\d+)`,
@@ -1226,10 +737,10 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.line, 0);
-        assert.strictEqual(diags[0].range.start.character, 4);
-        assert.strictEqual(diags[0].message, 'invalid TOML');
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].range.start.line, 0);
+        assert.strictEqual(diagnostics[0].range.start.character, 4);
+        assert.strictEqual(diagnostics[0].message, 'invalid TOML');
     });
 
     test('eslint stylish format', () => {
@@ -1238,7 +749,7 @@ suite('Regex Utility Parser Configs', () => {
             "  2:7  error    'unused' is assigned a value but never used  no-unused-vars",
             '  8:1  warning  Unexpected console statement                 no-console',
         ].join('\n');
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'ESLint',
             {
                 pattern: String.raw`^\s*(?<line>\d+):(?<col>\d+)\s+(?<severity>error|warning)\s+(?<message>.+?)\s{2,}(?<code>\S+)\s*$`,
@@ -1247,17 +758,17 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
-        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Warning);
-        assert.strictEqual(diags[1].code, 'no-console');
+        assert.strictEqual(diagnostics.length, 2);
+        assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diagnostics[1].severity, vscode.DiagnosticSeverity.Warning);
+        assert.strictEqual(diagnostics[1].code, 'no-console');
     });
 
     test('stylelint compact format', () => {
         const output =
             '/home/vix/Code/lint-runner/lint-test/test.css: line 6, col 12, error - Disallowed named color "red" (color-named)';
-        const diags = parseRegexFixture(
-            'Style Lint',
+        const diagnostics = parseRegexFixture(
+            'Style',
             {
                 pattern: String.raw`^.+?: line (?<line>\d+), col (?<col>\d+), (?<severity>\w+) - (?<message>.+?) \((?<code>[^)]+)\)$`,
                 flags: 'gm',
@@ -1265,9 +776,9 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.line, 5);
-        assert.strictEqual(diags[0].code, 'color-named');
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].range.start.line, 5);
+        assert.strictEqual(diagnostics[0].code, 'color-named');
     });
 
     test('linthtml no-color format', () => {
@@ -1275,8 +786,8 @@ suite('Regex Utility Parser Configs', () => {
             ' 2:1  error  <HTML> tag should specify the language of the page using the "lang" attribute  html-req-lang      ',
             ' 8:9  error  Invalid case for tag <h1>, tag names must be written in lowercase              tag-name-lowercase ',
         ].join('\n');
-        const diags = parseRegexFixture(
-            'Lint HTML',
+        const diagnostics = parseRegexFixture(
+            'HTML',
             {
                 pattern: String.raw`^\s*(?<line>\d+):(?<col>\d+)\s+(?<severity>error|warning)\s+(?<message>.+?)\s{2,}(?<code>\S+)\s*$`,
                 flags: 'gm',
@@ -1284,9 +795,9 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].code, 'html-req-lang');
-        assert.strictEqual(diags[1].range.start.character, 8);
+        assert.strictEqual(diagnostics.length, 2);
+        assert.strictEqual(diagnostics[0].code, 'html-req-lang');
+        assert.strictEqual(diagnostics[1].range.start.character, 8);
     });
 
     test('htmlhint unix format', () => {
@@ -1294,7 +805,7 @@ suite('Regex Utility Parser Configs', () => {
             '/home/vix/Code/lint-runner/lint-test/test.html:2:6: An lang attribute must be present on <html> elements. [warning/html-lang-require]',
             '/home/vix/Code/lint-runner/lint-test/test.html:8:9: The html element name of [ H1 ] must be in lowercase. [error/tagname-lowercase]',
         ].join('\n');
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'HTML Hint',
             {
                 pattern: String.raw`^.+?:(?<line>\d+):(?<col>\d+): (?<message>.+) \[(?<severity>[^/\]]+)/(?<code>[^\]]+)\]$`,
@@ -1303,10 +814,10 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
-        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Error);
-        assert.strictEqual(diags[1].code, 'tagname-lowercase');
+        assert.strictEqual(diagnostics.length, 2);
+        assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Warning);
+        assert.strictEqual(diagnostics[1].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diagnostics[1].code, 'tagname-lowercase');
     });
 
     test('sqlfluff github annotation native format', () => {
@@ -1314,7 +825,7 @@ suite('Regex Utility Parser Configs', () => {
             '::warning title=SQLFluff,file=lint-test/test.sql,line=1,col=1,endLine=1,endColumn=7::CP01: Keywords must be upper case. [capitalisation.keywords]',
             "::warning title=SQLFluff,file=lint-test/test.sql,line=1,col=35,endLine=1,endColumn=40::LT14: The 'where' keyword should always start a new line. [layout.keyword_newline]",
         ].join('\n');
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'Sql Fluff',
             {
                 pattern: String.raw`^::(?<severity>error|warning|notice) title=SQLFluff,file=[^,]+,line=(?<line>\d+),col=(?<col>\d+),endLine=(?<endLine>\d+),endColumn=(?<endCol>\d+)::(?<code>[A-Z]+\d+): (?<message>.+?)(?: \[[^\]]+\])?$`,
@@ -1323,10 +834,10 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].code, 'CP01');
-        assert.strictEqual(diags[1].range.start.character, 34);
-        assert.strictEqual(diags[1].range.end.character, 39);
+        assert.strictEqual(diagnostics.length, 2);
+        assert.strictEqual(diagnostics[0].code, 'CP01');
+        assert.strictEqual(diagnostics[1].range.start.character, 34);
+        assert.strictEqual(diagnostics[1].range.end.character, 39);
     });
 
     test('checkmake json format with regex', () => {
@@ -1348,7 +859,7 @@ suite('Regex Utility Parser Configs', () => {
             null,
             2
         );
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'Check Make',
             {
                 pattern: String.raw`\{\s*"rule":\s*"(?<code>[^"]+)",\s*"violation":\s*"(?<message>(?:\\.|[^"])*)",\s*"file_name":\s*"[^"]+",\s*"line_number":\s*(?<line>\d+)\s*\}`,
@@ -1357,9 +868,9 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].code, 'phonydeclared');
-        assert.strictEqual(diags[1].message, 'Required target "clean" must be declared PHONY.');
+        assert.strictEqual(diagnostics.length, 2);
+        assert.strictEqual(diagnostics[0].code, 'phonydeclared');
+        assert.strictEqual(diagnostics[1].message, 'Required target "clean" must be declared PHONY.');
     });
 
     test('nginx-lint errorformat', () => {
@@ -1367,8 +878,8 @@ suite('Regex Utility Parser Configs', () => {
             "/tmp/lint-runner-nginx.conf:1:1: error[syntax/invalid-directive-context]: 'server' directive must be inside one of: http, stream, mail, not in main context",
             '/tmp/lint-runner-nginx.conf:2:13: error[syntax/missing-semicolon]: Missing semicolon at end of directive',
         ].join('\n');
-        const diags = parseRegexFixture(
-            'Nginx Lint',
+        const diagnostics = parseRegexFixture(
+            'Nginx',
             {
                 pattern: String.raw`^.+?:(?<line>\d+):(?<col>\d+): (?<severity>\w+)\[(?<code>[^\]]+)\]: (?<message>.+)$`,
                 flags: 'gm',
@@ -1376,9 +887,9 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
-        assert.strictEqual(diags[0].code, 'syntax/invalid-directive-context');
+        assert.strictEqual(diagnostics.length, 2);
+        assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diagnostics[0].code, 'syntax/invalid-directive-context');
     });
 
     test('xmllint stderr format', () => {
@@ -1387,8 +898,8 @@ suite('Regex Utility Parser Configs', () => {
             '    </item>',
             '           ^',
         ].join('\n');
-        const diags = parseRegexFixture(
-            'XML Lint',
+        const diagnostics = parseRegexFixture(
+            'XML',
             {
                 pattern: String.raw`^.+?:(?<line>\d+): (?:(?:parser )?(?<severity>error|warning)) : (?<message>.+)$`,
                 flags: 'gm',
@@ -1398,15 +909,15 @@ suite('Regex Utility Parser Configs', () => {
             stderr
         );
 
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.line, 5);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].range.start.line, 5);
+        assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Error);
     });
 
     test('jsonlint single-line format', () => {
         const output = 'lint-test/test.json: line 4, col 11, Duplicate key: "name".';
-        const diags = parseRegexFixture(
-            'JSON Lint',
+        const diagnostics = parseRegexFixture(
+            'JSON',
             {
                 pattern: String.raw`^(?:.+?:\s*)?line\s+(?<line>\d+),\s*col\s+(?<col>\d+),\s*(?<message>.+?)(?:\.)?$`,
                 flags: 'gm',
@@ -1415,10 +926,10 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 1);
-        assert.strictEqual(diags[0].range.start.character, 10);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
-        assert.strictEqual(diags[0].message, 'Duplicate key: "name"');
+        assert.strictEqual(diagnostics.length, 1);
+        assert.strictEqual(diagnostics[0].range.start.character, 10);
+        assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diagnostics[0].message, 'Duplicate key: "name"');
     });
 
     test('actionlint default format', () => {
@@ -1426,8 +937,8 @@ suite('Regex Utility Parser Configs', () => {
             'lint-test/.github/workflows/test.yml:14:9: step must run script with "run" section or run action with "uses" section [syntax-check]',
             "lint-test/.github/workflows/test.yml:15:29: got unexpected character ' ' while lexing == operator, expecting '=' [expression]",
         ].join('\n');
-        const diags = parseRegexFixture(
-            'Action Lint',
+        const diagnostics = parseRegexFixture(
+            'Action',
             {
                 pattern: String.raw`^.+?:(?<line>\d+):(?<col>\d+): (?<message>.+?) \[(?<code>[^\]]+)\]$`,
                 flags: 'gm',
@@ -1436,10 +947,10 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].code, 'syntax-check');
-        assert.strictEqual(diags[1].range.start.character, 28);
-        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diagnostics.length, 2);
+        assert.strictEqual(diagnostics[0].code, 'syntax-check');
+        assert.strictEqual(diagnostics[1].range.start.character, 28);
+        assert.strictEqual(diagnostics[1].severity, vscode.DiagnosticSeverity.Error);
     });
 
     test('phpcs emacs format', () => {
@@ -1447,7 +958,7 @@ suite('Regex Utility Parser Configs', () => {
             '/home/vix/Code/lint-runner/lint-test/test.php:1:1: warning - A file should declare new symbols and cause no other side effects.',
             '/home/vix/Code/lint-runner/lint-test/test.php:1:1: error - Missing declare(strict_types=1).',
         ].join('\n');
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'PHP CodeSniffer',
             {
                 pattern: String.raw`^.+?:(?<line>\d+):(?<col>\d+): (?<severity>warning|error) - (?<message>.+)$`,
@@ -1456,9 +967,9 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Warning);
-        assert.strictEqual(diags[1].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diagnostics.length, 2);
+        assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Warning);
+        assert.strictEqual(diagnostics[1].severity, vscode.DiagnosticSeverity.Error);
     });
 
     test('phpmd text format', () => {
@@ -1466,7 +977,7 @@ suite('Regex Utility Parser Configs', () => {
             "/home/vix/Code/lint-runner/lint-test/test.php:5  UnusedLocalVariable  Avoid unused local variables such as '$unused'.",
             "/home/vix/Code/lint-runner/lint-test/test.php:6  UnusedLocalVariable  Avoid unused local variables such as '$magic'.",
         ].join('\n');
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'PHP Mess Detector',
             {
                 pattern: String.raw`^.+?:(?<line>\d+)\s+(?<code>\S+)\s+(?<message>.+)$`,
@@ -1475,9 +986,9 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].range.start.line, 4);
-        assert.strictEqual(diags[0].code, 'UnusedLocalVariable');
+        assert.strictEqual(diagnostics.length, 2);
+        assert.strictEqual(diagnostics[0].range.start.line, 4);
+        assert.strictEqual(diagnostics[0].code, 'UnusedLocalVariable');
     });
 
     test('phpstan raw format', () => {
@@ -1487,7 +998,7 @@ suite('Regex Utility Parser Configs', () => {
             '/home/vix/Code/lint-runner/lint-test/test.php:3:Function greet() has no return type specified. [identifier=missingType.return]',
             '/home/vix/Code/lint-runner/lint-test/test.php:10:Parameter #1 (mixed) of echo cannot be converted to string. [identifier=echo.nonString]',
         ].join('\n');
-        const diags = parseRegexFixture(
+        const diagnostics = parseRegexFixture(
             'PHPStan',
             {
                 pattern: String.raw`^.+?:(?<line>\d+):(?<message>.+?)(?: \[identifier=(?<code>[^\]]+)\])?$`,
@@ -1497,722 +1008,9 @@ suite('Regex Utility Parser Configs', () => {
             output
         );
 
-        assert.strictEqual(diags.length, 2);
-        assert.strictEqual(diags[0].range.start.line, 2);
-        assert.strictEqual(diags[0].severity, vscode.DiagnosticSeverity.Error);
-        assert.strictEqual(diags[0].code, 'missingType.return');
-    });
-});
-
-suite('mergeConfiguredTargets', () => {
-    const BASE_PARSER: RegexParserConfig = {
-        pattern: String.raw`(?<line>\d+):(?<message>.+)`,
-    };
-
-    test('empty overrides returns global targets unchanged', () => {
-        const global = [
-            {
-                name: 'PHP',
-                languages: ['php'],
-                linters: [{ name: 'phpstan', command: 'phpstan', args: ['${file}'], parser: BASE_PARSER }],
-            },
-        ];
-        const result = mergeConfiguredTargets(global, []);
-        assert.deepStrictEqual(result, global);
-    });
-
-    test('patches top-level target fields by name', () => {
-        const global = [
-            { name: 'PHP', languages: ['php'], run: 'onSave' as const, linters: [] },
-        ];
-        const patches: TargetPatch[] = [{ name: 'PHP', run: 'manual' }];
-        const result = mergeConfiguredTargets(global, patches);
-        assert.strictEqual(result.length, 1);
-        assert.strictEqual(result[0].run, 'manual');
-        assert.deepStrictEqual(result[0].languages, ['php']);
-    });
-
-    test('patches linter args by name, leaving other linter fields intact', () => {
-        const global = [
-            {
-                name: 'PHP',
-                languages: ['php'],
-                linters: [
-                    { name: 'phpstan', command: 'phpstan', args: ['analyse', '${file}'], parser: BASE_PARSER },
-                ],
-            },
-        ];
-        const patches: TargetPatch[] = [
-            {
-                name: 'PHP',
-                linters: [
-                    { name: 'phpstan', args: ['analyse', '--configuration', 'phpstan.neon', '${file}'] },
-                ],
-            },
-        ];
-        const result = mergeConfiguredTargets(global, patches);
-        assert.strictEqual(result.length, 1);
-        const linters = result[0].linters ?? [];
-        assert.strictEqual(linters.length, 1);
-        assert.deepStrictEqual(linters[0].args, ['analyse', '--configuration', 'phpstan.neon', '${file}']);
-        assert.strictEqual(linters[0].command, 'phpstan');
-        assert.deepStrictEqual(linters[0].parser, BASE_PARSER);
-    });
-
-    test('patches linter maxFileSize by name', () => {
-        const global = [
-            {
-                name: 'PHP',
-                languages: ['php'],
-                linters: [
-                    { name: 'phpstan', command: 'phpstan', args: ['${file}'], parser: BASE_PARSER, maxFileSize: 1024 },
-                ],
-            },
-        ];
-        const patches: TargetPatch[] = [
-            {
-                name: 'PHP',
-                linters: [
-                    { name: 'phpstan', maxFileSize: 2048 },
-                ],
-            },
-        ];
-        const result = mergeConfiguredTargets(global, patches);
-        const linters = result[0].linters ?? [];
-        assert.strictEqual(linters[0].maxFileSize, 2048);
-    });
-
-    test('patches linter successExitCodes by name', () => {
-        const global = [
-            {
-                name: 'PHP',
-                languages: ['php'],
-                linters: [
-                    { name: 'phpstan', command: 'phpstan', args: ['${file}'], parser: BASE_PARSER, successExitCodes: [0] },
-                ],
-            },
-        ];
-        const patches: TargetPatch[] = [
-            {
-                name: 'PHP',
-                linters: [
-                    { name: 'phpstan', successExitCodes: [0, 1] },
-                ],
-            },
-        ];
-        const result = mergeConfiguredTargets(global, patches);
-        const linters = result[0].linters ?? [];
-        assert.deepStrictEqual(linters[0].successExitCodes, [0, 1]);
-    });
-
-    test('patches linter env by name', () => {
-        const global = [
-            {
-                name: 'PHP',
-                languages: ['php'],
-                linters: [
-                    { name: 'phpstan', command: 'phpstan', args: ['${file}'], env: { PATH: '/usr/bin' }, parser: BASE_PARSER },
-                ],
-            },
-        ];
-        const patches: TargetPatch[] = [
-            {
-                name: 'PHP',
-                linters: [
-                    { name: 'phpstan', env: { COMPOSER_MEMORY_LIMIT: '-1' } },
-                ],
-            },
-        ];
-        const result = mergeConfiguredTargets(global, patches);
-        const linters = result[0].linters ?? [];
-        assert.deepStrictEqual(linters[0].env, { COMPOSER_MEMORY_LIMIT: '-1' });
-    });
-
-    test('appends new linter to existing target when name does not match', () => {
-        const global = [
-            {
-                name: 'PHP',
-                languages: ['php'],
-                linters: [
-                    { name: 'phpstan', command: 'phpstan', args: ['${file}'], parser: BASE_PARSER },
-                ],
-            },
-        ];
-        const newLinter = { name: 'phpcs', command: 'phpcs', args: ['${file}'], parser: BASE_PARSER };
-        const patches: TargetPatch[] = [
-            { name: 'PHP', linters: [newLinter] },
-        ];
-        const result = mergeConfiguredTargets(global, patches);
-        const linters = result[0].linters ?? [];
-        assert.strictEqual(linters.length, 2);
-        assert.strictEqual(linters[1].name, 'phpcs');
-    });
-
-    test('adds a completely new target when no global target matches', () => {
-        const global = [
-            { name: 'PHP', languages: ['php'], linters: [] },
-        ];
-        const patches: TargetPatch[] = [
-            {
-                name: 'JS',
-                languages: ['javascript'],
-                linters: [{ name: 'eslint', command: 'eslint', args: ['${file}'], parser: BASE_PARSER }],
-            },
-        ];
-        const result = mergeConfiguredTargets(global, patches);
-        assert.strictEqual(result.length, 2);
-        assert.strictEqual(result[1].name, 'JS');
-        assert.deepStrictEqual(result[1].languages, ['javascript']);
-    });
-
-    test('patches one linter in a multi-linter target leaving others intact', () => {
-        const global = [
-            {
-                name: 'PHP',
-                languages: ['php'],
-                linters: [
-                    { name: 'phpstan', command: 'phpstan', args: ['analyse', '${file}'], parser: BASE_PARSER },
-                    { name: 'phpcs', command: 'phpcs', args: ['${file}'], parser: BASE_PARSER, run: 'onSave' as const },
-                ],
-            },
-        ];
-        const patches: TargetPatch[] = [
-            { name: 'PHP', linters: [{ name: 'phpstan', args: ['analyse', '--no-progress', '${file}'] }] },
-        ];
-        const result = mergeConfiguredTargets(global, patches);
-        const linters = result[0].linters ?? [];
-        assert.strictEqual(linters.length, 2);
-        assert.deepStrictEqual(linters[0].args, ['analyse', '--no-progress', '${file}']);
-        assert.strictEqual(linters[1].name, 'phpcs');
-        assert.strictEqual(linters[1].run, 'onSave');
-    });
-
-    test('targets not matching any patch remain unchanged', () => {
-        const global = [
-            { name: 'PHP', languages: ['php'], run: 'onSave' as const, linters: [] },
-            { name: 'JS', languages: ['javascript'], run: 'manual' as const, linters: [] },
-        ];
-        const patches: TargetPatch[] = [{ name: 'PHP', run: 'manual' }];
-        const result = mergeConfiguredTargets(global, patches);
-        assert.strictEqual(result.length, 2);
-        assert.strictEqual(result[0].run, 'manual');
-        assert.strictEqual(result[1].run, 'manual');
-        assert.deepStrictEqual(result[1].languages, ['javascript']);
-    });
-
-    test('duplicate new-target patches with same name merge rather than duplicate', () => {
-        const global: TargetConfig[] = [];
-        const patches: TargetPatch[] = [
-            { name: 'NEW', languages: ['typescript'], run: 'onSave' },
-            { name: 'NEW', run: 'manual' },
-        ];
-        const result = mergeConfiguredTargets(global, patches);
-        assert.strictEqual(result.length, 1);
-        assert.strictEqual(result[0].name, 'NEW');
-        assert.strictEqual(result[0].run, 'manual');
-    });
-
-    test('new target without languages is skipped', () => {
-        const global: TargetConfig[] = [];
-        const patches: TargetPatch[] = [{ name: 'GHOST' }];
-        const result = mergeConfiguredTargets(global, patches);
-        assert.strictEqual(result.length, 0);
-    });
-
-    test('duplicate new-linter patches with same name merge rather than duplicate', () => {
-        const global = [
-            { name: 'PHP', languages: ['php'], linters: [] },
-        ];
-        const patches: TargetPatch[] = [
-            {
-                name: 'PHP',
-                linters: [
-                    { name: 'phpcs', command: 'phpcs', args: ['${file}'], parser: BASE_PARSER },
-                    { name: 'phpcs', args: ['--standard=PSR2', '${file}'] },
-                ],
-            },
-        ];
-        const result = mergeConfiguredTargets(global, patches);
-        const linters = result[0].linters ?? [];
-        assert.strictEqual(linters.length, 1);
-        assert.deepStrictEqual(linters[0].args, ['--standard=PSR2', '${file}']);
-    });
-
-    test('new linter without required fields is skipped', () => {
-        const global = [
-            { name: 'PHP', languages: ['php'], linters: [] },
-        ];
-        const patches: TargetPatch[] = [
-            { name: 'PHP', linters: [{ name: 'phpcs' }] },
-        ];
-        const result = mergeConfiguredTargets(global, patches);
-        const linters = result[0].linters ?? [];
-        assert.strictEqual(linters.length, 0);
-    });
-
-    test('patches fixer args by name, leaving other fixer fields intact', () => {
-        const global = [
-            {
-                name: 'PHP',
-                languages: ['php'],
-                fixers: [
-                    { name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix', '${file}'], run: 'manual' as const },
-                ],
-            },
-        ];
-        const patches: TargetPatch[] = [
-            {
-                name: 'PHP',
-                fixers: [
-                    { name: 'php-cs-fixer', args: ['fix', '--config=.php-cs-fixer.php', '${file}'] },
-                ],
-            },
-        ];
-        const result = mergeConfiguredTargets(global, patches);
-        const fixers = result[0].fixers ?? [];
-        assert.strictEqual(fixers.length, 1);
-        assert.deepStrictEqual(fixers[0].args, ['fix', '--config=.php-cs-fixer.php', '${file}']);
-        assert.strictEqual(fixers[0].command, 'php-cs-fixer');
-        assert.strictEqual(fixers[0].run, 'manual');
-    });
-
-    test('duplicate fixer names merge rather than duplicate', () => {
-        const global = [
-            { name: 'PHP', languages: ['php'], fixers: [] },
-        ];
-        const patches: TargetPatch[] = [
-            {
-                name: 'PHP',
-                fixers: [
-                    { name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix', '${file}'] },
-                    { name: 'php-cs-fixer', args: ['fix', '--dry-run', '${file}'] },
-                ],
-            },
-        ];
-        const result = mergeConfiguredTargets(global, patches);
-        const fixers = result[0].fixers ?? [];
-        assert.strictEqual(fixers.length, 1);
-        assert.deepStrictEqual(fixers[0].args, ['fix', '--dry-run', '${file}']);
-    });
-
-    test('patches fixer successExitCodes by name', () => {
-        const global = [
-            {
-                name: 'PHP',
-                languages: ['php'],
-                fixers: [
-                    { name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix', '${file}'], successExitCodes: [0] },
-                ],
-            },
-        ];
-        const patches: TargetPatch[] = [
-            {
-                name: 'PHP',
-                fixers: [
-                    { name: 'php-cs-fixer', successExitCodes: [0, 8] },
-                ],
-            },
-        ];
-        const result = mergeConfiguredTargets(global, patches);
-        const fixers = result[0].fixers ?? [];
-        assert.deepStrictEqual(fixers[0].successExitCodes, [0, 8]);
-    });
-
-    test('patches fixer env by name', () => {
-        const global = [
-            {
-                name: 'PHP',
-                languages: ['php'],
-                fixers: [
-                    { name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix', '${file}'], env: { PATH: '/usr/bin' } },
-                ],
-            },
-        ];
-        const patches: TargetPatch[] = [
-            {
-                name: 'PHP',
-                fixers: [
-                    { name: 'php-cs-fixer', env: { PHP_CS_FIXER_IGNORE_ENV: '1' } },
-                ],
-            },
-        ];
-        const result = mergeConfiguredTargets(global, patches);
-        const fixers = result[0].fixers ?? [];
-        assert.deepStrictEqual(fixers[0].env, { PHP_CS_FIXER_IGNORE_ENV: '1' });
-    });
-
-    test('duplicate target names in the same source merge rather than duplicate', () => {
-        const global: TargetConfig[] = [
-            { name: 'PHP', languages: ['php'], run: 'onSave', linters: [] },
-            { name: 'PHP', languages: ['php'], run: 'manual', fixers: [{ name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix', '${file}'] }] },
-        ];
-        const result = mergeConfiguredTargets(global, []);
-        assert.strictEqual(result.length, 1);
-        assert.strictEqual(result[0].run, 'manual');
-        assert.strictEqual(result[0].fixers?.[0].name, 'php-cs-fixer');
-    });
-
-    test('patch keeps existing linters while adding fixers from another scope', () => {
-        const global: TargetConfig[] = [
-            {
-                name: 'PHP',
-                languages: ['php'],
-                linters: [
-                    { name: 'phpstan', command: 'phpstan', args: ['analyse', '${file}'], parser: BASE_PARSER },
-                ],
-            },
-        ];
-        const patches: TargetPatch[] = [
-            {
-                name: 'PHP',
-                fixers: [
-                    { name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix', '${file}'] },
-                ],
-            },
-        ];
-        const result = mergeConfiguredTargets(global, patches);
-        assert.strictEqual(result.length, 1);
-        assert.strictEqual(result[0].linters?.[0].name, 'phpstan');
-        assert.strictEqual(result[0].fixers?.[0].name, 'php-cs-fixer');
-    });
-});
-
-suite('Config validation', () => {
-    const BASE_PARSER: RegexParserConfig = {
-        pattern: String.raw`(?<line>\d+):(?<message>.+)`,
-    };
-
-    test('allows target patches without languages when the target already exists in a higher scope', () => {
-        const issues = validateTargetScopes(
-            [
-                {
-                    label: 'User settings',
-                    targets: [{ name: 'PHP', languages: ['php'] }],
-                },
-                {
-                    label: 'Workspace settings',
-                    targets: [{ name: 'PHP', run: 'manual' }],
-                },
-            ],
-            {
-                knownLanguageIds: ['php'],
-                env: { PATH: '' },
-                platform: 'linux',
-            }
-        );
-
-        assert.deepStrictEqual(issues, { errors: [], warnings: [] });
-    });
-
-    test('reports duplicate target, linter, and fixer names in the same scope', () => {
-        const issues = validateTargetScopes(
-            [
-                {
-                    label: 'Workspace settings',
-                    targets: [
-                        { name: 'PHP', languages: ['php'] },
-                        {
-                            name: 'PHP',
-                            languages: ['php'],
-                            linters: [
-                                { name: 'phpstan', command: 'phpstan', args: ['analyse'], parser: BASE_PARSER },
-                                { name: 'phpstan', command: 'phpstan', args: ['analyse'], parser: BASE_PARSER },
-                            ],
-                            fixers: [
-                                { name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix'] },
-                                { name: 'php-cs-fixer', command: 'php-cs-fixer', args: ['fix'] },
-                            ],
-                        },
-                    ],
-                },
-            ],
-            {
-                knownLanguageIds: ['php'],
-                env: { PATH: '' },
-                platform: 'linux',
-            }
-        );
-
-        assert.ok(issues.errors.includes("Workspace settings: duplicate target name 'PHP'."));
-        assert.ok(issues.errors.includes("Workspace settings: target 'PHP' has duplicate linter name 'phpstan'."));
-        assert.ok(issues.errors.includes("Workspace settings: target 'PHP' has duplicate fixer name 'php-cs-fixer'."));
-    });
-
-    test('reports missing tool fields, invalid parser groups, and unknown language ids', () => {
-        const issues = validateTargetScopes(
-            [
-                {
-                    label: 'Workspace settings',
-                    targets: [
-                        {
-                            name: 'Broken',
-                            languages: ['made-up-language'],
-                            linters: [
-                                {
-                                    name: 'eslint',
-                                    command: 'eslint',
-                                    args: ['${file}'],
-                                    parser: { pattern: String.raw`(?<line>\d+):(?<severity>\w+)` },
-                                },
-                                {
-                                    name: 'missing-linter',
-                                },
-                            ],
-                            fixers: [
-                                {
-                                    name: 'missing-fixer',
-                                },
-                            ],
-                        },
-                    ],
-                },
-            ],
-            {
-                knownLanguageIds: ['php', 'typescript'],
-                env: { PATH: '' },
-                platform: 'linux',
-            }
-        );
-
-        assert.ok(
-            issues.warnings.includes(
-                "Workspace settings: target 'Broken' contains unknown language id 'made-up-language'."
-            )
-        );
-        assert.ok(
-            issues.errors.includes(
-                "Workspace settings: target 'Broken' linter 'eslint' parser is missing required capture groups: message."
-            )
-        );
-        assert.ok(
-            issues.errors.includes(
-                "Workspace settings: target 'Broken' linter 'missing-linter' is missing command or args."
-            )
-        );
-        assert.ok(
-            issues.errors.includes(
-                "Workspace settings: target 'Broken' linter 'missing-linter' parser is missing pattern."
-            )
-        );
-        assert.ok(
-            issues.errors.includes(
-                "Workspace settings: target 'Broken' fixer 'missing-fixer' is missing command or args."
-            )
-        );
-    });
-
-    test('skips incomplete and unavailable disabled linters and fixers', () => {
-        const issues = validateTargetScopes(
-            [
-                {
-                    label: 'Workspace settings',
-                    targets: [
-                        {
-                            name: 'PHP',
-                            languages: ['php'],
-                            linters: [
-                                {
-                                    name: 'disabled-linter',
-                                    enabled: false,
-                                },
-                                {
-                                    name: 'disabled-parser',
-                                    enabled: false,
-                                    command: 'missing-command',
-                                    args: ['${file}'],
-                                    parser: { pattern: String.raw`(?<line>\d+)` },
-                                },
-                                {
-                                    name: 'disabled-pre-command',
-                                    enabled: false,
-                                    command: '/bin/true',
-                                    args: ['${file}'],
-                                    parser: BASE_PARSER,
-                                    preCommands: [
-                                        { command: 'missing-pre-command' } as unknown as {
-                                            command: string;
-                                            args: string[];
-                                        },
-                                    ],
-                                },
-                            ],
-                            fixers: [
-                                {
-                                    name: 'disabled-fixer',
-                                    enabled: false,
-                                },
-                                {
-                                    name: 'disabled-missing-command',
-                                    enabled: false,
-                                    command: 'missing-command',
-                                    args: ['${file}'],
-                                },
-                            ],
-                        },
-                    ],
-                },
-            ],
-            {
-                knownLanguageIds: ['php'],
-                env: { PATH: '' },
-                platform: 'linux',
-            }
-        );
-
-        assert.deepStrictEqual(issues, { errors: [], warnings: [] });
-    });
-
-    test('reports invalid successExitCodes entries', () => {
-        const issues = validateTargetScopes(
-            [
-                {
-                    label: 'Workspace settings',
-                    targets: [
-                        {
-                            name: 'PHP',
-                            languages: ['php'],
-                            linters: [
-                                {
-                                    name: 'phpstan',
-                                    command: '/bin/true',
-                                    args: ['${file}'],
-                                    parser: BASE_PARSER,
-                                    successExitCodes: [0, 1.5] as unknown as number[],
-                                },
-                            ],
-                            fixers: [
-                                {
-                                    name: 'php-cs-fixer',
-                                    command: '/bin/true',
-                                    args: ['fix', '${file}'],
-                                    successExitCodes: [0, '8'] as unknown as number[],
-                                },
-                            ],
-                        },
-                    ],
-                },
-            ],
-            {
-                knownLanguageIds: ['php'],
-                env: { PATH: '' },
-                platform: 'linux',
-            }
-        );
-
-        assert.ok(
-            issues.errors.includes(
-                "Workspace settings: target 'PHP' linter 'phpstan' successExitCodes must be an array of integers."
-            )
-        );
-        assert.ok(
-            issues.errors.includes(
-                "Workspace settings: target 'PHP' fixer 'php-cs-fixer' successExitCodes must be an array of integers."
-            )
-        );
-    });
-
-    test('reports safely checkable commands that are not found', () => {
-        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-runner-validate-'));
-        const existingCommand = path.join(tempDir, 'existing-command');
-        fs.writeFileSync(existingCommand, '#!/bin/sh\nexit 0\n', 'utf8');
-        fs.chmodSync(existingCommand, 0o755);
-
-        try {
-            const issues = validateTargetScopes(
-                [
-                    {
-                        label: 'Workspace settings',
-                        targets: [
-                            {
-                                name: 'PHP',
-                                languages: ['php'],
-                                linters: [
-                                    {
-                                        name: 'found',
-                                        command: existingCommand,
-                                        args: ['${file}'],
-                                        parser: BASE_PARSER,
-                                    },
-                                    {
-                                        name: 'missing',
-                                        command: 'missing-command',
-                                        args: ['${file}'],
-                                        parser: BASE_PARSER,
-                                    },
-                                ],
-                                fixers: [
-                                    {
-                                        name: 'templated',
-                                        command: '${workspaceFolder}/vendor/bin/pint',
-                                        args: ['${file}'],
-                                    },
-                                ],
-                            },
-                        ],
-                    },
-                ],
-                {
-                    knownLanguageIds: ['php'],
-                    env: { PATH: tempDir },
-                    platform: 'linux',
-                }
-            );
-
-            assert.ok(
-                issues.warnings.includes(
-                    "Workspace settings: target 'PHP' linter 'missing' command 'missing-command' was not found."
-                )
-            );
-            assert.ok(
-                issues.warnings.includes(
-                    "Workspace settings: target 'PHP' fixer 'templated' command '${workspaceFolder}/vendor/bin/pint' cannot be checked because it contains variables."
-                )
-            );
-            assert.deepStrictEqual(issues.errors, []);
-        } finally {
-            fs.rmSync(tempDir, { recursive: true, force: true });
-        }
-    });
-
-    test('respects command env PATH during command validation', () => {
-        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lint-runner-validate-env-'));
-        const existingCommand = path.join(tempDir, 'existing-command');
-        fs.writeFileSync(existingCommand, '#!/bin/sh\nexit 0\n', 'utf8');
-        fs.chmodSync(existingCommand, 0o755);
-
-        try {
-            const issues = validateTargetScopes(
-                [
-                    {
-                        label: 'Workspace settings',
-                        targets: [
-                            {
-                                name: 'PHP',
-                                languages: ['php'],
-                                linters: [
-                                    {
-                                        name: 'phpstan',
-                                        command: 'existing-command',
-                                        args: ['${file}'],
-                                        env: { PATH: tempDir },
-                                        parser: BASE_PARSER,
-                                    },
-                                ],
-                            },
-                        ],
-                    },
-                ],
-                {
-                    knownLanguageIds: ['php'],
-                    env: { PATH: '' },
-                    platform: 'linux',
-                }
-            );
-
-            assert.deepStrictEqual(issues.errors, []);
-            assert.deepStrictEqual(issues.warnings, []);
-        } finally {
-            fs.rmSync(tempDir, { recursive: true, force: true });
-        }
+        assert.strictEqual(diagnostics.length, 2);
+        assert.strictEqual(diagnostics[0].range.start.line, 2);
+        assert.strictEqual(diagnostics[0].severity, vscode.DiagnosticSeverity.Error);
+        assert.strictEqual(diagnostics[0].code, 'missingType.return');
     });
 });
