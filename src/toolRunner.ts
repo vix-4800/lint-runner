@@ -549,7 +549,7 @@ export function resolveToolConfiguration(config: ToolConfigurationPatch): Resolv
                 command: tool.command,
                 args: [...tool.args],
                 cwd: tool.cwd ?? '${workspaceFolder}',
-                successExitCodes: tool.successExitCodes !== undefined ? [...tool.successExitCodes] : [0],
+                successExitCodes: tool.successExitCodes !== undefined ? [...tool.successExitCodes] : undefined,
             };
         }
     }
@@ -1188,14 +1188,14 @@ function isAcceptedExitCode(result: CommandResult, successExitCodes?: readonly n
     if (result.error !== undefined) {
         return false;
     }
-    return result.code !== null && (successExitCodes ?? [0]).includes(result.code);
+    return successExitCodes === undefined || (result.code !== null && successExitCodes.includes(result.code));
 }
 
 function formatExitCodePolicyFailure(result: CommandResult, successExitCodes?: readonly number[]): string {
     if (result.error !== undefined) {
         return result.error;
     }
-    return `exit ${result.code ?? 'null'} is not in successExitCodes [${(successExitCodes ?? [0]).join(', ')}]`;
+    return `exit ${result.code ?? 'null'} is not in successExitCodes [${(successExitCodes ?? []).join(', ')}]`;
 }
 
 function reportCommandFailure(output: RunnerOutput, label: string, message: string): void {

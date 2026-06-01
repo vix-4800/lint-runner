@@ -31,6 +31,7 @@ let configValidationWarningShown = false;
 const saveDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const lastSavedContentHashes = new Map<string, string>();
 const CONFIG_VALIDATION_PREVIEW_LIMIT = 5;
+const MANUAL_RUN_FAILURE_NOTIFICATION_MS = 4000;
 const manualCodeActionKind = vscode.CodeActionKind.Source.append('lintRunner.manual');
 const manualPipelineCodeActionKind = manualCodeActionKind.append('pipeline');
 const manualToolCodeActionKind = manualCodeActionKind.append('tool');
@@ -39,6 +40,7 @@ type OutputChannelLike = Pick<vscode.OutputChannel, 'appendLine' | 'dispose'>;
 type StatusBarLike = Pick<vscode.StatusBarItem, 'dispose' | 'hide'>;
 type DiagnosticsLike = Pick<vscode.DiagnosticCollection, 'clear' | 'dispose'>;
 type DisposableLike = Pick<vscode.Disposable, 'dispose'>;
+type DelayFn = (ms: number) => Promise<void>;
 type WithProgressFn = <T>(
     options: vscode.ProgressOptions,
     task: (
@@ -91,6 +93,12 @@ interface ManualRunNotificationDeps {
     isEnabled?: (resource: vscode.Uri) => boolean;
     withProgress?: WithProgressFn;
     onCancel?: (filePath: string) => void;
+}
+
+interface ManualRunFailureWarningDeps {
+    delay?: DelayFn;
+    showWarningMessage?: typeof vscode.window.showWarningMessage;
+    withProgress?: WithProgressFn;
 }
 
 interface DoctorNotificationDeps {
@@ -436,14 +444,38 @@ function createFailureAwareOutput(output: RunnerOutput, failures: RunnerFailure[
     };
 }
 
-async function showManualRunFailureWarning(
+function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isExitCodePolicyFailure(message: string): boolean {
+    return /\bexit .+ is not in successExitCodes \[.*\]/.test(message);
+}
+
+export async function showManualRunFailureWarning(
     failures: readonly RunnerFailure[],
-    showWarningMessage: typeof vscode.window.showWarningMessage = vscode.window.showWarningMessage
+    deps: ManualRunFailureWarningDeps = {}
 ): Promise<void> {
     if (failures.length === 0) {
         return;
     }
-    await showWarningMessage(`LintRunner: ${failures[0].label} failed: ${failures[0].message}`);
+    const message = `LintRunner: ${failures[0].label} failed: ${failures[0].message}`;
+    if (isExitCodePolicyFailure(failures[0].message)) {
+        const withProgress = deps.withProgress ?? vscode.window.withProgress;
+        const wait = deps.delay ?? delay;
+        await withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: message,
+            },
+            async () => {
+                await wait(MANUAL_RUN_FAILURE_NOTIFICATION_MS);
+            }
+        );
+        return;
+    }
+    const showWarningMessage = deps.showWarningMessage ?? vscode.window.showWarningMessage;
+    await showWarningMessage(message);
 }
 
 export async function runManualTaskWithNotification<T>(
