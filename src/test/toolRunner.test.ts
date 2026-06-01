@@ -8,6 +8,7 @@ import {
     cancelAllFileRuns,
     cancelFileRun,
     collectDoctorToolStatuses,
+    collectRunnablePipelines,
     resolveToolConfiguration,
     runPipeline,
     type ResolvedToolConfiguration,
@@ -79,6 +80,32 @@ suite('Tool Pipeline Runner', () => {
 
         assert.strictEqual(runCount, 0);
         await assert.rejects(fs.access(markerPath));
+    });
+
+    test('collectRunnablePipelines matches a document language id override', () => {
+        const toolConfig: ResolvedToolConfiguration = resolveToolConfiguration({
+            tools: {
+                eslint: {
+                    kind: 'diagnostic',
+                    command: 'eslint',
+                    args: ['${file}'],
+                    parser: { pattern: '(?<line>\\d+):(?<message>.+)' },
+                },
+            },
+            targets: [
+                {
+                    name: 'TS',
+                    match: { languages: ['typescript'] },
+                    manual: { strategy: 'sequence', tools: ['eslint'] },
+                },
+            ],
+        });
+
+        const pipelines = collectRunnablePipelines(toolConfig, '/tmp/lint-runner-untitled.ts', 'manual', {
+            languageId: 'typescript',
+        });
+
+        assert.deepStrictEqual(pipelines.map((pipeline) => pipeline.label), ['TS: manual']);
     });
 
     test('runPipeline skips files ignored by git when respectGitignore is enabled', async function () {

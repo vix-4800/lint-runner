@@ -1,4 +1,6 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import {
     cleanupExtensionRuntime,
@@ -21,6 +23,7 @@ import {
     OutputChannelManager,
     runDoctorWithNotification,
     runManualTaskWithNotification,
+    runManualPipelinesForDocument,
     runOnOpenPipelinesForVisibleEditors,
     showManualRunFailureWarning,
     type RunnablePipeline,
@@ -406,6 +409,50 @@ suite('Extension', () => {
         assert.deepStrictEqual(lenses.map((lens) => lens.command?.title), [
             'Run: eslint',
         ]);
+    });
+
+    test('runManualPipelinesForDocument runs untitled buffers through a temp file and applies writes back', async () => {
+        const documentUri = vscode.Uri.parse('untitled:LintRunner Untitled');
+        const pipeline = createPipeline();
+        const runFileNames: string[] = [];
+        const runDiagnosticUris: vscode.Uri[] = [];
+        const editEntries: [vscode.Uri, vscode.TextEdit[]][] = [];
+
+        await runManualPipelinesForDocument(
+            {
+                uri: documentUri,
+                fileName: 'LintRunner Untitled',
+                isUntitled: true,
+                languageId: 'typescript',
+                lineCount: 1,
+                getText: () => 'const value = 1;\n',
+            } as vscode.TextDocument,
+            {} as vscode.DiagnosticCollection,
+            { appendLine() { /* test stub */ } },
+            { show() { /* test stub */ }, hide() { /* test stub */ } } as vscode.StatusBarItem,
+            [pipeline],
+            {
+                runManualPipelinesForFile: async (fileName, _diagnostics, _output, _statusBar, _pipelines, options) => {
+                    runFileNames.push(fileName);
+                    if (options?.diagnosticUri !== undefined) {
+                        runDiagnosticUris.push(options.diagnosticUri);
+                    }
+                    await fs.promises.writeFile(fileName, 'const value = 2;\n');
+                },
+                applyWorkspaceEdit: async (edit) => {
+                    editEntries.push(...edit.entries());
+                    return true;
+                },
+            }
+        );
+
+        assert.strictEqual(runFileNames.length, 1);
+        assert.match(path.basename(runFileNames[0]), /^lint-runner-untitled-.*\.ts$/);
+        await assert.rejects(fs.promises.access(runFileNames[0]));
+        assert.deepStrictEqual(runDiagnosticUris, [documentUri]);
+        assert.strictEqual(editEntries.length, 1);
+        assert.strictEqual(editEntries[0][0].toString(), documentUri.toString());
+        assert.strictEqual(editEntries[0][1][0].newText, 'const value = 2;\n');
     });
 
     test('getActionsStatusBarState returns undefined without active file editor', () => {
