@@ -1,4 +1,7 @@
 import * as crypto from 'crypto';
+import * as fs from 'fs/promises';
+import * as os from 'os';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import {
     cancelAllFileRuns,
@@ -17,6 +20,7 @@ import {
     validateLintRunnerConfig,
     type ConfigValidationIssues,
     type DoctorToolStatus,
+    type RunPipelineOptions,
     type RunnablePipeline,
     type RunnableTool,
     type RunnerFailure,
@@ -32,6 +36,25 @@ const saveDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const lastSavedContentHashes = new Map<string, string>();
 const CONFIG_VALIDATION_PREVIEW_LIMIT = 5;
 const MANUAL_RUN_FAILURE_NOTIFICATION_MS = 4000;
+const UNTITLED_LANGUAGE_EXTENSIONS: Record<string, string> = {
+    css: '.css',
+    go: '.go',
+    html: '.html',
+    javascript: '.js',
+    javascriptreact: '.jsx',
+    json: '.json',
+    lua: '.lua',
+    markdown: '.md',
+    php: '.php',
+    plaintext: '.txt',
+    python: '.py',
+    shellscript: '.sh',
+    typescript: '.ts',
+    typescriptreact: '.tsx',
+    vue: '.vue',
+    xml: '.xml',
+    yaml: '.yml',
+};
 const manualCodeActionKind = vscode.CodeActionKind.Source.append('lintRunner.manual');
 const manualPipelineCodeActionKind = manualCodeActionKind.append('pipeline');
 const manualToolCodeActionKind = manualCodeActionKind.append('tool');
@@ -113,6 +136,25 @@ interface DoctorNotificationDeps {
 interface OpenBundledExamplesDeps {
     openTextDocument?: typeof vscode.workspace.openTextDocument;
     showTextDocument?: typeof vscode.window.showTextDocument;
+}
+
+interface RunnableTextDocument extends Pick<
+    vscode.TextDocument,
+    'fileName' | 'getText' | 'isUntitled' | 'languageId' | 'lineCount' | 'uri'
+> {}
+
+type RunManualPipelinesForFileFn = (
+    fileName: string,
+    diagnostics: vscode.DiagnosticCollection,
+    output: RunnerOutput,
+    statusBar: vscode.StatusBarItem,
+    pipelines?: readonly RunnablePipeline[],
+    options?: RunPipelineOptions
+) => Promise<void>;
+
+interface ManualDocumentRunDeps {
+    runManualPipelinesForFile?: RunManualPipelinesForFileFn;
+    applyWorkspaceEdit?: typeof vscode.workspace.applyEdit;
 }
 
 let deactivateCleanupResources: Omit<
@@ -336,9 +378,42 @@ function canRunWorkspaceCommands(showWarning: boolean): boolean {
     return true;
 }
 
+function isRunnableDocumentScheme(uri: vscode.Uri): boolean {
+    return uri.scheme === 'file' || uri.scheme === 'untitled';
+}
+
+function getActiveRunnableEditor(): vscode.TextEditor | undefined {
+    const editor = vscode.window.activeTextEditor;
+    return editor !== undefined && isRunnableDocumentScheme(editor.document.uri) ? editor : undefined;
+}
+
 function getActiveFileEditor(): vscode.TextEditor | undefined {
     const editor = vscode.window.activeTextEditor;
     return editor?.document.uri.scheme === 'file' ? editor : undefined;
+}
+
+function getUntitledDocumentExtension(document: RunnableTextDocument): string {
+    const fileExtname = path.extname(document.fileName);
+    if (fileExtname !== '') {
+        return fileExtname;
+    }
+    return UNTITLED_LANGUAGE_EXTENSIONS[document.languageId] ?? '.txt';
+}
+
+function getDocumentMatchFileName(document: Pick<vscode.TextDocument, 'fileName' | 'languageId' | 'uri'>): string {
+    if (document.uri.scheme === 'file') {
+        return document.fileName;
+    }
+    const extension = UNTITLED_LANGUAGE_EXTENSIONS[document.languageId] ?? '.txt';
+    return path.join(os.tmpdir(), `lint-runner-untitled${extension}`);
+}
+
+function getFullDocumentRange(document: Pick<vscode.TextDocument, 'lineCount'>): vscode.Range {
+    return new vscode.Range(0, 0, document.lineCount, 0);
+}
+
+function findOpenDocument(uri: vscode.Uri): vscode.TextDocument | undefined {
+    return vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString());
 }
 
 function hasValidConfig(): boolean {
@@ -374,22 +449,24 @@ export function getActionsStatusBarState(
     getPipelines: typeof getRunnablePipelines = getRunnablePipelines,
     getTools: typeof getRunnableTools = getRunnableTools
 ): { text: string; tooltip: string } | undefined {
-    if (editor === undefined || editor.document.isUntitled || editor.document.uri.scheme !== 'file') {
+    if (editor === undefined || !isRunnableDocumentScheme(editor.document.uri)) {
         return undefined;
     }
     if (!isEnabled(editor.document.uri) || !isConfigValid()) {
         return undefined;
     }
-    const pipelines = getPipelines(editor.document.fileName, 'manual');
-    const tools = getTools(editor.document.fileName, 'manual');
+    const fileName = getDocumentMatchFileName(editor.document);
+    const options = { resource: editor.document.uri, languageId: editor.document.languageId };
+    const pipelines = getPipelines(fileName, 'manual', options);
+    const tools = getTools(fileName, 'manual', options);
     return {
         text: '$(wrench)',
-        tooltip: `LintRunner: ${pipelines.length} pipeline(s), ${tools.length} tool(s) for ${vscode.workspace.asRelativePath(editor.document.fileName)}`,
+        tooltip: `LintRunner: ${pipelines.length} pipeline(s), ${tools.length} tool(s) for ${vscode.workspace.asRelativePath(fileName)}`,
     };
 }
 
 function updateActionsStatusBar(statusBar: vscode.StatusBarItem): void {
-    const state = getActionsStatusBarState(getActiveFileEditor());
+    const state = getActionsStatusBarState(getActiveRunnableEditor());
     if (state === undefined) {
         statusBar.hide();
         return;
@@ -409,13 +486,31 @@ async function runPipelinesForFile(
     diagnostics: vscode.DiagnosticCollection,
     output: RunnerOutput,
     statusBar: vscode.StatusBarItem,
-    pipelines: readonly RunnablePipeline[] = getRunnablePipelines(fileName, trigger)
+    pipelines: readonly RunnablePipeline[] = getRunnablePipelines(fileName, trigger),
+    options: RunPipelineOptions = {}
 ): Promise<number> {
     let count = 0;
     for (const pipeline of pipelines) {
-        count += await runPipeline(fileName, pipeline, output, statusBar, diagnostics);
+        count += await runPipeline(fileName, pipeline, output, statusBar, diagnostics, options);
     }
     return count;
+}
+
+export function getRunnablePipelinesForDocument(
+    document: Pick<vscode.TextDocument, 'fileName' | 'languageId' | 'uri'>,
+    trigger: 'manual' | 'onOpen' | 'onSave' = 'manual'
+): RunnablePipeline[] {
+    return getRunnablePipelines(getDocumentMatchFileName(document), trigger, {
+        resource: document.uri,
+        languageId: document.languageId,
+    });
+}
+
+export function getRunnableToolsForDocument(
+    document: Pick<vscode.TextDocument, 'fileName' | 'languageId' | 'uri'>,
+    trigger: 'manual' | 'onOpen' | 'onSave' = 'manual'
+): RunnableTool[] {
+    return getRunnablePipelinesForDocument(document, trigger).flatMap((pipeline) => pipeline.tools);
 }
 
 export function runOnOpenPipelinesForVisibleEditors(
@@ -444,8 +539,8 @@ function createFailureAwareOutput(output: RunnerOutput, failures: RunnerFailure[
     };
 }
 
-function delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+async function delay(ms: number): Promise<void> {
+    return void await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isExitCodePolicyFailure(message: string): boolean {
@@ -517,7 +612,8 @@ export async function runManualPipelinesForFile(
     diagnostics: vscode.DiagnosticCollection,
     output: RunnerOutput,
     statusBar: vscode.StatusBarItem,
-    pipelines?: readonly RunnablePipeline[]
+    pipelines?: readonly RunnablePipeline[],
+    options: RunPipelineOptions = {}
 ): Promise<void> {
     const selectedPipelines = pipelines ?? getRunnablePipelines(fileName, 'manual');
     if (selectedPipelines.length === 0) {
@@ -528,9 +624,71 @@ export async function runManualPipelinesForFile(
     const failures: RunnerFailure[] = [];
     const failureAwareOutput = createFailureAwareOutput(output, failures);
     await runManualTaskWithNotification(fileName, getRunnablePipelineLabels(selectedPipelines), async () =>
-        await runPipelinesForFile(fileName, 'manual', diagnostics, failureAwareOutput, statusBar, selectedPipelines)
+        await runPipelinesForFile(fileName, 'manual', diagnostics, failureAwareOutput, statusBar, selectedPipelines, options)
     );
     await showManualRunFailureWarning(failures);
+}
+
+async function applyTempFileChangesToDocument(
+    document: RunnableTextDocument,
+    tempFileName: string,
+    applyWorkspaceEdit: typeof vscode.workspace.applyEdit
+): Promise<void> {
+    const updatedText = await fs.readFile(tempFileName, 'utf8');
+    if (updatedText === document.getText()) {
+        return;
+    }
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(document.uri, getFullDocumentRange(document), updatedText);
+    await applyWorkspaceEdit(edit);
+}
+
+async function runUntitledDocumentPipelines(
+    document: RunnableTextDocument,
+    diagnostics: vscode.DiagnosticCollection,
+    output: RunnerOutput,
+    statusBar: vscode.StatusBarItem,
+    pipelines: readonly RunnablePipeline[] | undefined,
+    deps: ManualDocumentRunDeps
+): Promise<void> {
+    const selectedPipelines = pipelines ?? getRunnablePipelinesForDocument(document, 'manual');
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-buffer-'));
+    const tempFileName = path.join(tempDir, `lint-runner-untitled-${crypto.randomUUID()}${getUntitledDocumentExtension(document)}`);
+    try {
+        await fs.writeFile(tempFileName, document.getText());
+        await (deps.runManualPipelinesForFile ?? runManualPipelinesForFile)(
+            tempFileName,
+            diagnostics,
+            output,
+            statusBar,
+            selectedPipelines,
+            { diagnosticUri: document.uri }
+        );
+        await applyTempFileChangesToDocument(document, tempFileName, deps.applyWorkspaceEdit ?? vscode.workspace.applyEdit);
+    } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+    }
+}
+
+export async function runManualPipelinesForDocument(
+    document: RunnableTextDocument,
+    diagnostics: vscode.DiagnosticCollection,
+    output: RunnerOutput,
+    statusBar: vscode.StatusBarItem,
+    pipelines?: readonly RunnablePipeline[],
+    deps: ManualDocumentRunDeps = {}
+): Promise<void> {
+    if (document.uri.scheme === 'file') {
+        await (deps.runManualPipelinesForFile ?? runManualPipelinesForFile)(
+            document.fileName,
+            diagnostics,
+            output,
+            statusBar,
+            pipelines
+        );
+        return;
+    }
+    await runUntitledDocumentPipelines(document, diagnostics, output, statusBar, pipelines, deps);
 }
 
 export async function runManualToolForFile(
@@ -550,6 +708,25 @@ export async function runManualToolForFile(
         tools: [tool],
     };
     await runManualPipelinesForFile(fileName, diagnostics, output, statusBar, [pipeline]);
+}
+
+export async function runManualToolForDocument(
+    document: RunnableTextDocument,
+    tool: RunnableTool,
+    diagnostics: vscode.DiagnosticCollection,
+    output: RunnerOutput,
+    statusBar: vscode.StatusBarItem
+): Promise<void> {
+    const pipeline: RunnablePipeline = {
+        label: tool.label,
+        description: tool.description,
+        detail: tool.detail,
+        target: { name: tool.targetName },
+        pipelineName: 'manual',
+        pipeline: { strategy: 'sequence', tools: [tool.toolName] },
+        tools: [tool],
+    };
+    await runManualPipelinesForDocument(document, diagnostics, output, statusBar, [pipeline]);
 }
 
 export function createManualCodeActions(
@@ -583,13 +760,12 @@ async function openActionsMenu(
     output: RunnerOutput,
     runningStatusBar: vscode.StatusBarItem
 ): Promise<void> {
-    const editor = getActiveFileEditor();
+    const editor = getActiveRunnableEditor();
     if (editor === undefined || !canRunWorkspaceCommands(true)) {
         return;
     }
-    const fileName = editor.document.fileName;
-    const pipelines = getRunnablePipelines(fileName, 'manual');
-    const tools = getRunnableTools(fileName, 'manual');
+    const pipelines = getRunnablePipelinesForDocument(editor.document, 'manual');
+    const tools = getRunnableToolsForDocument(editor.document, 'manual');
     if (pipelines.length === 0 && tools.length === 0) {
         vscode.window.showWarningMessage('LintRunner: No matching pipeline or tool.');
         return;
@@ -600,13 +776,13 @@ async function openActionsMenu(
             label: `$(play) ${pipeline.label}`,
             description: pipeline.description,
             detail: pipeline.detail,
-            action: async () => await runManualPipelinesForFile(fileName, diagnostics, output, runningStatusBar, [pipeline]),
+            action: async () => await runManualPipelinesForDocument(editor.document, diagnostics, output, runningStatusBar, [pipeline]),
         })),
         ...tools.map((tool) => ({
             label: `$(wrench) ${tool.label}`,
             description: tool.description,
             detail: tool.detail,
-            action: async () => await runManualToolForFile(fileName, tool, diagnostics, output, runningStatusBar),
+            action: async () => await runManualToolForDocument(editor.document, tool, diagnostics, output, runningStatusBar),
         })),
     ];
     const selectedItem = await vscode.window.showQuickPick(items, {
@@ -646,14 +822,14 @@ export async function openBundledExamples(
 }
 
 async function inspectCurrentFile(): Promise<void> {
-    const editor = getActiveFileEditor();
+    const editor = getActiveRunnableEditor();
     if (editor === undefined) {
         vscode.window.showWarningMessage('LintRunner: No active file editor.');
         return;
     }
-    const fileName = editor.document.fileName;
-    const pipelines = getRunnablePipelines(fileName, 'manual');
-    const tools = getRunnableTools(fileName, 'manual');
+    const fileName = getDocumentMatchFileName(editor.document);
+    const pipelines = getRunnablePipelinesForDocument(editor.document, 'manual');
+    const tools = getRunnableToolsForDocument(editor.document, 'manual');
     const lines = [
         '# LintRunner Inspect Current File',
         '',
@@ -700,7 +876,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
 
     context.subscriptions.push(
-        vscode.languages.registerCodeLensProvider({ scheme: 'file' }, {
+        vscode.languages.registerCodeLensProvider([{ scheme: 'file' }, { scheme: 'untitled' }], {
             onDidChangeCodeLenses: codeLensRefreshEmitter.event,
             provideCodeLenses(document) {
                 const config = vscode.workspace.getConfiguration('lintRunner', document.uri);
@@ -714,8 +890,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 }
                 return createManualCodeLenses(
                     document.uri,
-                    getRunnablePipelines(document.fileName, 'manual'),
-                    getRunnableTools(document.fileName, 'manual')
+                    getRunnablePipelinesForDocument(document, 'manual'),
+                    getRunnableToolsForDocument(document, 'manual')
                 );
             },
         })
@@ -723,7 +899,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     context.subscriptions.push(
         vscode.languages.registerCodeActionsProvider(
-            { scheme: 'file' },
+            [{ scheme: 'file' }, { scheme: 'untitled' }],
             {
                 provideCodeActions(document) {
                     const config = vscode.workspace.getConfiguration('lintRunner', document.uri);
@@ -737,8 +913,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     }
                     return createManualCodeActions(
                         document.uri,
-                        getRunnablePipelines(document.fileName, 'manual'),
-                        getRunnableTools(document.fileName, 'manual')
+                        getRunnablePipelinesForDocument(document, 'manual'),
+                        getRunnableToolsForDocument(document, 'manual')
                     );
                 },
             },
@@ -839,7 +1015,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
         }),
         vscode.commands.registerCommand('lintRunner.runPipeline', async () => {
-            const editor = getActiveFileEditor();
+            const editor = getActiveRunnableEditor();
             if (editor === undefined) {
                 vscode.window.showWarningMessage('LintRunner: No active file editor.');
                 return;
@@ -847,16 +1023,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (!canRunWorkspaceCommands(true)) {
                 return;
             }
-            const pipelines = getRunnablePipelines(editor.document.fileName, 'manual');
+            const pipelines = getRunnablePipelinesForDocument(editor.document, 'manual');
             const selected = pipelines.length === 1
                 ? pipelines[0]
                 : await vscode.window.showQuickPick(pipelines, { title: 'LintRunner: Run Pipeline' });
             if (selected !== undefined) {
-                await runManualPipelinesForFile(editor.document.fileName, diagnostics, output, runningStatusBar, [selected]);
+                await runManualPipelinesForDocument(editor.document, diagnostics, output, runningStatusBar, [selected]);
             }
         }),
         vscode.commands.registerCommand('lintRunner.runTool', async () => {
-            const editor = getActiveFileEditor();
+            const editor = getActiveRunnableEditor();
             if (editor === undefined) {
                 vscode.window.showWarningMessage('LintRunner: No active file editor.');
                 return;
@@ -864,23 +1040,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (!canRunWorkspaceCommands(true)) {
                 return;
             }
-            const tools = getRunnableTools(editor.document.fileName, 'manual');
+            const tools = getRunnableToolsForDocument(editor.document, 'manual');
             const selected = tools.length === 1
                 ? tools[0]
                 : await vscode.window.showQuickPick(tools, { title: 'LintRunner: Run Tool' });
             if (selected !== undefined) {
-                await runManualToolForFile(editor.document.fileName, selected, diagnostics, output, runningStatusBar);
+                await runManualToolForDocument(editor.document, selected, diagnostics, output, runningStatusBar);
             }
         }),
         vscode.commands.registerCommand('lintRunner.inspectCurrentFile', inspectCurrentFile),
         vscode.commands.registerCommand('lintRunner.runManualPipelineCodeAction', async (uri: vscode.Uri, pipeline: RunnablePipeline) => {
             if (canRunWorkspaceCommands(true)) {
-                await runManualPipelinesForFile(uri.fsPath, diagnostics, output, runningStatusBar, [pipeline]);
+                const document = findOpenDocument(uri);
+                if (document !== undefined) {
+                    await runManualPipelinesForDocument(document, diagnostics, output, runningStatusBar, [pipeline]);
+                } else {
+                    await runManualPipelinesForFile(uri.fsPath, diagnostics, output, runningStatusBar, [pipeline]);
+                }
             }
         }),
         vscode.commands.registerCommand('lintRunner.runManualToolCodeAction', async (uri: vscode.Uri, tool: RunnableTool) => {
             if (canRunWorkspaceCommands(true)) {
-                await runManualToolForFile(uri.fsPath, tool, diagnostics, output, runningStatusBar);
+                const document = findOpenDocument(uri);
+                if (document !== undefined) {
+                    await runManualToolForDocument(document, tool, diagnostics, output, runningStatusBar);
+                } else {
+                    await runManualToolForFile(uri.fsPath, tool, diagnostics, output, runningStatusBar);
+                }
             }
         }),
         vscode.commands.registerCommand('lintRunner.stop', () => cancelAllFileRuns()),

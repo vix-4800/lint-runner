@@ -119,6 +119,15 @@ export interface ValidateToolConfigScopesOptions {
     platform?: NodeJS.Platform;
 }
 
+export interface RunnablePipelineMatchOptions {
+    resource?: vscode.Uri;
+    languageId?: string;
+}
+
+export interface RunPipelineOptions {
+    diagnosticUri?: vscode.Uri;
+}
+
 export interface ConfigValidationIssues {
     errors: string[];
     warnings: string[];
@@ -916,12 +925,12 @@ function matchesLanguageId(languages: readonly string[] = [], languageId: string
     return languages.includes('*') || languages.includes(languageId);
 }
 
-function matchesTarget(filePath: string, target: ToolTargetDefinition): boolean {
+function matchesTarget(filePath: string, target: ToolTargetDefinition, languageId?: string): boolean {
     if (target.match?.exclude !== undefined && matchesPatterns(filePath, target.match.exclude)) {
         return false;
     }
     if (target.match?.languages !== undefined && target.match.languages.length > 0) {
-        if (!matchesLanguageId(target.match.languages, getDocumentLanguageId(filePath))) {
+        if (!matchesLanguageId(target.match.languages, languageId ?? getDocumentLanguageId(filePath))) {
             return false;
         }
     }
@@ -953,11 +962,12 @@ function runnableToolFromConfig(
 export function collectRunnablePipelines(
     config: ResolvedToolConfiguration,
     filePath: string,
-    trigger: RunMode
+    trigger: RunMode,
+    options: RunnablePipelineMatchOptions = {}
 ): RunnablePipeline[] {
     const result: RunnablePipeline[] = [];
     for (const target of config.targets) {
-        if (!matchesTarget(filePath, target)) {
+        if (!matchesTarget(filePath, target, options.languageId)) {
             continue;
         }
         const pipelineNames: RunMode[] = trigger === 'onSave' ? ['onSave', 'onOpen'] : [trigger];
@@ -991,12 +1001,25 @@ export function collectRunnablePipelines(
     return result;
 }
 
-export function getRunnablePipelines(filePath: string, trigger: RunMode = 'manual'): RunnablePipeline[] {
-    return collectRunnablePipelines(getConfiguredToolConfiguration(vscode.Uri.file(filePath)), filePath, trigger);
+export function getRunnablePipelines(
+    filePath: string,
+    trigger: RunMode = 'manual',
+    options: RunnablePipelineMatchOptions = {}
+): RunnablePipeline[] {
+    return collectRunnablePipelines(
+        getConfiguredToolConfiguration(options.resource ?? vscode.Uri.file(filePath)),
+        filePath,
+        trigger,
+        options
+    );
 }
 
-export function getRunnableTools(filePath: string, trigger: RunMode = 'manual'): RunnableTool[] {
-    return getRunnablePipelines(filePath, trigger).flatMap((pipeline) => pipeline.tools);
+export function getRunnableTools(
+    filePath: string,
+    trigger: RunMode = 'manual',
+    options: RunnablePipelineMatchOptions = {}
+): RunnableTool[] {
+    return getRunnablePipelines(filePath, trigger, options).flatMap((pipeline) => pipeline.tools);
 }
 
 function resolveWorkingDirectory(filePath: string): string | undefined {
@@ -1385,7 +1408,8 @@ async function runRunnableTool(
     output: RunnerOutput,
     statusBar: vscode.StatusBarItem,
     diagnostics: vscode.DiagnosticCollection | undefined,
-    shouldContinue: () => boolean
+    shouldContinue: () => boolean,
+    options: RunPipelineOptions
 ): Promise<boolean> {
     const tool = runnable.tool;
     const statusName = `${runnable.targetName}: ${runnable.toolName}`;
@@ -1421,7 +1445,7 @@ async function runRunnableTool(
         if (tool.kind === 'diagnostic' && diagnostics !== undefined) {
             const parsedDiagnostics = parseToolOutput(runnable.toolName, tool, result);
             await normalizeDiagnosticRanges(filePath, parsedDiagnostics);
-            const uri = vscode.Uri.file(filePath);
+            const uri = options.diagnosticUri ?? vscode.Uri.file(filePath);
             const toolMap = getOrCreateToolMap(uri.toString());
             toolMap.set(toolDiagnosticKey(runnable.targetName, runnable.toolName), parsedDiagnostics);
             republishMergedDiagnostics(uri, toolMap, diagnostics);
@@ -1450,7 +1474,8 @@ export async function runPipeline(
     pipeline: RunnablePipeline,
     output: RunnerOutput,
     statusBar: vscode.StatusBarItem,
-    diagnostics?: vscode.DiagnosticCollection
+    diagnostics?: vscode.DiagnosticCollection,
+    options: RunPipelineOptions = {}
 ): Promise<number> {
     const runId = startFileRun(filePath);
     const shouldContinue = (): boolean => isActiveFileRun(filePath, runId);
@@ -1467,7 +1492,7 @@ export async function runPipeline(
                 pipeline.tools.map(async (tool, index) => ({
                     index,
                     kind: tool.tool.kind,
-                    success: await runRunnableTool(filePath, tool, output, statusBar, diagnostics, shouldContinue),
+                    success: await runRunnableTool(filePath, tool, output, statusBar, diagnostics, shouldContinue, options),
                 }))
             );
             successfulTools = results.filter((result) => result.success).length;
@@ -1481,7 +1506,7 @@ export async function runPipeline(
                 if (!shouldContinue()) {
                     break;
                 }
-                const success = await runRunnableTool(filePath, tool, output, statusBar, diagnostics, shouldContinue);
+                const success = await runRunnableTool(filePath, tool, output, statusBar, diagnostics, shouldContinue, options);
                 if (!success) {
                     break;
                 }
@@ -1500,7 +1525,7 @@ export async function runPipeline(
                 if (!shouldContinue()) {
                     break;
                 }
-                await runRunnableTool(filePath, diagnosticTool, output, statusBar, diagnostics, shouldContinue);
+                await runRunnableTool(filePath, diagnosticTool, output, statusBar, diagnostics, shouldContinue, options);
             }
         }
         return successfulTools;
