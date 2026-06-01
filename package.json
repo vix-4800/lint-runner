@@ -400,10 +400,7 @@
                 "type": "array",
                 "items": {
                   "type": "integer"
-                },
-                "default": [
-                  0
-                ]
+                }
               },
               "maxFileSize": {
                 "type": "number",
