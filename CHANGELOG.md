@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Added manual linting support for untitled buffers by running tools against a temporary file and publishing diagnostics back to the open document.
+
 ## [0.4.1] - 2026-06-02
 
 ### Changed
