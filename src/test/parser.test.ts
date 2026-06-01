@@ -271,6 +271,41 @@ suite('Tool configuration', () => {
         assert.strictEqual(collectRunnablePipelines(config, vendorFilePath, 'manual').length, 0);
         assert.strictEqual(collectRunnablePipelines(config, jsFilePath, 'manual').length, 0);
     });
+
+    test('collects both onSave and onOpen pipelines for save trigger', async () => {
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+        const jsFilePath = path.join(workspaceRoot, 'lint-test', 'test.js');
+        await vscode.workspace.openTextDocument(vscode.Uri.file(jsFilePath));
+
+        const config = resolveToolConfiguration({
+            tools: {
+                eslint: {
+                    kind: 'diagnostic',
+                    command: 'eslint',
+                    args: ['${file}'],
+                    parser: { pattern: '(?<line>\\d+):(?<message>.+)' },
+                },
+                prettier: {
+                    kind: 'write',
+                    command: 'prettier',
+                    args: ['--write', '${file}'],
+                },
+            },
+            targets: [
+                {
+                    name: 'JS',
+                    match: { languages: ['javascript'] },
+                    onOpen: { strategy: 'sequence', tools: ['eslint'] },
+                    onSave: { strategy: 'sequence', tools: ['prettier'] },
+                },
+            ],
+        });
+
+        assert.deepStrictEqual(
+            collectRunnablePipelines(config, jsFilePath, 'onSave').map((pipeline) => pipeline.pipelineName),
+            ['onSave', 'onOpen']
+        );
+    });
 });
 
 suite('Regex Parser', () => {

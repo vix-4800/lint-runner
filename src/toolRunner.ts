@@ -879,6 +879,31 @@ export function matchesIgnorePatterns(filePath: string, patterns: readonly strin
     return matchesPatterns(filePath, patterns);
 }
 
+async function checkGitIgnore(filePath: string): Promise<boolean> {
+    const cwd = resolveWorkingDirectory(filePath) ?? path.dirname(filePath);
+    return await new Promise<boolean>((resolve) => {
+        let done = false;
+        const proc = cp.spawn('git', ['check-ignore', '-q', '--', filePath], {
+            cwd,
+            stdio: 'ignore',
+        });
+        proc.on('close', (code) => {
+            if (done) {
+                return;
+            }
+            done = true;
+            resolve(code === 0);
+        });
+        proc.on('error', () => {
+            if (done) {
+                return;
+            }
+            done = true;
+            resolve(false);
+        });
+    });
+}
+
 function getDocumentLanguageId(filePath: string): string | undefined {
     const normalized = path.resolve(filePath);
     return vscode.workspace.textDocuments.find((document) => path.resolve(document.fileName) === normalized)?.languageId;
@@ -935,30 +960,33 @@ export function collectRunnablePipelines(
         if (!matchesTarget(filePath, target)) {
             continue;
         }
-        const pipeline = target[trigger] ?? (trigger === 'onSave' ? target.onOpen : undefined);
-        if (pipeline === undefined) {
-            continue;
+        const pipelineNames: RunMode[] = trigger === 'onSave' ? ['onSave', 'onOpen'] : [trigger];
+        for (const pipelineName of pipelineNames) {
+            const pipeline = target[pipelineName];
+            if (pipeline === undefined) {
+                continue;
+            }
+            const tools = pipeline.tools
+                .map((toolName) => {
+                    const tool = config.tools[toolName];
+                    return tool === undefined || tool.enabled === false
+                        ? undefined
+                        : runnableToolFromConfig(config, target, pipelineName, toolName, tool);
+                })
+                .filter((tool): tool is RunnableTool => tool !== undefined);
+            if (tools.length === 0) {
+                continue;
+            }
+            result.push({
+                label: `${target.name}: ${pipelineName}`,
+                description: `${pipeline.strategy}, ${tools.length} tool(s)`,
+                detail: tools.map((tool) => tool.toolName).join(', '),
+                target,
+                pipelineName,
+                pipeline,
+                tools,
+            });
         }
-        const tools = pipeline.tools
-            .map((toolName) => {
-                const tool = config.tools[toolName];
-                return tool === undefined || tool.enabled === false
-                    ? undefined
-                    : runnableToolFromConfig(config, target, trigger, toolName, tool);
-            })
-            .filter((tool): tool is RunnableTool => tool !== undefined);
-        if (tools.length === 0) {
-            continue;
-        }
-        result.push({
-            label: `${target.name}: ${trigger}`,
-            description: `${pipeline.strategy}, ${tools.length} tool(s)`,
-            detail: tools.map((tool) => tool.toolName).join(', '),
-            target,
-            pipelineName: trigger,
-            pipeline,
-            tools,
-        });
     }
     return result;
 }
@@ -1339,8 +1367,14 @@ export function parseToolOutput(toolName: string, tool: ToolConfig, result: Comm
 
 async function shouldSkipFile(filePath: string): Promise<boolean> {
     const config = vscode.workspace.getConfiguration('lintRunner', vscode.Uri.file(filePath));
+    if (!isLintRunnerEnabled(config)) {
+        return true;
+    }
     if (config.get<string[]>('ignorePatterns', []).some((pattern) => matchesPatterns(filePath, [pattern]))) {
         return true;
+    }
+    if (config.get<boolean>('respectGitignore') === true) {
+        return await checkGitIgnore(filePath);
     }
     return false;
 }
@@ -1422,6 +1456,7 @@ export async function runPipeline(
     const shouldContinue = (): boolean => isActiveFileRun(filePath, runId);
     let successfulTools = 0;
     let lastSuccessfulWriteIndex = -1;
+    let shouldRefreshAllDiagnosticsAfterWrite = false;
 
     try {
         if (await shouldSkipFile(filePath)) {
@@ -1440,6 +1475,7 @@ export async function runPipeline(
                 .filter((result) => result.success && result.kind === 'write')
                 .map((result) => result.index);
             lastSuccessfulWriteIndex = writeIndexes.length === 0 ? -1 : Math.max(...writeIndexes);
+            shouldRefreshAllDiagnosticsAfterWrite = lastSuccessfulWriteIndex >= 0;
         } else {
             for (const [index, tool] of pipeline.tools.entries()) {
                 if (!shouldContinue()) {
@@ -1457,7 +1493,10 @@ export async function runPipeline(
         }
 
         if (lastSuccessfulWriteIndex >= 0 && shouldContinue()) {
-            for (const diagnosticTool of diagnosticToolsAfterWrite(pipeline, lastSuccessfulWriteIndex)) {
+            const diagnosticsToRefresh = shouldRefreshAllDiagnosticsAfterWrite
+                ? pipeline.tools.filter((tool) => tool.tool.kind === 'diagnostic')
+                : diagnosticToolsAfterWrite(pipeline, lastSuccessfulWriteIndex);
+            for (const diagnosticTool of diagnosticsToRefresh) {
                 if (!shouldContinue()) {
                     break;
                 }
