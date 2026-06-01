@@ -73,7 +73,7 @@ Existing non-conflicting settings remain: `enabled`, `debounceMs`, `enableLoggin
 | `env`              | `Record<string, string>`  | no              | Process env overrides. Values support templates.                                               |
 | `enabled`          | `boolean`                 | no              | Defaults to `true`.                                                                            |
 | `timeout`          | `number`                  | no              | Defaults to `30000`.                                                                           |
-| `successExitCodes` | `number[]`                | no              | Defaults to `[0]`. Any other exit code fails the tool.                                         |
+| `successExitCodes` | `number[]`                | no              | Optional. When omitted, exit code is not checked. When set, any other exit code fails the tool. |
 | `maxFileSize`      | `number`                  | no              | Diagnostic tools skip larger files.                                                            |
 | `parser`           | `RegexParserConfig`       | diagnostic only | Required for `diagnostic`; invalid for `write`.                                                |
 
@@ -96,6 +96,35 @@ Array shorthand is invalid. `strategy: "sequence"` runs tools left to right and 
 
 After a successful `write` tool, LintRunner refreshes diagnostics from diagnostic tools in the same pipeline when no
 later diagnostic tool already ran after that write.
+
+## Exit Codes
+
+`successExitCodes` is not set by default. If a tool exits with a non-zero code and `successExitCodes` is omitted,
+LintRunner still treats the process as successful and continues the pipeline.
+
+Set `successExitCodes` when exit status should control pipeline success:
+
+```json
+{
+    "lintRunner.tools": {
+        "prettier-check": {
+            "kind": "diagnostic",
+            "command": "prettier",
+            "args": ["--check", "${file}"],
+            "successExitCodes": [0],
+            "parser": {
+                "pattern": "(?<message>.+)"
+            }
+        }
+    }
+}
+```
+
+Manual runs that fail this policy show a short notification like:
+
+```text
+LintRunner: prettier-check failed: exit 1 is not in successExitCodes [0]
+```
 
 ## Regex Parser
 

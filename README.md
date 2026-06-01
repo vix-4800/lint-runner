@@ -16,6 +16,7 @@ VS Code extension for running external CLI tools as file pipelines and publishin
 - expose optional Code Actions and CodeLens entries for manual pipelines/tools;
 - inspect current file matching;
 - validate config and run Doctor;
+- optionally fail tools by explicit `successExitCodes`;
 - block command execution in untrusted workspaces.
 
 ## Configuration
@@ -64,6 +65,10 @@ VS Code extension for running external CLI tools as file pipelines and publishin
 ```
 
 See [docs/configuration.md](docs/configuration.md) for full configuration reference.
+
+`successExitCodes` is opt-in. If omitted, LintRunner does not fail a tool based on exit code. Set it when a CLI uses
+exit status as failure policy, for example `[0]` for strict success or `[0, 1]` for linters that return `1` when
+diagnostics are found.
 
 ## Commands
 
