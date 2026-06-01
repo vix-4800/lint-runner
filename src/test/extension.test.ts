@@ -22,6 +22,7 @@ import {
     runDoctorWithNotification,
     runManualTaskWithNotification,
     runOnOpenPipelinesForVisibleEditors,
+    showManualRunFailureWarning,
     type RunnablePipeline,
     type RunnableTool,
 } from '../extension.js';
@@ -355,6 +356,35 @@ suite('Extension', () => {
         });
 
         assert.deepStrictEqual(cancelled, ['file.ts']);
+    });
+
+    test('showManualRunFailureWarning shows timed notification for successExitCodes failure', async () => {
+        const calls: string[] = [];
+
+        await showManualRunFailureWarning(
+            [{ label: 'eslint', message: 'exit 7 is not in successExitCodes [0]' }],
+            {
+                delay: async (ms) => {
+                    calls.push(`delay:${ms}`);
+                },
+                showWarningMessage: async (message: string) => {
+                    calls.push(`warning:${message}`);
+                    return undefined;
+                },
+                withProgress: async (options, task) => {
+                    calls.push(`progress:${options.title}:${options.location}`);
+                    return await task(
+                        {} as vscode.Progress<{ message?: string; increment?: number }>,
+                        {} as vscode.CancellationToken
+                    );
+                },
+            }
+        );
+
+        assert.deepStrictEqual(calls, [
+            `progress:LintRunner: eslint failed: exit 7 is not in successExitCodes [0]:${vscode.ProgressLocation.Notification}`,
+            'delay:4000',
+        ]);
     });
 
     test('creates manual pipeline and tool code actions and lenses', () => {

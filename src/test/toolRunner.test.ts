@@ -8,6 +8,7 @@ import {
     cancelAllFileRuns,
     cancelFileRun,
     collectDoctorToolStatuses,
+    resolveToolConfiguration,
     runPipeline,
     type ResolvedToolConfiguration,
     type RunnablePipeline,
@@ -176,6 +177,80 @@ suite('Tool Pipeline Runner', () => {
         assert.strictEqual(runCount, 0);
         await assert.rejects(fs.access(markerPath));
         assert.match(outputLines.join('\n'), /exit 7 is not in successExitCodes/);
+    });
+
+    test('runPipeline ignores exit code when successExitCodes is unset', async () => {
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lint-runner-exit-unset-'));
+        const markerPath = path.join(tmpDir, 'marker');
+        const filePath = path.join(tmpDir, 'file.js');
+        await fs.writeFile(filePath, 'const a = 1;');
+        const failures: Array<{ label: string; message: string }> = [];
+        const pipeline: RunnablePipeline = {
+            label: 'JS: manual',
+            description: 'sequence',
+            detail: 'unchecked, later',
+            target: { name: 'JS' },
+            pipelineName: 'manual',
+            pipeline: { strategy: 'sequence', tools: ['unchecked', 'later'] },
+            tools: [
+                {
+                    label: 'unchecked',
+                    description: 'JS / manual',
+                    detail: 'write',
+                    targetName: 'JS',
+                    pipelineName: 'manual',
+                    toolName: 'unchecked',
+                    tool: {
+                        kind: 'write',
+                        command: process.execPath,
+                        args: ['-e', 'process.exit(7)'],
+                    },
+                },
+                {
+                    label: 'later',
+                    description: 'JS / manual',
+                    detail: 'write',
+                    targetName: 'JS',
+                    pipelineName: 'manual',
+                    toolName: 'later',
+                    tool: {
+                        kind: 'write',
+                        command: process.execPath,
+                        args: ['-e', `require('fs').writeFileSync(${JSON.stringify(markerPath)}, 'ran')`],
+                    },
+                },
+            ],
+        };
+
+        const statusBar = { text: '', show() { /* test stub */ }, hide() { /* test stub */ } } as vscode.StatusBarItem;
+        const runCount = await runPipeline(
+            filePath,
+            pipeline,
+            {
+                appendLine() { /* test stub */ },
+                reportFailure: (failure) => failures.push(failure),
+            },
+            statusBar
+        );
+
+        assert.strictEqual(runCount, 2);
+        assert.strictEqual(await fs.readFile(markerPath, 'utf8'), 'ran');
+        assert.deepStrictEqual(failures, []);
+    });
+
+    test('resolveToolConfiguration leaves successExitCodes unset by default', () => {
+        const resolved = resolveToolConfiguration({
+            tools: {
+                eslint: {
+                    kind: 'diagnostic',
+                    command: 'eslint',
+                    args: ['${file}'],
+                    parser: { pattern: '(?<line>\\d+):(?<message>.+)' },
+                },
+            },
+        });
+
+        assert.strictEqual(resolved.tools.eslint.successExitCodes, undefined);
     });
 
     test('runPipeline parses diagnostic tool output', async () => {
