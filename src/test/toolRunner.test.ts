@@ -313,7 +313,8 @@ suite('Tool Pipeline Runner', () => {
             scriptPath,
             [
                 'const fs = require("fs");',
-                `setTimeout(() => fs.writeFileSync(${JSON.stringify(completedMarker)}, "done"), 5000);`,
+                'const completedMarker = process.argv[2];',
+                'setTimeout(() => fs.writeFileSync(completedMarker, "done"), 5000);',
             ].join('\n')
         );
         const pipeline: RunnablePipeline = {
@@ -331,7 +332,7 @@ suite('Tool Pipeline Runner', () => {
                     targetName: 'JS',
                     pipelineName: 'manual',
                     toolName: 'slow',
-                    tool: { kind: 'write', command: process.execPath, args: [scriptPath], timeout: 10_000 },
+                    tool: { kind: 'write', command: process.execPath, args: [scriptPath, completedMarker], timeout: 10_000 },
                 },
             ],
         };
