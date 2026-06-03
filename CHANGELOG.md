@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.4.2] - 2026-06-03
 
 ### Added
 
@@ -46,6 +46,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Removed old `linterRunner` runtime and tests.
 
-[Unreleased]: https://github.com/vix-4800/lint-runner/compare/v0.4.1...HEAD
 [0.4.1]: https://github.com/vix-4800/lint-runner/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/vix-4800/lint-runner/compare/v0.3.0...v0.4.0
