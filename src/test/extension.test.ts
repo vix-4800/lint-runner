@@ -14,6 +14,8 @@ import {
     formatDoctorTable,
     getActionsStatusBarState,
     getManualRunNotificationTitle,
+    getRunnablePipelinesForDocument,
+    getRunnableToolsForDocument,
     handleClosedDocument,
     handleClosedFileUri,
     isContentChanged,
@@ -60,6 +62,81 @@ function createTool(): RunnableTool {
 }
 
 suite('Extension', () => {
+    test('treats every matching untitled buffer pipeline as manual', () => {
+        const documentUri = vscode.Uri.parse('untitled:LintRunner Untitled');
+        const calls: string[] = [];
+        const createModePipeline = (pipelineName: 'manual' | 'onOpen' | 'onSave', toolName: string): RunnablePipeline => ({
+            label: `TS: ${pipelineName}`,
+            description: 'sequence',
+            detail: toolName,
+            target: { name: 'TS' },
+            pipelineName,
+            pipeline: { strategy: 'sequence', tools: [toolName] },
+            tools: [{
+                ...createTool(),
+                label: toolName,
+                description: `TS / ${pipelineName}`,
+                pipelineName,
+                targetName: 'TS',
+                toolName,
+            }],
+        });
+        const manual = createModePipeline('manual', 'eslint');
+        const onOpen = createModePipeline('onOpen', 'tsc');
+        const onSave = createModePipeline('onSave', 'prettier');
+        onSave.pipeline.tools.push('eslint');
+        onSave.tools.push(manual.tools[0]);
+        const getPipelines = (
+            _fileName: string,
+            trigger: 'manual' | 'onOpen' | 'onSave' = 'manual'
+        ): RunnablePipeline[] => {
+            calls.push(trigger);
+            if (trigger === 'manual') {
+                return [manual];
+            }
+            if (trigger === 'onOpen') {
+                return [onOpen];
+            }
+            return [onSave, onOpen];
+        };
+        const document = {
+            fileName: 'Untitled-1',
+            languageId: 'typescript',
+            uri: documentUri,
+        };
+
+        const pipelines = getRunnablePipelinesForDocument(document, 'manual', getPipelines);
+        const tools = getRunnableToolsForDocument(document, 'manual', getPipelines);
+
+        assert.deepStrictEqual(calls, ['manual', 'onOpen', 'onSave', 'manual', 'onOpen', 'onSave']);
+        assert.deepStrictEqual(pipelines.map((pipeline) => pipeline.pipelineName), ['manual', 'manual', 'manual']);
+        assert.deepStrictEqual(tools.map((tool) => tool.toolName), ['eslint', 'tsc', 'prettier']);
+        assert.deepStrictEqual(tools.map((tool) => tool.pipelineName), ['manual', 'manual', 'manual']);
+        assert.deepStrictEqual(tools.map((tool) => tool.description), ['TS / manual', 'TS / manual', 'TS / manual']);
+    });
+
+    test('keeps pipeline selection unchanged for saved files', () => {
+        const documentUri = vscode.Uri.file('/tmp/lint-runner-saved.ts');
+        const pipeline = createPipeline();
+        const calls: string[] = [];
+        const getPipelines = (
+            _fileName: string,
+            trigger: 'manual' | 'onOpen' | 'onSave' = 'manual'
+        ): RunnablePipeline[] => {
+            calls.push(trigger);
+            return [pipeline];
+        };
+
+        const result = getRunnablePipelinesForDocument({
+            fileName: documentUri.fsPath,
+            languageId: 'typescript',
+            uri: documentUri,
+        }, 'manual', getPipelines);
+
+        assert.deepStrictEqual(calls, ['manual']);
+        assert.strictEqual(result[0], pipeline);
+    });
+
     test('computeContentHash returns stable hashes', () => {
         assert.strictEqual(computeContentHash('a'), computeContentHash('a'));
         assert.notStrictEqual(computeContentHash('a'), computeContentHash('b'));

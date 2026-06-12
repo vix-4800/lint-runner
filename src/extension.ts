@@ -457,8 +457,12 @@ export function getActionsStatusBarState(
     }
     const fileName = getDocumentMatchFileName(editor.document);
     const options = { resource: editor.document.uri, languageId: editor.document.languageId };
-    const pipelines = getPipelines(fileName, 'manual', options);
-    const tools = getTools(fileName, 'manual', options);
+    const pipelines = editor.document.uri.scheme === 'untitled'
+        ? getRunnablePipelinesForDocument(editor.document, 'manual', getPipelines)
+        : getPipelines(fileName, 'manual', options);
+    const tools = editor.document.uri.scheme === 'untitled'
+        ? getRunnableToolsForDocument(editor.document, 'manual', getPipelines)
+        : getTools(fileName, 'manual', options);
     return {
         text: '$(wrench)',
         tooltip: `LintRunner: ${pipelines.length} pipeline(s), ${tools.length} tool(s) for ${vscode.workspace.asRelativePath(fileName)}`,
@@ -498,19 +502,53 @@ async function runPipelinesForFile(
 
 export function getRunnablePipelinesForDocument(
     document: Pick<vscode.TextDocument, 'fileName' | 'languageId' | 'uri'>,
-    trigger: 'manual' | 'onOpen' | 'onSave' = 'manual'
+    trigger: 'manual' | 'onOpen' | 'onSave' = 'manual',
+    getPipelines: typeof getRunnablePipelines = getRunnablePipelines
 ): RunnablePipeline[] {
-    return getRunnablePipelines(getDocumentMatchFileName(document), trigger, {
+    const fileName = getDocumentMatchFileName(document);
+    const options = {
         resource: document.uri,
         languageId: document.languageId,
-    });
+    };
+    if (document.uri.scheme !== 'untitled' || trigger !== 'manual') {
+        return getPipelines(fileName, trigger, options);
+    }
+
+    const pipelines = [
+        ...getPipelines(fileName, 'manual', options),
+        ...getPipelines(fileName, 'onOpen', options),
+        ...getPipelines(fileName, 'onSave', options).filter((pipeline) => pipeline.pipelineName === 'onSave'),
+    ];
+    return pipelines.map((pipeline) => ({
+        ...pipeline,
+        pipelineName: 'manual',
+        tools: pipeline.tools.map((tool) => ({
+            ...tool,
+            description: `${tool.targetName} / manual`,
+            pipelineName: 'manual',
+        })),
+    }));
 }
 
 export function getRunnableToolsForDocument(
     document: Pick<vscode.TextDocument, 'fileName' | 'languageId' | 'uri'>,
-    trigger: 'manual' | 'onOpen' | 'onSave' = 'manual'
+    trigger: 'manual' | 'onOpen' | 'onSave' = 'manual',
+    getPipelines: typeof getRunnablePipelines = getRunnablePipelines
 ): RunnableTool[] {
-    return getRunnablePipelinesForDocument(document, trigger).flatMap((pipeline) => pipeline.tools);
+    const tools = getRunnablePipelinesForDocument(document, trigger, getPipelines).flatMap((pipeline) => pipeline.tools);
+    if (document.uri.scheme !== 'untitled' || trigger !== 'manual') {
+        return tools;
+    }
+
+    const seen = new Set<string>();
+    return tools.filter((tool) => {
+        const key = `${tool.targetName}\0${tool.toolName}`;
+        if (seen.has(key)) {
+            return false;
+        }
+        seen.add(key);
+        return true;
+    });
 }
 
 export function runOnOpenPipelinesForVisibleEditors(
