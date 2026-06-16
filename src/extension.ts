@@ -859,6 +859,26 @@ export async function openBundledExamples(
     await showTextDocument(document, { preview: true });
 }
 
+export function formatInspectCurrentFileReport(
+    fileName: string,
+    languageId: string,
+    pipelines: RunnablePipeline[],
+    tools: RunnableTool[]
+): string {
+    return [
+        '# LintRunner Inspect Current File',
+        '',
+        `File: ${fileName}`,
+        `Language: ${languageId}`,
+        '',
+        '## Manual Pipelines',
+        ...(pipelines.length === 0 ? ['- none'] : pipelines.map((pipeline) => `- ${pipeline.label}: ${pipeline.detail}`)),
+        '',
+        '## Manual Tools',
+        ...(tools.length === 0 ? ['- none'] : tools.map((tool) => `- ${tool.label}: ${tool.detail}`)),
+    ].join('\n');
+}
+
 async function inspectCurrentFile(): Promise<void> {
     const editor = getActiveRunnableEditor();
     if (editor === undefined) {
@@ -868,18 +888,10 @@ async function inspectCurrentFile(): Promise<void> {
     const fileName = getDocumentMatchFileName(editor.document);
     const pipelines = getRunnablePipelinesForDocument(editor.document, 'manual');
     const tools = getRunnableToolsForDocument(editor.document, 'manual');
-    const lines = [
-        '# LintRunner Inspect Current File',
-        '',
-        `File: ${fileName}`,
-        '',
-        '## Manual Pipelines',
-        ...(pipelines.length === 0 ? ['- none'] : pipelines.map((pipeline) => `- ${pipeline.label}: ${pipeline.detail}`)),
-        '',
-        '## Manual Tools',
-        ...(tools.length === 0 ? ['- none'] : tools.map((tool) => `- ${tool.label}: ${tool.detail}`)),
-    ];
-    const document = await vscode.workspace.openTextDocument({ content: lines.join('\n'), language: 'markdown' });
+    const document = await vscode.workspace.openTextDocument({
+        content: formatInspectCurrentFileReport(fileName, editor.document.languageId, pipelines, tools),
+        language: 'markdown',
+    });
     await vscode.window.showTextDocument(document, { preview: true });
 }
 

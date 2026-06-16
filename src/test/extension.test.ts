@@ -12,6 +12,7 @@ import {
     createManualCodeActions,
     createManualCodeLenses,
     formatDoctorTable,
+    formatInspectCurrentFileReport,
     getActionsStatusBarState,
     getManualRunNotificationTitle,
     getRunnablePipelinesForDocument,
@@ -307,6 +308,29 @@ suite('Extension', () => {
                 '| Tool | Found | Version | Used by |',
                 '| --- | --- | --- | --- |',
                 '| eslint | yes | v1 | JS / manual / eslint |',
+            ].join('\n')
+        );
+    });
+
+    test('formats inspect current file report with vscode language id', () => {
+        assert.strictEqual(
+            formatInspectCurrentFileReport(
+                '/tmp/readme.md',
+                'markdown',
+                [createPipeline()],
+                [createTool()]
+            ),
+            [
+                '# LintRunner Inspect Current File',
+                '',
+                'File: /tmp/readme.md',
+                'Language: markdown',
+                '',
+                '## Manual Pipelines',
+                '- JS: manual: eslint',
+                '',
+                '## Manual Tools',
+                '- eslint: diagnostic: eslint ${file}',
             ].join('\n')
         );
     });

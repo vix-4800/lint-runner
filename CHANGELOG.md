@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.4] - 2026-06-16
+
+### Changed
+
+- Added the VS Code language id to the current-file inspection report.
+
 ## [0.4.3] - 2026-06-13
 
 ### Changed
@@ -52,6 +58,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Removed old `linterRunner` runtime and tests.
 
+[0.4.4]: https://github.com/vix-4800/lint-runner/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/vix-4800/lint-runner/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/vix-4800/lint-runner/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/vix-4800/lint-runner/compare/v0.4.0...v0.4.1
