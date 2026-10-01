@@ -459,7 +459,7 @@
     "@types/vscode": "^1.116.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "26.0.1",
-    "@vscode/vsce": "^3.6.3",
+    "@vscode/vsce": "^4.0.0",
     "typescript-eslint": "^8.58.2",
     "esbuild": "^0.28.1",
     "eslint": "^10.2.1",
