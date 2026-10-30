@@ -35,7 +35,7 @@ function parseRegexFixture(
             parser,
         },
         { code: 1, stdout, stderr }
-    );
+    ).map((entry) => entry.diagnostic);
 }
 
 suite('Tool Runner', () => {
@@ -117,7 +117,7 @@ suite('Tool Runner', () => {
                 parser: TEST_REGEX_PARSER,
             },
             { code: 1, stdout: '2:7:error:Unused variable', stderr: '' }
-        );
+        ).map((entry) => entry.diagnostic);
 
         assert.strictEqual(diagnostics.length, 1);
         assert.strictEqual(diagnostics[0].source, 'eslint');
@@ -556,6 +556,58 @@ suite('Regex Parser', () => {
         assert.strictEqual(diagnostics.length, 1);
         assert.strictEqual(diagnostics[0].range.start.line, 7);
         assert.strictEqual(diagnostics[0].message, 'Valid');
+    });
+
+    test('file group attaches the parsed file path to the entry', () => {
+        const entries = parseToolOutput(
+            'eslint',
+            {
+                kind: 'diagnostic',
+                command: 'test',
+                args: [],
+                parser: {
+                    pattern: String.raw`^(?<file>[^:]+):(?<line>\d+):(?<message>.+)$`,
+                    flags: 'gm',
+                },
+            },
+            { code: 1, stdout: 'src/app.js:2:Broken\nsrc/other.ts:10:Also broken', stderr: '' }
+        );
+
+        assert.strictEqual(entries.length, 2);
+        assert.strictEqual(entries[0].filePath, 'src/app.js');
+        assert.strictEqual(entries[0].diagnostic.range.start.line, 1);
+        assert.strictEqual(entries[1].filePath, 'src/other.ts');
+        assert.strictEqual(entries[1].diagnostic.range.start.line, 9);
+    });
+
+    test('entries without a file group have no file path', () => {
+        const entries = parseToolOutput(
+            'test',
+            { kind: 'diagnostic', command: 'test', args: [], parser: { pattern: BASIC_PATTERN } },
+            { code: 1, stdout: '3:Something went wrong', stderr: '' }
+        );
+
+        assert.strictEqual(entries.length, 1);
+        assert.strictEqual(entries[0].filePath, undefined);
+    });
+
+    test('file group with an empty capture is ignored', () => {
+        const entries = parseToolOutput(
+            'test',
+            {
+                kind: 'diagnostic',
+                command: 'test',
+                args: [],
+                parser: {
+                    pattern: String.raw`^(?<file>[^:]*):(?<line>\d+):(?<message>.+)$`,
+                    flags: 'gm',
+                },
+            },
+            { code: 1, stdout: ':3:No file here', stderr: '' }
+        );
+
+        assert.strictEqual(entries.length, 1);
+        assert.strictEqual(entries[0].filePath, undefined);
     });
 });
 
