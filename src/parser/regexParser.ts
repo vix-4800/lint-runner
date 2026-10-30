@@ -71,11 +71,16 @@ function hasInvalidNumericCapture(rawValue: string | undefined, parsedValue: num
     return rawValue !== undefined && parsedValue === undefined;
 }
 
+export interface ParsedDiagnostic {
+    diagnostic: vscode.Diagnostic;
+    filePath?: string;
+}
+
 export function parseRegexOutput(
     output: string,
     config: RegexParserConfig,
     source: string
-): vscode.Diagnostic[] {
+): ParsedDiagnostic[] {
     const flags = ensureGlobalFlag(config.flags ?? 'g');
 
     let regex: RegExp;
@@ -91,7 +96,7 @@ export function parseRegexOutput(
         return [];
     }
 
-    const diagnostics: vscode.Diagnostic[] = [];
+    const diagnostics: ParsedDiagnostic[] = [];
     let match: RegExpExecArray | null;
 
     while ((match = regex.exec(output)) !== null) {
@@ -132,13 +137,15 @@ export function parseRegexOutput(
             const severity = parseSeverity(groups.severity, config.defaultSeverity);
             const message = formatMessage(rawMessage, config.messageFormat);
             const code = groups.code;
+            const rawFile = groups.file?.trim();
+            const filePath = rawFile === undefined || rawFile === '' ? undefined : rawFile;
 
             const diagnostic = createDiagnostic(line, col, message, severity, endLine, endCol);
             diagnostic.source = source;
             if (code !== undefined) {
                 diagnostic.code = code;
             }
-            diagnostics.push(diagnostic);
+            diagnostics.push({ diagnostic, filePath });
         }
 
         if (isZeroWidthMatch) {

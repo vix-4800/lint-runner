@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Added an optional `file` capture group to the regex parser. When present, diagnostics are published to the file the tool reported instead of the file the pipeline ran for; relative paths resolve against the tool's working directory.
+- Diagnostics reported for a file on a previous run are removed when the tool no longer reports that file.
 - Added the VS Code language id to the current-file inspection report.
 
 ## [0.4.3] - 2026-06-13

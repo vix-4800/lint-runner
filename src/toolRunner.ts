@@ -4,12 +4,13 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { diagnosticHasExplicitColumn, diagnosticHasExplicitRange } from './parser/diagnostic.js';
-import { parseRegexOutput, type RegexParserConfig } from './parser/regexParser.js';
+import { parseRegexOutput, type ParsedDiagnostic, type RegexParserConfig } from './parser/regexParser.js';
 
 const runningTools = new Map<string, number>();
 const activeRunIds = new Map<string, number>();
 const activeFileProcesses = new Map<string, Set<cp.ChildProcess>>();
 const fileToolDiagnostics = new Map<string, Map<string, vscode.Diagnostic[]>>();
+const toolPublishedUris = new Map<string, Map<string, Set<string>>>();
 let nextRunId = 0;
 let commandEnvPromise: Promise<NodeJS.ProcessEnv> | undefined;
 
@@ -199,10 +200,12 @@ function republishMergedDiagnostics(
 
 export function clearFileToolDiagnostics(uriString: string): void {
     fileToolDiagnostics.delete(uriString);
+    toolPublishedUris.delete(uriString);
 }
 
 export function clearAllFileToolDiagnostics(): void {
     fileToolDiagnostics.clear();
+    toolPublishedUris.clear();
 }
 
 export function clearDiagnosticsCache(): void {
@@ -211,6 +214,28 @@ export function clearDiagnosticsCache(): void {
 
 export function clearFileDiagnosticsCache(filePath: string): void {
     fileToolDiagnostics.delete(vscode.Uri.file(filePath).toString());
+}
+
+function clearStaleToolDiagnostics(
+    triggerUriString: string,
+    toolKey: string,
+    currentUris: Set<string>,
+    diagnostics: vscode.DiagnosticCollection
+): void {
+    const previousUris = toolPublishedUris.get(triggerUriString)?.get(toolKey);
+    if (previousUris === undefined) {
+        return;
+    }
+    for (const uriString of previousUris) {
+        if (currentUris.has(uriString)) {
+            continue;
+        }
+        const uri = vscode.Uri.parse(uriString);
+        const toolMap = fileToolDiagnostics.get(uriString);
+        if (toolMap?.delete(toolKey)) {
+            republishMergedDiagnostics(uri, toolMap, diagnostics);
+        }
+    }
 }
 
 function registerProcess(filePath: string, proc: cp.ChildProcess): void {
@@ -1345,7 +1370,12 @@ export async function normalizeDiagnosticRanges(filePath: string, diagnostics: v
     if (diagnostics.length === 0) {
         return;
     }
-    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+    let document: vscode.TextDocument;
+    try {
+        document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+    } catch {
+        return;
+    }
     for (const diagnostic of diagnostics) {
         if (diagnosticHasExplicitRange(diagnostic) || diagnostic.range.start.line >= document.lineCount) {
             continue;
@@ -1381,7 +1411,21 @@ function selectParserOutput(config: RegexParserConfig, result: CommandResult): s
     return `${result.stdout}\n${result.stderr}`;
 }
 
-export function parseToolOutput(toolName: string, tool: ToolConfig, result: CommandResult): vscode.Diagnostic[] {
+function resolveDiagnosticUri(filePath: string, cwd: string | undefined, fallbackUri: vscode.Uri): vscode.Uri {
+    if (path.isAbsolute(filePath)) {
+        return vscode.Uri.file(filePath);
+    }
+    if (cwd !== undefined && cwd !== '') {
+        return vscode.Uri.file(path.resolve(cwd, filePath));
+    }
+    const workspaceFolder = resolveWorkingDirectory(fallbackUri.fsPath);
+    if (workspaceFolder === undefined) {
+        return vscode.Uri.file(path.resolve(path.dirname(fallbackUri.fsPath), filePath));
+    }
+    return vscode.Uri.file(path.resolve(workspaceFolder, filePath));
+}
+
+export function parseToolOutput(toolName: string, tool: ToolConfig, result: CommandResult): ParsedDiagnostic[] {
     if (tool.kind !== 'diagnostic' || tool.parser === undefined) {
         return [];
     }
@@ -1444,11 +1488,54 @@ async function runRunnableTool(
 
         if (tool.kind === 'diagnostic' && diagnostics !== undefined) {
             const parsedDiagnostics = parseToolOutput(runnable.toolName, tool, result);
-            await normalizeDiagnosticRanges(filePath, parsedDiagnostics);
-            const uri = options.diagnosticUri ?? vscode.Uri.file(filePath);
-            const toolMap = getOrCreateToolMap(uri.toString());
-            toolMap.set(toolDiagnosticKey(runnable.targetName, runnable.toolName), parsedDiagnostics);
-            republishMergedDiagnostics(uri, toolMap, diagnostics);
+            const diagnosticUri = options.diagnosticUri;
+            const fallbackUri = diagnosticUri ?? vscode.Uri.file(filePath);
+            const toolCwd = buildCommandCwd(tool, filePath, runnable.vars ?? {});
+            interface DiagnosticGroup {
+                uri: vscode.Uri;
+                normalizePath: string;
+                diagnostics: vscode.Diagnostic[];
+            }
+            const groupsByUri = new Map<string, DiagnosticGroup>();
+            for (const entry of parsedDiagnostics) {
+                // A configured diagnosticUri redirects the whole run's output to that document
+                // (untitled-buffer flow), taking precedence over per-diagnostic file paths.
+                const uri =
+                    diagnosticUri === undefined && entry.filePath !== undefined
+                        ? resolveDiagnosticUri(entry.filePath, toolCwd, fallbackUri)
+                        : fallbackUri;
+                const key = uri.toString();
+                let group = groupsByUri.get(key);
+                if (group === undefined) {
+                    group = {
+                        uri,
+                        normalizePath: diagnosticUri !== undefined ? filePath : uri.fsPath,
+                        diagnostics: [],
+                    };
+                    groupsByUri.set(key, group);
+                }
+                group.diagnostics.push(entry.diagnostic);
+            }
+
+            const toolKey = toolDiagnosticKey(runnable.targetName, runnable.toolName);
+            const groupList = Array.from(groupsByUri.values());
+            for (const group of groupList) {
+                await normalizeDiagnosticRanges(group.normalizePath, group.diagnostics);
+            }
+            for (const group of groupList) {
+                const toolMap = getOrCreateToolMap(group.uri.toString());
+                toolMap.set(toolKey, group.diagnostics);
+                republishMergedDiagnostics(group.uri, toolMap, diagnostics);
+            }
+            const triggerKey = fallbackUri.toString();
+            const currentUris = new Set(groupList.map((group) => group.uri.toString()));
+            clearStaleToolDiagnostics(triggerKey, toolKey, currentUris, diagnostics);
+            let toolUris = toolPublishedUris.get(triggerKey);
+            if (toolUris === undefined) {
+                toolUris = new Map();
+                toolPublishedUris.set(triggerKey, toolUris);
+            }
+            toolUris.set(toolKey, currentUris);
         }
         return true;
     } catch (err) {

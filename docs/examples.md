@@ -15,7 +15,7 @@
             "successExitCodes": [0, 1],
             "parser": {
                 "flags": "gm",
-                "pattern": "^.+?:(?<line>\\d+):(?<message>.+)$"
+                "pattern": "^(?<file>.+?):(?<line>\\d+):(?<message>.+)$"
             }
         },
         "phpcs": {

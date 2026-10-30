@@ -129,7 +129,13 @@ LintRunner: prettier-check failed: exit 1 is not in successExitCodes [0]
 ## Regex Parser
 
 The parser config is unchanged. Required named groups: `line`, `message`. Optional groups: `col`, `endLine`, `endCol`,
-`severity`, `code`.
+`severity`, `code`, `file`.
+
+When the `file` group is present, each diagnostic is published to the file the tool reported instead of the file the
+pipeline ran for. Relative paths resolve against the tool's working directory (the same directory the command runs in);
+absolute paths are used as-is. Paths that do not resolve to an existing file still publish their diagnostics; range
+normalization is skipped for those files. Files that a tool reported on a previous run but not on the current one have
+that tool's diagnostics removed automatically.
 
 Unknown output lines are skipped. Invalid regex config blocks runs through config validation.
 
